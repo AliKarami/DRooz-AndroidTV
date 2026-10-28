@@ -10,6 +10,12 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.focusGroup
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.composed
+import androidx.compose.ui.res.stringResource
+import com.alikarami.drooz.R
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
@@ -34,8 +40,21 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -43,6 +62,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.FocusDirection
@@ -70,6 +90,8 @@ import androidx.tv.material3.Text
 import androidx.tv.material3.rememberDrawerState
 import com.alikarami.drooz.AppGraph
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
+import androidx.compose.foundation.gestures.scrollBy
 import com.alikarami.drooz.data.HomeRows
 import com.alikarami.drooz.data.RowSource
 import com.alikarami.drooz.site.model.TitleRef
@@ -99,10 +121,6 @@ private val LandscapeWidth = 220.dp
 private val PosterWidth = 120.dp
 
 private const val EXIT_WINDOW_MS = 2_000L
-private const val EXIT_HINT = "برای خروج دوباره بازگشت را بزنید"
-private const val ROW_FAILED = "بارگذاری نشد"
-private const val RETRY = "تلاش دوباره"
-private const val HOME_FAILED = "صفحه اصلی بارگذاری نشد"
 
 /**
  * Scrolls so the focused child sits [pivotPx] from the container's leading edge (Netflix-style fixed
@@ -141,7 +159,7 @@ fun HomeScreen(
         if (now - lastBack < EXIT_WINDOW_MS) onExit()
         else {
             lastBack = now
-            Toast.makeText(context, EXIT_HINT, Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, R.string.home_exit_hint, Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -152,19 +170,43 @@ fun HomeScreen(
     val entryIndex = entryRow?.let { vm.focusedIndex(it.key).coerceIn(0, it.items.lastIndex) } ?: 0
     val entryRequester = remember { FocusRequester() }
     val placeholderRequester = remember { FocusRequester() }
-    var entered by remember { mutableStateOf(false) }
-    LaunchedEffect(entryRow?.key, entered) {
-        if (entered) return@LaunchedEffect
-        // Until the first cards arrive, hold focus on a placeholder so the rail doesn't grab it.
-        val target = if (entryRow == null) placeholderRequester else entryRequester
-        // The target may attach a frame or two after the rows arrive; keep trying briefly.
-        repeat(30) {
-            withFrameNanos { }
-            if (runCatching { target.requestFocus(FocusDirection.Enter) }.getOrDefault(false)) {
-                if (entryRow != null) entered = true
-                return@LaunchedEffect
-            }
+    // Each composed row's focus slot, so Up/Down go straight to the neighbouring row's remembered card
+    // (Netflix-style) instead of a geometric search that misfires while the column is scrolling.
+    val slots = remember { mutableStateMapOf<String, FocusRequester>() }
+    // Row that most recently gained focus; a swapped-out placeholder only reclaims focus if it still owns it.
+    val focusOwner = remember { mutableStateOf<String?>(null) }
+    val columnState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    // Only a row that is laid out in the viewport can take focus usefully: a cached-but-unplaced row has
+    // a slot, but focusing it would not scroll it into view.
+    val placedSlot: (String) -> FocusRequester? = { key ->
+        slots[key]?.takeIf { columnState.layoutInfo.visibleItemsInfo.any { it.key == key } }
+    }
+    // A neighbouring row scrolled out of view: nudge it back in, then focus it.
+    val focusRow: (String) -> Unit = { key ->
+        val index = rows.indexOfFirst { it.key == key }
+        if (index >= 0) scope.launch {
+            // Nudge one pixel so the row re-enters composition; focusing its card then lets the
+            // pivot spec animate the column (animateScrollToItem took 1-1.6 s to get there).
+            val up = index <= columnState.firstVisibleItemIndex
+            columnState.scrollBy(if (up) -1f else 1f)
+            val slot = withTimeoutOrNull(200) { snapshotFlow { placedSlot(key) }.filterNotNull().first() }
+                ?: run { columnState.scrollToItem(index); snapshotFlow { placedSlot(key) }.filterNotNull().first() }
+            slot.requestFocusSoon()
         }
+    }
+    var entered by remember { mutableStateOf(false) }
+    val homeFailed = state.error != null && rows.none { it.items.isNotEmpty() || it.loading }
+    val homeErrorRequester = remember { FocusRequester() }
+    LaunchedEffect(entryRow?.key, entered, homeFailed) {
+        if (homeFailed) {
+            homeErrorRequester.requestFocusSoon()
+            return@LaunchedEffect
+        }
+        if (entered) return@LaunchedEffect
+        // Until the first cards arrive, hold focus on the first row's placeholder so the rail doesn't grab it.
+        val target = if (entryRow == null) placeholderRequester else entryRequester
+        if (target.requestFocusSoon() && entryRow != null) entered = true
     }
 
     ModalNavigationDrawer(
@@ -179,15 +221,17 @@ fun HomeScreen(
     ) {
         BoxWithConstraints(Modifier.fillMaxSize().background(DroozColors.Background)) {
             val rowsTop = maxHeight * 0.5f
-            HeroBackdrop(state.hero?.backdrop, Modifier.fillMaxWidth().height(maxHeight * 0.62f))
+            HeroBackdrop(state.hero, Modifier.fillMaxWidth().height(maxHeight * 0.62f))
             HeroInfo(
                 state.hero,
                 rows.firstOrNull { it.key == focusedRowKey }?.title,
-                Modifier.align(Alignment.TopStart).padding(start = ContentStart, top = 36.dp).width(440.dp),
+                Modifier.align(Alignment.TopStart).padding(start = ContentStart, top = 36.dp).width(480.dp),
             )
-            val homeFailed = state.error != null && rows.none { it.items.isNotEmpty() || it.loading }
             if (homeFailed) {
-                ErrorState(HOME_FAILED, RETRY, vm::refresh, Modifier.padding(top = rowsTop))
+                ErrorState(
+                    stringResource(R.string.home_failed), stringResource(R.string.retry), vm::refresh,
+                    Modifier.padding(top = rowsTop).focusRequester(homeErrorRequester).focusGroup(),
+                )
             } else {
                 val density = LocalDensity.current
                 val columnSpec = remember(density) { PivotSpec(with(density) { (RowHeader + RowPadV).toPx() }) }
@@ -196,10 +240,16 @@ fun HomeScreen(
                 CompositionLocalProvider(LocalBringIntoViewSpec provides columnSpec) {
                     LazyColumn(
                         Modifier.fillMaxSize().padding(top = rowsTop, start = RailWidth),
+                        state = columnState,
                         contentPadding = PaddingValues(bottom = 48.dp),
                     ) {
                         itemsIndexed(rows, key = { _, r -> r.key }) { rowIndex, row ->
                             LaunchedEffect(row.key) { vm.loadRowIfNeeded(row.key) }
+                            val rowSlot = remember { FocusRequester() }
+                            DisposableEffect(row.key) {
+                                slots[row.key] = rowSlot
+                                onDispose { slots.remove(row.key) }
+                            }
                             CompositionLocalProvider(LocalBringIntoViewSpec provides rowSpec) {
                                 HomeRow(
                                     row = row,
@@ -207,7 +257,19 @@ fun HomeScreen(
                                     entryIndex = if (row.key == entryRow?.key) entryIndex else -1,
                                     entryRequester = entryRequester,
                                     placeholderRequester = placeholderRequester.takeIf { rowIndex == 0 },
-                                    onFocus = { index -> focusedRowKey = row.key; vm.onFocus(row.key, index) },
+                                    slotRequester = rowSlot,
+                                    slots = placedSlot,
+                                    upKey = rows.getOrNull(rowIndex - 1)?.key,
+                                    downKey = rows.getOrNull(rowIndex + 1)?.key,
+                                    focusRow = focusRow,
+                                    focusOwner = focusOwner,
+                                    onFocus = { index ->
+                                        focusedRowKey = row.key
+                                        vm.onFocus(row.key, index)
+                                        // Start loading the next rows before the user reaches them.
+                                        rows.subList(rowIndex + 1, minOf(rowIndex + 3, rows.size))
+                                            .forEach { vm.loadRowIfNeeded(it.key) }
+                                    },
                                     onOpen = onOpen,
                                     onRetry = { vm.retryRow(row.key) },
                                 )
@@ -220,6 +282,29 @@ fun HomeScreen(
     }
 }
 
+private enum class Slot { Cards, Error, Skeleton }
+
+/** Pivot the focused element of a row (and the row itself) into the fixed focus position. */
+private fun Modifier.bringIntoViewOnFocus(onFocused: () -> Unit = {}): Modifier = composed {
+    val requester = remember { BringIntoViewRequester() }
+    val scope = rememberCoroutineScope()
+    bringIntoViewRequester(requester).onFocusChanged {
+        if (it.hasFocus) {
+            onFocused()
+            scope.launch { requester.bringIntoView() }
+        }
+    }
+}
+
+/** Retries for a few frames: a node that just appeared may attach a frame late. */
+private suspend fun FocusRequester.requestFocusSoon(): Boolean {
+    repeat(30) {
+        withFrameNanos { }
+        if (runCatching { requestFocus(FocusDirection.Enter) }.getOrDefault(false)) return true
+    }
+    return false
+}
+
 @Composable
 private fun HomeRow(
     row: RowUi,
@@ -227,23 +312,72 @@ private fun HomeRow(
     entryIndex: Int,
     entryRequester: FocusRequester,
     placeholderRequester: FocusRequester?,
+    slotRequester: FocusRequester,
+    slots: (String) -> FocusRequester?,
+    upKey: String?,
+    downKey: String?,
+    focusRow: (String) -> Unit,
+    focusOwner: MutableState<String?>,
     onFocus: (Int) -> Unit,
     onOpen: (TitleRef) -> Unit,
     onRetry: () -> Unit,
 ) {
     val landscape = row.items.firstOrNull()?.landscape ?: (row.key in recentKeys)
-    Column(Modifier.fillMaxWidth()) {
+    val slot = when {
+        row.items.isNotEmpty() -> Slot.Cards
+        row.error -> Slot.Error
+        else -> Slot.Skeleton
+    }
+    // [slotRequester] is the row's focus target, whatever currently fills it: the last focused card,
+    // the retry button or the skeleton.
+    val nav = Modifier.focusProperties {
+        down = downKey?.let(slots) ?: FocusRequester.Default
+        up = upKey?.let(slots) ?: FocusRequester.Default
+    }
+    // True while focus sits on a skeleton/error that gets swapped out, so it follows into the replacement.
+    var holdFocus by remember { mutableStateOf(false) }
+    val currentSlot by rememberUpdatedState(slot)
+    val placeholderFocus: (Slot, Boolean) -> Unit = { mine, focused ->
+        if (focused) {
+            holdFocus = true
+            focusOwner.value = row.key
+        } else if (currentSlot == mine) holdFocus = false
+    }
+    LaunchedEffect(slot) {
+        if (!holdFocus || focusOwner.value != row.key) return@LaunchedEffect
+        slotRequester.requestFocusSoon()
+        if (slot == Slot.Cards) holdFocus = false
+    }
+    Column(
+        Modifier.fillMaxWidth().onPreviewKeyEvent { e ->
+            if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+            val target = when (e.key) {
+                Key.DirectionUp -> upKey
+                Key.DirectionDown -> downKey
+                else -> null
+            }
+            if (target == null || slots(target) != null) return@onPreviewKeyEvent false
+            focusRow(target)
+            true
+        },
+    ) {
         Box(Modifier.height(RowHeader).padding(start = RowStart), contentAlignment = Alignment.BottomStart) {
             Text(row.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = Color.White)
         }
-        when {
-            row.items.isNotEmpty() -> CardsRow(row, landscape, initialIndex, entryIndex, entryRequester, onFocus, onOpen)
-            row.error -> RowError(onRetry)
-            else -> SkeletonRow(landscape, placeholderRequester)
+        when (slot) {
+            Slot.Cards ->
+                CardsRow(row, landscape, initialIndex, entryIndex, entryRequester, slotRequester, nav, onOpen) { i ->
+                    focusOwner.value = row.key
+                    onFocus(i)
+                }
+            Slot.Error -> RowError(onRetry, slotRequester, nav) { placeholderFocus(Slot.Error, it) }
+            Slot.Skeleton ->
+                SkeletonRow(landscape, slotRequester, placeholderRequester, nav) { placeholderFocus(Slot.Skeleton, it) }
         }
     }
 }
 
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun CardsRow(
     row: RowUi,
@@ -251,33 +385,31 @@ private fun CardsRow(
     initialIndex: Int,
     entryIndex: Int,
     entryRequester: FocusRequester,
-    onFocus: (Int) -> Unit,
+    slot: FocusRequester,
+    nav: Modifier,
     onOpen: (TitleRef) -> Unit,
+    onFocus: (Int) -> Unit,
 ) {
     val start = initialIndex.coerceIn(0, row.items.lastIndex)
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = start)
-    val restore = remember { FocusRequester() }
-    val scope = rememberCoroutineScope()
+    // [slot] always sits on the row's last focused card, so entering the row (Up/Down or a slot
+    // hand-over) lands there; it is also the focusRestorer fallback.
+    var last by remember { mutableIntStateOf(start) }
     LazyRow(
         state = listState,
-        modifier = Modifier.fillMaxWidth().focusRestorer(restore),
+        // Entering the row by any route lands on [slot]. (focusRestorer mis-restored rows that had been
+        // scrolled out of composition, picking an unrelated card.)
+        modifier = Modifier.fillMaxWidth().focusProperties { enter = { slot } }.focusGroup(),
         contentPadding = PaddingValues(start = RowStart, end = ContentEnd, top = RowPadV, bottom = RowPadV),
         horizontalArrangement = Arrangement.spacedBy(CardGap),
     ) {
         itemsIndexed(row.items, key = { i, c -> "$i:${c.ref.kind}:${c.ref.postId}" }) { i, card ->
             // Focus only scrolls a card that is partly off-screen; ask explicitly so the pivot
             // specs place every focused card (and its row) at the fixed focus position.
-            val bringIntoView = remember { BringIntoViewRequester() }
-            val m = Modifier
-                .then(if (i == start) Modifier.focusRequester(restore) else Modifier)
+            val m = nav
+                .then(if (i == last) Modifier.focusRequester(slot) else Modifier)
                 .then(if (i == entryIndex) Modifier.focusRequester(entryRequester) else Modifier)
-                .bringIntoViewRequester(bringIntoView)
-                .onFocusChanged {
-                    if (it.hasFocus) {
-                        onFocus(i)
-                        scope.launch { bringIntoView.bringIntoView() }
-                    }
-                }
+                .bringIntoViewOnFocus { last = i; onFocus(i) }
             if (landscape) {
                 LandscapeCard(card.title, card.subtitle, card.posterUrl, progress = null, onClick = { onOpen(card.ref) },
                     modifier = m)
@@ -289,33 +421,57 @@ private fun CardsRow(
 }
 
 @Composable
-private fun RowError(onRetry: () -> Unit) {
+private fun RowError(onRetry: () -> Unit, requester: FocusRequester, nav: Modifier, onFocusChanged: (Boolean) -> Unit) {
     Row(
-        Modifier.padding(start = RowStart, top = RowPadV, bottom = RowPadV),
+        Modifier.padding(start = RowStart, top = RowPadV, bottom = RowPadV)
+            .focusRequester(requester)
+            .focusGroup()
+            .bringIntoViewOnFocus()
+            .onFocusChanged { onFocusChanged(it.hasFocus) },
         horizontalArrangement = Arrangement.spacedBy(16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(ROW_FAILED, style = MaterialTheme.typography.bodyMedium, color = DroozColors.TextSecondary)
-        Button(onClick = onRetry) { Text(RETRY) }
+        Text(stringResource(R.string.home_row_failed), style = MaterialTheme.typography.bodyMedium,
+            color = DroozColors.TextSecondary)
+        Button(onClick = onRetry, modifier = nav) { Text(stringResource(R.string.retry)) }
     }
 }
 
-/** Pulsing placeholders with the real card geometry, so rows don't jump when items arrive. */
+/**
+ * Pulsing placeholders with the real card geometry, so rows don't jump when items arrive. The row is
+ * focusable (ring on its first placeholder) so D-pad moves into a row that is still loading.
+ */
 @Composable
-private fun SkeletonRow(landscape: Boolean, focusRequester: FocusRequester?) {
+private fun SkeletonRow(
+    landscape: Boolean,
+    requester: FocusRequester,
+    entryRequester: FocusRequester?,
+    nav: Modifier,
+    onFocusChanged: (Boolean) -> Unit,
+) {
     val pulse by rememberInfiniteTransition(label = "skeleton").animateFloat(
         0.35f, 0.7f, infiniteRepeatable(tween(800), RepeatMode.Reverse), label = "skeletonAlpha",
     )
+    var focused by remember { mutableStateOf(false) }
     val (w, h) = if (landscape) LandscapeWidth to 124.dp else PosterWidth to PosterWidth * 1.5f
     Row(
-        Modifier.padding(start = RowStart, top = RowPadV, bottom = RowPadV).alpha(pulse)
-            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester).focusable() else Modifier),
+        Modifier.padding(start = RowStart, top = RowPadV, bottom = RowPadV)
+            .focusRequester(requester)
+            .then(if (entryRequester != null) Modifier.focusRequester(entryRequester) else Modifier)
+            .bringIntoViewOnFocus()
+            .onFocusChanged { focused = it.isFocused; onFocusChanged(it.isFocused) }
+            .then(nav)
+            .focusable(),
         horizontalArrangement = Arrangement.spacedBy(CardGap),
     ) {
-        repeat(if (landscape) 5 else 8) {
+        repeat(if (landscape) 5 else 8) { i ->
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Box(Modifier.size(w, h).background(DroozColors.Surface, DroozCardShape))
-                Box(Modifier.size(w * 0.6f, 12.dp).background(DroozColors.Surface, DroozCardShape))
+                Box(
+                    Modifier.size(w, h)
+                        .then(if (i == 0 && focused) Modifier.border(3.dp, Color.White, DroozCardShape) else Modifier)
+                        .background(DroozColors.Surface.copy(alpha = if (i == 0 && focused) 1f else pulse), DroozCardShape),
+                )
+                Box(Modifier.size(w * 0.6f, 12.dp).alpha(pulse).background(DroozColors.Surface, DroozCardShape))
             }
         }
     }

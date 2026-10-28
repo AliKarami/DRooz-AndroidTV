@@ -2,4 +2,14 @@
 <resources>
     <string name="app_name">دی‌ال‌روز</string>
     <string name="minutes_short">%1$s دقیقه</string>
+    <string name="home_exit_hint">برای خروج دوباره بازگشت را بزنید</string>
+    <string name="home_row_failed">بارگذاری نشد</string>
+    <string name="home_failed">صفحه اصلی بارگذاری نشد</string>
+    <string name="retry">تلاش دوباره</string>
+    <string name="rail_search">جستجو</string>
+    <string name="rail_home">خانه</string>
+    <string name="rail_series">سریال‌ها</string>
+    <string name="rail_films">فیلم‌ها</string>
+    <string name="rail_my_list">لیست من</string>
+    <string name="rail_settings">تنظیمات</string>
 </resources>

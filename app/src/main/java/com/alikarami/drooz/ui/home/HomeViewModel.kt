@@ -47,6 +47,11 @@ data class HeroUi(
     val chips: List<String>,
     val synopsis: String?,
     val backdrop: Backdrop,
+    /** IMDb score, rendered as a Latin-digit badge ("IMDb 7.9"); not part of [meta]. */
+    val imdb: Double? = null,
+    val genres: List<String> = emptyList(),
+    /** Blurred poster to show while [backdrop] loads, or if it fails. */
+    val posterBackdrop: Backdrop.BlurredPoster? = null,
 )
 
 data class HomeUiState(val rows: List<RowUi>, val hero: HeroUi?, val error: String?)
@@ -174,7 +179,6 @@ class HomeViewModel(
         val meta = buildList {
             card?.year?.let { add(it.toString().toPersianDigits()) }
             card?.durationMin?.let { add("$it دقیقه".toPersianDigits()) }
-            card?.imdb?.let { add("IMDb ${it.score}".toPersianDigits()) }
             card?.episodeLabel?.let { add(it) }
         }
         val chips = buildList {
@@ -184,6 +188,7 @@ class HomeViewModel(
             if (episodes.any { ep -> ep.videos.any { it.height >= 2160 } }) add("4K")
         }
         val backdrop = BackdropResolver.resolve(e.ref, featured, titleInfo.playedBackdrops.value, detail, e.posterHash)
-        return HeroUi(e.ref, title, meta, chips, card?.synopsis, backdrop)
+        val poster = (detail?.card?.posterHash ?: e.posterHash)?.let { Backdrop.BlurredPoster(ImageUrls.poster(it, 240, 360)) }
+        return HeroUi(e.ref, title, meta, chips, card?.synopsis, backdrop, card?.imdb?.score, card?.genres.orEmpty(), poster)
     }
 }

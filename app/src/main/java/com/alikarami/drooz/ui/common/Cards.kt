@@ -13,7 +13,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.unit.Dp
@@ -59,7 +62,10 @@ fun PosterCard(
     }
 }
 
-/** 16:9 card with title/subtitle and an optional red progress bar along the bottom. */
+/**
+ * 16:9 card; title and subtitle sit inside its bottom edge over a dark gradient (mockup `.land .lbl`),
+ * with an optional red progress bar along the bottom.
+ */
 @Composable
 fun LandscapeCard(
     title: String,
@@ -69,23 +75,30 @@ fun LandscapeCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Column(modifier.width(220.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Surface(
-            onClick = onClick,
-            modifier = Modifier.droozFocus(FocusScale.CARD).fillMaxWidth().height(124.dp),
-            shape = ClickableSurfaceDefaults.shape(DroozCardShape),
-            scale = droozSurfaceScale,
-            colors = droozSurfaceColors(),
-        ) {
-            Box(Modifier.fillMaxWidth().fillMaxHeight()) {
-                DroozImage(imageUrl, ImageSizes.CARD_W, ImageSizes.CARD_H, Modifier.fillMaxWidth().fillMaxHeight())
-                if (progress != null) ProgressBar(progress, Modifier.align(Alignment.BottomStart))
+    Surface(
+        onClick = onClick,
+        modifier = modifier.width(220.dp).droozFocus(FocusScale.CARD).height(124.dp),
+        shape = ClickableSurfaceDefaults.shape(DroozCardShape),
+        scale = droozSurfaceScale,
+        colors = droozSurfaceColors(),
+    ) {
+        Box(Modifier.fillMaxWidth().fillMaxHeight()) {
+            DroozImage(imageUrl, ImageSizes.CARD_W, ImageSizes.CARD_H, Modifier.fillMaxWidth().fillMaxHeight())
+            Column(
+                Modifier.align(Alignment.BottomStart).fillMaxWidth()
+                    .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.9f))))
+                    .padding(start = 10.dp, end = 10.dp, top = 22.dp, bottom = if (progress != null) 10.dp else 7.dp),
+            ) {
+                TitleText(
+                    title,
+                    MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold, textAlign = TextAlign.Right),
+                    Modifier.fillMaxWidth(), color = Color.White, maxLines = 1,
+                )
+                if (subtitle != null) {
+                    Text(subtitle, style = MaterialTheme.typography.labelSmall, color = Color(0xFFCFD2DA), maxLines = 1)
+                }
             }
-        }
-        TitleText(title, MaterialTheme.typography.bodySmall, Modifier.zIndex(AboveFocusedCard), color = Color.White, maxLines = 1)
-        if (subtitle != null) {
-            Text(subtitle, Modifier.zIndex(AboveFocusedCard), style = MaterialTheme.typography.labelSmall,
-                color = DroozColors.TextSecondary, maxLines = 1)
+            if (progress != null) ProgressBar(progress, Modifier.align(Alignment.BottomStart))
         }
     }
 }

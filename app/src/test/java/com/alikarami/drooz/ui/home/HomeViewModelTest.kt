@@ -111,6 +111,20 @@ class HomeViewModelTest {
         assertTrue(api.titleCalls.isEmpty())
     }
 
+    @Test fun heroImdbIsStructuredNotMetaText() = runTest(dispatcher) {
+        val vm = vm(FakeApi(home())); advanceUntilIdle()
+        vm.onFocus("featured", 0); runCurrent()
+        val hero = vm.uiState.value.hero!!
+        assertEquals(7.5, hero.imdb!!, 0.0)
+        assertTrue(hero.meta.none { "IMDb" in it })
+    }
+
+    @Test fun heroCarriesGenres() = runTest(dispatcher) {
+        val vm = vm(FakeApi(home())); advanceUntilIdle()
+        vm.onFocus("featured", 0); runCurrent()
+        assertEquals(listOf("Drama"), vm.uiState.value.hero!!.genres)
+    }
+
     @Test fun heroFetchesDetailAfterDwell() = runTest(dispatcher) {
         val api = FakeApi(home(), onTitle = { detail(it) })
         val vm = vm(api); advanceUntilIdle()
@@ -134,6 +148,15 @@ class HomeViewModelTest {
         assertEquals("Real Title", hero.title)
         assertTrue(hero.backdrop is Backdrop.Wide)
         assertTrue(hero.chips.containsAll(listOf("دوبله", "زیرنویس", "4K")))
+    }
+
+    @Test fun wideHeroKeepsPosterFallback() = runTest(dispatcher) {
+        val api = FakeApi(home(), onTitle = { detail(it) })
+        val vm = vm(api); advanceUntilIdle()
+        vm.onFocus("recent", 0); advanceTimeBy(301); advanceUntilIdle()
+        val hero = vm.uiState.value.hero!!
+        assertTrue(hero.backdrop is Backdrop.Wide)
+        assertTrue(hero.posterBackdrop is Backdrop.BlurredPoster)
     }
 
     @Test fun heroFailureKeepsPosterHero() = runTest(dispatcher) {

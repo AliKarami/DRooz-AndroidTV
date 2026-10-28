@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -50,11 +51,10 @@ fun buildImageLoader(context: Context, client: OkHttpClient): ImageLoader =
 /** Network image at a fixed pixel size (no resampling beyond what the URL already encodes). */
 @Composable
 fun DroozImage(url: String?, widthPx: Int, heightPx: Int, modifier: Modifier = Modifier) {
-    val request = ImageRequest.Builder(LocalContext.current)
-        .data(url)
-        .size(Size(widthPx, heightPx))
-        .crossfade(150)
-        .build()
+    val context = LocalContext.current
+    val request = remember(url, widthPx, heightPx) {
+        ImageRequest.Builder(context).data(url).size(Size(widthPx, heightPx)).crossfade(150).build()
+    }
     Box(modifier.background(DroozColors.Surface)) {
         AsyncImage(
             model = request,

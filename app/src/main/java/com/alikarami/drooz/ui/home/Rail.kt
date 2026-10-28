@@ -1,6 +1,9 @@
 package com.alikarami.drooz.ui.home
 
+import androidx.annotation.StringRes
 import androidx.compose.foundation.background
+import androidx.compose.ui.res.stringResource
+import com.alikarami.drooz.R
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -36,13 +39,13 @@ import androidx.tv.material3.Text
 import com.alikarami.drooz.ui.theme.DroozColors
 
 /** Top-level destinations in the side rail, in on-screen order (top to bottom). */
-enum class RailItem(val label: String, val icon: ImageVector) {
-    Search("جستجو", railIcon("Search", SEARCH)),
-    Home("خانه", railIcon("Home", HOME)),
-    Series("سریال‌ها", railIcon("Series", TV)),
-    Films("فیلم‌ها", railIcon("Films", MOVIE)),
-    MyList("لیست من", railIcon("MyList", BOOKMARK)),
-    Settings("تنظیمات", railIcon("Settings", SETTINGS)),
+enum class RailItem(@StringRes val label: Int, val icon: ImageVector) {
+    Search(R.string.rail_search, railIcon("Search", SEARCH)),
+    Home(R.string.rail_home, railIcon("Home", HOME)),
+    Series(R.string.rail_series, railIcon("Series", TV)),
+    Films(R.string.rail_films, railIcon("Films", MOVIE)),
+    MyList(R.string.rail_my_list, railIcon("MyList", BOOKMARK)),
+    Settings(R.string.rail_settings, railIcon("Settings", SETTINGS)),
 }
 
 /** Behind the rail: dark at the screen edge fading into the backdrop (mockup `.rail`). */
@@ -96,7 +99,7 @@ fun NavigationDrawerScope.HomeRail(selected: RailItem, onSelect: (RailItem) -> U
                     pressedSelectedContentColor = Color.Black,
                 ),
             ) {
-                Text(item.label, style = MaterialTheme.typography.titleSmall, maxLines = 1)
+                Text(stringResource(item.label), style = MaterialTheme.typography.titleSmall, maxLines = 1)
             }
         }
     }

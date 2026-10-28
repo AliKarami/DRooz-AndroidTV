@@ -2,6 +2,11 @@ package com.alikarami.drooz
 
 import android.content.Context
 import coil3.ImageLoader
+import com.alikarami.drooz.data.AuthApi
+import com.alikarami.drooz.data.AuthApiAdapter
+import com.alikarami.drooz.data.SiteApi
+import com.alikarami.drooz.data.SiteApiAdapter
+import com.alikarami.drooz.data.TitleInfoRepository
 import com.alikarami.drooz.site.SiteConfig
 import com.alikarami.drooz.ui.common.buildImageLoader
 import com.alikarami.drooz.site.SiteRepository
@@ -36,6 +41,9 @@ class AppGraph(context: Context) {
     val http = SiteHttp(SiteConfig.BASE_URL.toHttpUrl(), cookieJar, baseClient)
     val auth = AuthService(http, cookieJar, CredentialStore(dir.resolve("creds.bin"), KeystoreSecretBox()))
     val repository = SiteRepository(http, auth)
+    val siteApi: SiteApi = SiteApiAdapter(repository)
+    val authApi: AuthApi = AuthApiAdapter(auth)
+    val titleInfo = TitleInfoRepository(siteApi)
 
     /** For Media3: carries the site cookies (subtitles need them) and the browser UA. */
     val mediaClient: OkHttpClient = baseClient.newBuilder()

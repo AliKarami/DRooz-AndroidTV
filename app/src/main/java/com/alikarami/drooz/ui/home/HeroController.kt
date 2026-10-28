@@ -52,6 +52,12 @@ class HeroController(
         }
     }
 
+    /** Forget the focused title: a pending detail fetch no longer updates the hero. */
+    fun clear() {
+        dwellJob?.cancel()
+        focusedRef = null
+    }
+
     private fun hero(ref: TitleRef, listCard: TitleCard?, posterHash: String?, detail: TitleDetail?): HeroUi {
         val card = detail?.card ?: listCard
         val meta = buildList {

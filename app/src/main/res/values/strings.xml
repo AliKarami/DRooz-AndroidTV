@@ -29,4 +29,13 @@
     <string name="list_new_films">فیلم های جدید</string>
     <string name="list_failed">فهرست بارگذاری نشد</string>
     <string name="list_empty">موردی پیدا نشد</string>
+    <string name="search_placeholder">جستجوی فیلم و سریال</string>
+    <string name="search_idle">نام فیلم یا سریال را بنویسید یا با میکروفون بگویید</string>
+    <string name="search_idle_tip">نام انگلیسی بهترین نتیجه را می‌دهد</string>
+    <string name="search_empty">نتیجه‌ای پیدا نشد</string>
+    <string name="search_empty_persian_tip">نام انگلیسی فیلم یا سریال را امتحان کنید</string>
+    <string name="search_failed">جستجو انجام نشد</string>
+    <string name="search_voice">جستجوی صوتی</string>
+    <string name="search_voice_prompt">نام فیلم یا سریال را بگویید</string>
+    <string name="search_voice_unavailable">جستجوی صوتی در دسترس نیست</string>
 </resources>

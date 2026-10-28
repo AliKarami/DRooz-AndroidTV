@@ -30,6 +30,9 @@ import com.alikarami.drooz.ui.home.RailItem
 import com.alikarami.drooz.ui.list.ListScreen
 import com.alikarami.drooz.ui.list.ListViewModel
 import com.alikarami.drooz.ui.list.ListViewModelFactory
+import com.alikarami.drooz.ui.search.SearchScreen
+import com.alikarami.drooz.ui.search.SearchViewModel
+import com.alikarami.drooz.ui.search.SearchViewModelFactory
 import com.alikarami.drooz.ui.theme.DroozTheme
 import com.alikarami.drooz.ui.title.PlayRequest
 import com.alikarami.drooz.ui.title.TitleScreen
@@ -40,7 +43,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 /**
- * Glue until Task 9's navigation: home → list grids / title pages as a simple back stack. Each entry
+ * Glue until Task 9's navigation: home → list grids / search / title pages as a simple back stack. Each entry
  * owns a ViewModelStore, cleared when the entry is popped.
  */
 class TitleStack : ViewModel() {
@@ -48,6 +51,7 @@ class TitleStack : ViewModel() {
         val id: Long
         data class Title(override val id: Long, val ref: TitleRef, val featuredBackdrop: String?) : Entry
         data class List(override val id: Long, val title: String, val path: String) : Entry
+        data class Search(override val id: Long) : Entry
     }
 
     val entries = mutableStateListOf<Entry>()
@@ -60,6 +64,10 @@ class TitleStack : ViewModel() {
 
     fun pushList(title: String, path: String) {
         entries += Entry.List(nextId++, title, path)
+    }
+
+    fun pushSearch() {
+        entries += Entry.Search(nextId++)
     }
 
     fun pop(): Entry? = entries.removeLastOrNull()?.also { stores.remove(it.id)?.clear() }
@@ -113,6 +121,7 @@ class MainActivity : ComponentActivity() {
                                         titles.pushList(getString(R.string.list_updated_series), "/archive/series/")
                                     RailItem.Films ->
                                         titles.pushList(getString(R.string.list_new_films), "/archive/category/new-films/")
+                                    RailItem.Search -> titles.pushSearch()
                                     else -> Unit
                                 }
                             })
@@ -139,6 +148,12 @@ class MainActivity : ComponentActivity() {
                                         ViewModelProvider(titles.owner(top), ListViewModelFactory(graph, top.path, top.title))[ListViewModel::class.java]
                                     }
                                     ListScreen(listVm, onOpen = openTitle)
+                                }
+                                is TitleStack.Entry.Search -> {
+                                    val searchVm = remember(top.id) {
+                                        ViewModelProvider(titles.owner(top), SearchViewModelFactory(graph))[SearchViewModel::class.java]
+                                    }
+                                    SearchScreen(searchVm, onOpen = openTitle)
                                 }
                             }
                         }

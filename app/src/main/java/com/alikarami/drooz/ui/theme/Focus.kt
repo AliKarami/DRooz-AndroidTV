@@ -26,6 +26,8 @@ private const val FOCUS_MS = 150
 object FocusScale {
     const val CARD = 1.08f
     const val TILE = 1.1f
+    /** Wide controls (the search field): 1.08 on a 500dp field would swallow its neighbours. */
+    const val FIELD = 1.03f
 }
 
 /** One corner shape for cards, tiles and their focus ring. */

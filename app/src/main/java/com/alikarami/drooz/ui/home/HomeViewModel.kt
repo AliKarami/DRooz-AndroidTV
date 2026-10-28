@@ -13,6 +13,7 @@ import com.alikarami.drooz.site.ImageUrls
 import com.alikarami.drooz.site.model.TitleCard
 import com.alikarami.drooz.site.model.TitleDetail
 import com.alikarami.drooz.site.model.TitleRef
+import com.alikarami.drooz.ui.common.UiStrings
 import com.alikarami.drooz.ui.common.prettifySlug
 import com.alikarami.drooz.ui.common.safeLaunch
 import com.alikarami.drooz.ui.common.toPersianDigits
@@ -178,13 +179,13 @@ class HomeViewModel(
         val title = card?.title?.takeIf { it != e.ref.slug } ?: prettifySlug(e.ref.slug)
         val meta = buildList {
             card?.year?.let { add(it.toString().toPersianDigits()) }
-            card?.durationMin?.let { add("$it دقیقه".toPersianDigits()) }
+            card?.durationMin?.let { add(UiStrings.minutes(it)) }
             card?.episodeLabel?.let { add(it) }
         }
         val chips = buildList {
             val episodes = detail?.catalog?.main.orEmpty().flatMap { it.episodes }
-            if (detail?.catalog?.dub?.isNotEmpty() == true) add("دوبله")
-            if (episodes.any { it.subtitles.isNotEmpty() }) add("زیرنویس")
+            if (detail?.catalog?.dub?.isNotEmpty() == true) add(UiStrings.DUB)
+            if (episodes.any { it.subtitles.isNotEmpty() }) add(UiStrings.SUBTITLE)
             if (episodes.any { ep -> ep.videos.any { it.height >= 2160 } }) add("4K")
         }
         val backdrop = BackdropResolver.resolve(e.ref, featured, titleInfo.playedBackdrops.value, detail, e.posterHash)

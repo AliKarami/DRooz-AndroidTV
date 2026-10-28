@@ -246,7 +246,7 @@ private fun Loaded(
     val hasSuggestions = detail.suggestions.isNotEmpty()
     // Films have a single episode: the primary button plays it, so the bottom shows only suggestions.
     var suggestionsTab by rememberSaveable { mutableStateOf(false) }
-    val showSuggestions = isFilm || (suggestionsTab && hasSuggestions)
+    val showSuggestions = showSuggestions(isFilm, suggestionsTab, hasSuggestions)
     // Suggestion opened last, so coming Back lands on it.
     var openedSuggestion by rememberSaveable { mutableIntStateOf(-1) }
 
@@ -261,7 +261,9 @@ private fun Loaded(
     }
     // A lone tab is only a heading: Down from the buttons goes straight to its row.
     val tabsFocusable = tabs.size > 1
-    val hasRow = showSuggestions || state.episodes.isNotEmpty()
+    // Films never get a tile row: the primary button plays the film.
+    val showEpisodes = !isFilm && !showSuggestions && state.episodes.isNotEmpty()
+    val hasRow = showSuggestions || showEpisodes
     val downTarget = if (tabsFocusable) tabsRequester else rowRequester.takeIf { hasRow }
     LaunchedEffect(Unit) {
         if (openedSuggestion >= 0 && showSuggestions && returnRequester.requestFocusSoon()) return@LaunchedEffect
@@ -298,7 +300,7 @@ private fun Loaded(
                         openedSuggestion = i
                         onOpenTitle(r)
                     }
-                } else if (state.episodes.isNotEmpty()) {
+                } else if (showEpisodes) {
                     // A fresh row (and scroll position) per season / language.
                     key(state.selectedSeason, state.dubSelected) { Episodes(state, vm, rowRequester) }
                 }
@@ -346,10 +348,9 @@ private fun Info(
                 color = SecondaryText, maxLines = 4, overflow = TextOverflow.Ellipsis,
             )
         }
-        val people = listOfNotNull(
-            card.director?.let { stringResource(if (isFilm) R.string.title_director else R.string.title_creator, it) },
-            card.stars.take(3).joinToString(", ").takeIf { it.isNotEmpty() },
-        ).joinToString(" · ")
+        val directorLabel = if (isFilm) R.string.title_director else R.string.title_creator
+        val context = LocalContext.current
+        val people = creditsLine(card.director, card.stars) { context.getString(directorLabel, it) }
         if (people.isNotEmpty()) {
             Text(people, style = labelStyle, color = DroozColors.TextSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
@@ -588,6 +589,7 @@ private fun Suggestions(
     onOpen: (Int, TitleRef) -> Unit,
 ) {
     val items = detail.suggestions
+    if (items.isEmpty()) return
     var last by remember { mutableIntStateOf(returnTo.coerceIn(0, items.lastIndex)) }
     val slot = remember { FocusRequester() }
     LazyRow(

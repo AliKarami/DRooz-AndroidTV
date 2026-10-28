@@ -42,10 +42,6 @@ import com.alikarami.drooz.ui.title.TitleViewModel
 import com.alikarami.drooz.ui.title.TitleViewModelFactory
 import kotlinx.coroutines.flow.first
 
-/** Debug-build launch shortcuts (MainActivity reads them from the intent on a fresh start only). */
-data class DebugLaunch(val login: DebugLogin? = null, val playPath: String? = null)
-data class DebugLogin(val username: String, val password: String, val mobile: String?)
-
 /**
  * The app's screens. Each back stack entry owns its ViewModels and saved UI state, so Back restores the
  * focused card, query and scroll of the page below. No transitions: TV pages switch instantly, and a
@@ -57,10 +53,8 @@ fun DroozNavHost(
     appVm: AppViewModel,
     nav: NavHostController,
     onExit: () -> Unit,
-    debug: DebugLaunch? = null,
 ) {
     val context = LocalContext.current
-    var pendingLogin by remember { mutableStateOf(debug?.login) }
 
     /** Clears the whole back stack (stale focus / scroll / view models go with it) and shows [route]. */
     fun resetTo(route: Any) = nav.navigate(route) {
@@ -84,11 +78,6 @@ fun DroozNavHost(
     LaunchedEffect(appVm) {
         appVm.navigation.collect { if (it == AppNav.ToLogin) resetTo(Login) }
     }
-    LaunchedEffect(Unit) {
-        if (debug?.login != null) resetTo(Login)
-        val ref = debug?.playPath?.let(TitleRef::fromPath)
-        if (ref != null && graph.authApi.isLoggedIn) openTitle(null, ref, autoPlay = true)
-    }
 
     NavHost(
         nav,
@@ -100,20 +89,17 @@ fun DroozNavHost(
     ) {
         composable<Login> {
             val vm: LoginViewModel = viewModel(factory = LoginViewModelFactory(graph))
-            // Debug login: fill the view model before the form first composes (the form seeds its fields
-            // from it once), then submit.
+            // Debug login (AppViewModel made Login the start destination for it, so this first entry is
+            // the one that stays): fill the view model before the form first composes (the form seeds its
+            // fields from it once), then submit.
             val debugLogin = remember(vm) {
-                pendingLogin?.also { p ->
+                appVm.takeDebugLogin()?.also { p ->
                     vm.onUsername(p.username)
                     vm.onPassword(p.password)
                     p.mobile?.let(vm::onMobile)
                 }
             }
-            LaunchedEffect(debugLogin) {
-                if (debugLogin == null) return@LaunchedEffect
-                pendingLogin = null
-                vm.submit()
-            }
+            LaunchedEffect(debugLogin) { if (debugLogin != null) vm.submit() }
             LoginScreen(vm) {
                 appVm.onLoggedIn()
                 resetTo(Home)
@@ -121,6 +107,8 @@ fun DroozNavHost(
         }
         composable<Home> { entry ->
             val vm: HomeViewModel = viewModel(factory = HomeViewModelFactory(graph))
+            // Debug play: once Home is reached (straight away, or after the debug login).
+            LaunchedEffect(Unit) { appVm.takeDebugPlay()?.let { openTitle(null, it, autoPlay = true) } }
             HomeScreen(vm, onOpen = { openTitle(entry, it) }, onExit = onExit, onRailSelect = { item ->
                 when (item) {
                     RailItem.Search -> go(entry, Search)

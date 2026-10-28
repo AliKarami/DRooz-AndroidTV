@@ -4,6 +4,7 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.navigation.compose.rememberNavController
 import com.alikarami.drooz.BuildConfig
@@ -13,18 +14,23 @@ import com.alikarami.drooz.ui.theme.DroozTheme
 
 class MainActivity : ComponentActivity() {
     private val graph get() = (application as DroozApp).graph
-    private val appVm: AppViewModel by viewModels { AppViewModelFactory(graph) }
+    private var debug: DebugLaunch? = null
+    private val appVm: AppViewModel by viewModels { AppViewModelFactory(graph, debug) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Lets Compose see the IME's insets (Android 14 TV: otherwise the decor consumes them); a TV has no
+        // system bars to draw under.
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         val preview = if (BuildConfig.DEBUG) intent.getStringExtra(EXTRA_PREVIEW_LOGIN) else null
-        val debug = if (BuildConfig.DEBUG && savedInstanceState == null) debugLaunch(intent) else null
+        // Read before appVm is first touched: its factory takes them (a recreated activity keeps its VM).
+        debug = if (BuildConfig.DEBUG && savedInstanceState == null) debugLaunch(intent) else null
         setContent {
             DroozTheme {
                 if (preview != null) {
                     LoginPreview(withMobile = preview == "mobile")
                 } else {
-                    DroozNavHost(graph, appVm, rememberNavController(), onExit = ::finish, debug = debug)
+                    DroozNavHost(graph, appVm, rememberNavController(), onExit = ::finish)
                 }
             }
         }

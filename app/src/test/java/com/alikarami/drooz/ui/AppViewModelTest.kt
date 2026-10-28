@@ -4,6 +4,7 @@ import com.alikarami.drooz.data.AuthApi
 import com.alikarami.drooz.data.SessionEvents
 import com.alikarami.drooz.site.SiteException
 import com.alikarami.drooz.site.auth.LoginResult
+import com.alikarami.drooz.site.model.TitleRef
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
@@ -63,5 +64,36 @@ class AppViewModelTest {
         events.report(SiteException.NotLoggedIn())
         runCurrent()
         assertEquals(listOf(AppNav.ToLogin, AppNav.ToLogin), got)
+    }
+
+    // Debug launch extras (debug builds only): the decision lives here so it is JVM-testable.
+
+    private val creds = DebugLogin("u", "p", null)
+
+    @Test fun debugLoginStartsAtLoginEvenWhenLoggedIn() {
+        val vm = AppViewModel(FakeAuth(true), SessionEvents(), DebugLaunch(login = creds))
+        assertEquals(Login, vm.startDestination)
+    }
+
+    @Test fun debugLoginIsHandedOutOnce() {
+        val vm = AppViewModel(FakeAuth(false), SessionEvents(), DebugLaunch(login = creds))
+        assertEquals(creds, vm.takeDebugLogin())
+        assertEquals(null, vm.takeDebugLogin())
+    }
+
+    @Test fun debugPlayWaitsForDebugLogin() {
+        val path = "/post/series/5735053/pluribus/"
+        val vm = AppViewModel(FakeAuth(false), SessionEvents(), DebugLaunch(login = creds, playPath = path))
+        assertEquals(null, vm.takeDebugPlay()) // still on Login
+        vm.onLoggedIn()
+        assertEquals(TitleRef.fromPath(path), vm.takeDebugPlay())
+        assertEquals(null, vm.takeDebugPlay())
+    }
+
+    @Test fun debugPlayRunsAtOnceWhenLoggedIn() {
+        val path = "/post/series/5735053/pluribus/"
+        val vm = AppViewModel(FakeAuth(true), SessionEvents(), DebugLaunch(playPath = path))
+        assertEquals(Home, vm.startDestination)
+        assertEquals(TitleRef.fromPath(path), vm.takeDebugPlay())
     }
 }

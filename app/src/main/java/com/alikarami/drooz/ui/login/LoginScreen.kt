@@ -17,6 +17,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -106,6 +110,7 @@ fun LoginPreview(withMobile: Boolean) {
  * Fields are [TvTextField]s (focus never opens the keyboard by itself; OK does). The keyboard's Next
  * moves straight on to the next field, still typing; Done on the last field submits.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun LoginContent(
     state: LoginUiState,
@@ -168,10 +173,21 @@ fun LoginContent(
       BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         val density = LocalDensity.current
         val screenHeight = with(density) { maxHeight.toPx() }
-        val keyboardTop = screenHeight * KeyboardTopFraction - with(density) { 16.dp.toPx() }
+        // Prefer the IME's own inset and visibility; the Google TV keyboard may report neither, so the 55%
+        // keyboard top is only a fallback.
+        val imeBottom = WindowInsets.ime.getBottom(density).toFloat()
+        val imeVisible = WindowInsets.isImeVisible
+        // Once the IME has been seen reporting visibility, trust it: closing the keyboard with Back (the IME
+        // eats that press, editing stays on) drops the lift. Until then (an IME that reports nothing), lift
+        // whenever a field is being edited.
+        var imeReports by remember { mutableStateOf(false) }
+        if (imeVisible) imeReports = true
+        val keyboardUp = editing != null && (imeVisible || !imeReports)
+        val keyboardTop = (if (imeBottom > 0f) screenHeight - imeBottom else screenHeight * KeyboardTopFraction) -
+            with(density) { 16.dp.toPx() }
         var formHeight by remember { mutableStateOf(0f) }
         // The form is centred: its top is half the spare height down.
-        val fieldBottom = editing?.let { fieldBottoms[it] }?.plus((screenHeight - formHeight) / 2)
+        val fieldBottom = editing?.takeIf { keyboardUp }?.let { fieldBottoms[it] }?.plus((screenHeight - formHeight) / 2)
         val lift by animateFloatAsState(
             if (fieldBottom != null) (keyboardTop - fieldBottom).coerceAtMost(0f) else 0f,
             tween(250), label = "keyboardLift",
@@ -180,15 +196,16 @@ fun LoginContent(
             Modifier.width(FormWidth)
                 .graphicsLayer { translationY = lift }
                 .onGloballyPositioned { form[0] = it; formHeight = it.size.height.toFloat() },
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(if (askMobile) 6.dp else 8.dp),
         ) {
+            // Smaller brand on the mobile step: the taller form must stay inside the 5% overscan-safe area.
             Text(
                 stringResource(R.string.app_name),
-                style = MaterialTheme.typography.displayMedium.copy(fontSize = 40.sp),
+                style = MaterialTheme.typography.displayMedium.copy(fontSize = if (askMobile) 30.sp else 40.sp),
                 color = DroozColors.Accent, fontWeight = FontWeight.ExtraBold,
             )
             Text(
-                stringResource(R.string.login_heading), Modifier.padding(bottom = 8.dp),
+                stringResource(R.string.login_heading), Modifier.padding(bottom = if (askMobile) 2.dp else 8.dp),
                 style = MaterialTheme.typography.titleLarge, color = Color.White,
             )
 
@@ -215,7 +232,7 @@ fun LoginContent(
                 ltr = true,
             )
             AnimatedVisibility(askMobile, enter = fadeIn() + expandVertically(), exit = fadeOut() + shrinkVertically()) {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     // The site's request doubles as the field's label.
                     Text(
                         stringResource(R.string.login_mobile_hint),

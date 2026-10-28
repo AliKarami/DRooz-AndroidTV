@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -23,9 +22,11 @@ import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Surface
 import androidx.tv.material3.Text
 import com.alikarami.drooz.ui.theme.DroozColors
+import com.alikarami.drooz.ui.theme.DroozCardShape
+import com.alikarami.drooz.ui.theme.FocusScale
 import com.alikarami.drooz.ui.theme.droozFocus
-
-private val CardShape = RoundedCornerShape(10.dp)
+import com.alikarami.drooz.ui.theme.droozSurfaceColors
+import com.alikarami.drooz.ui.theme.droozSurfaceScale
 
 /** Poster (2:3) with the title underneath. */
 @Composable
@@ -33,8 +34,10 @@ fun PosterCard(title: String, posterUrl: String?, onClick: () -> Unit, modifier:
     Column(modifier.width(160.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Surface(
             onClick = onClick,
-            modifier = Modifier.droozFocus(1.08f).fillMaxWidth().height(240.dp),
-            shape = ClickableSurfaceDefaults.shape(CardShape),
+            modifier = Modifier.droozFocus(FocusScale.CARD).fillMaxWidth().height(240.dp),
+            shape = ClickableSurfaceDefaults.shape(DroozCardShape),
+            scale = droozSurfaceScale,
+            colors = droozSurfaceColors(),
         ) {
             DroozImage(posterUrl, ImageSizes.POSTER_W, ImageSizes.POSTER_H, Modifier.fillMaxWidth().fillMaxHeight())
         }
@@ -55,8 +58,10 @@ fun LandscapeCard(
     Column(modifier.width(220.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Surface(
             onClick = onClick,
-            modifier = Modifier.droozFocus(1.08f).fillMaxWidth().height(124.dp),
-            shape = ClickableSurfaceDefaults.shape(CardShape),
+            modifier = Modifier.droozFocus(FocusScale.CARD).fillMaxWidth().height(124.dp),
+            shape = ClickableSurfaceDefaults.shape(DroozCardShape),
+            scale = droozSurfaceScale,
+            colors = droozSurfaceColors(),
         ) {
             Box(Modifier.fillMaxWidth().fillMaxHeight()) {
                 DroozImage(imageUrl, ImageSizes.CARD_W, ImageSizes.CARD_H, Modifier.fillMaxWidth().fillMaxHeight())
@@ -82,8 +87,10 @@ fun EpisodeTile(
 ) {
     Surface(
         onClick = onClick,
-        modifier = modifier.droozFocus(1.1f).size(width = 96.dp, height = 72.dp),
-        shape = ClickableSurfaceDefaults.shape(CardShape),
+        modifier = modifier.droozFocus(FocusScale.TILE).size(width = 96.dp, height = 72.dp),
+        shape = ClickableSurfaceDefaults.shape(DroozCardShape),
+        scale = droozSurfaceScale,
+        colors = droozSurfaceColors(),
     ) {
         Box(Modifier.fillMaxWidth().fillMaxHeight().padding(8.dp)) {
             Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {

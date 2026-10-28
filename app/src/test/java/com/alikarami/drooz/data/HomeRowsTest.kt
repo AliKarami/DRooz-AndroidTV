@@ -16,6 +16,10 @@ class HomeRowsTest {
                 "/archive/category/safe-for-children/"),
             HomeRows.rows.mapNotNull { (it.source as? RowSource.ListPath)?.path },
         )
+        assertEquals(
+            listOf("recent", "featured", "updated-series", "new-films", "new-series", "popular", "imdb-top", "dubbed", "kids"),
+            HomeRows.rows.map { it.key },
+        )
         assertEquals(RowSource.Recent, HomeRows.rows[0].source)
     }
 }

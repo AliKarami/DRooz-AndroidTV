@@ -95,6 +95,8 @@ import com.alikarami.drooz.data.HomeRows
 import com.alikarami.drooz.data.RowSource
 import com.alikarami.drooz.site.model.TitleRef
 import com.alikarami.drooz.ui.common.ErrorState
+import com.alikarami.drooz.ui.common.PivotSpec
+import com.alikarami.drooz.ui.common.bringIntoViewOnFocus
 import com.alikarami.drooz.ui.common.requestFocusSoon
 import com.alikarami.drooz.ui.common.LandscapeCard
 import com.alikarami.drooz.ui.common.PosterCard
@@ -121,16 +123,6 @@ private val LandscapeWidth = 220.dp
 private val PosterWidth = 120.dp
 
 private const val EXIT_WINDOW_MS = 2_000L
-
-/**
- * Scrolls so the focused child sits [pivotPx] from the container's leading edge (Netflix-style fixed
- * focus). Offsets arrive in absolute (left-based) coordinates, so in RTL the leading edge is the right.
- */
-@OptIn(ExperimentalFoundationApi::class)
-private class PivotSpec(private val pivotPx: Float, private val fromRight: Boolean = false) : BringIntoViewSpec {
-    override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float =
-        if (fromRight) offset - (containerSize - pivotPx - size) else offset - pivotPx
-}
 
 private val RowUi.isHidden get() = requested && !loading && !error && items.isEmpty()
 private val recentKeys = HomeRows.rows.filter { it.source is RowSource.Recent }.map { it.key }.toSet()
@@ -283,18 +275,6 @@ fun HomeScreen(
 }
 
 private enum class Slot { Cards, Error, Skeleton }
-
-/** Pivot the focused element of a row (and the row itself) into the fixed focus position. */
-private fun Modifier.bringIntoViewOnFocus(onFocused: () -> Unit = {}): Modifier = composed {
-    val requester = remember { BringIntoViewRequester() }
-    val scope = rememberCoroutineScope()
-    bringIntoViewRequester(requester).onFocusChanged {
-        if (it.hasFocus) {
-            onFocused()
-            scope.launch { requester.bringIntoView() }
-        }
-    }
-}
 
 @Composable
 private fun HomeRow(

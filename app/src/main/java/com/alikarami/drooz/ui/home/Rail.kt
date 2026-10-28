@@ -10,16 +10,15 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.foundation.focusGroup
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -59,20 +58,19 @@ private val RailOpenBackground = Brush.horizontalGradient(
 )
 
 /** Content of the tv-material drawer: icons when collapsed, icons + labels once focus enters it. */
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun NavigationDrawerScope.HomeRail(selected: RailItem, onSelect: (RailItem) -> Unit, modifier: Modifier = Modifier) {
     val selectedRequester = remember { FocusRequester() }
-    var hadFocus by remember { mutableStateOf(false) }
     Column(
         modifier
             .fillMaxHeight()
             .background(if (hasFocus) RailOpenBackground else RailBackground)
             .padding(horizontal = 12.dp)
-            // Entering the rail from anywhere lands on the current destination, not the nearest icon.
-            .onFocusChanged {
-                if (it.hasFocus && !hadFocus) runCatching { selectedRequester.requestFocus() }
-                hadFocus = it.hasFocus
-            },
+            // Entering the rail from anywhere lands on the current destination, not the nearest icon. A focus
+            // group, so moving between items is not seen as re-entering (that snapped Up/Down back to it).
+            .focusProperties { enter = { selectedRequester } }
+            .focusGroup(),
         verticalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterVertically),
     ) {
         RailItem.entries.forEach { item ->

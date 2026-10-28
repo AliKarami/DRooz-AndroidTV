@@ -26,6 +26,10 @@ import com.alikarami.drooz.site.model.TitleRef
 import com.alikarami.drooz.ui.home.HomeScreen
 import com.alikarami.drooz.ui.home.HomeViewModel
 import com.alikarami.drooz.ui.home.HomeViewModelFactory
+import com.alikarami.drooz.ui.home.RailItem
+import com.alikarami.drooz.ui.list.ListScreen
+import com.alikarami.drooz.ui.list.ListViewModel
+import com.alikarami.drooz.ui.list.ListViewModelFactory
 import com.alikarami.drooz.ui.theme.DroozTheme
 import com.alikarami.drooz.ui.title.PlayRequest
 import com.alikarami.drooz.ui.title.TitleScreen
@@ -36,18 +40,26 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 /**
- * Glue until Task 9's navigation: home → title pages as a simple back stack. Each entry owns a
- * ViewModelStore, cleared when the entry is popped.
+ * Glue until Task 9's navigation: home → list grids / title pages as a simple back stack. Each entry
+ * owns a ViewModelStore, cleared when the entry is popped.
  */
 class TitleStack : ViewModel() {
-    data class Entry(val id: Long, val ref: TitleRef, val featuredBackdrop: String?)
+    sealed interface Entry {
+        val id: Long
+        data class Title(override val id: Long, val ref: TitleRef, val featuredBackdrop: String?) : Entry
+        data class List(override val id: Long, val title: String, val path: String) : Entry
+    }
 
     val entries = mutableStateListOf<Entry>()
     private val stores = HashMap<Long, ViewModelStore>()
     private var nextId = 0L
 
     fun push(ref: TitleRef, featuredBackdrop: String?) {
-        entries += Entry(nextId++, ref, featuredBackdrop)
+        entries += Entry.Title(nextId++, ref, featuredBackdrop)
+    }
+
+    fun pushList(title: String, path: String) {
+        entries += Entry.List(nextId++, title, path)
     }
 
     fun pop(): Entry? = entries.removeLastOrNull()?.also { stores.remove(it.id)?.clear() }
@@ -91,22 +103,40 @@ class MainActivity : ComponentActivity() {
                 DroozTheme {
                     val holder = rememberSaveableStateHolder()
                     val top = titles.entries.lastOrNull()
+                    val openTitle: (TitleRef) -> Unit = { titles.push(it, homeVm.featuredBackdrop(it)) }
                     if (top == null) {
-                        HomeScreen(homeVm, onOpen = { titles.push(it, homeVm.featuredBackdrop(it)) }, onExit = ::finish)
-                    } else {
-                        holder.SaveableStateProvider("title:${top.id}") {
-                            BackHandler { titles.pop()?.let { holder.removeState("title:${it.id}") } }
-                            val titleVm = remember(top.id) {
-                                ViewModelProvider(titles.owner(top), TitleViewModelFactory(graph, top.ref))[TitleViewModel::class.java]
+                        HomeScreen(homeVm, onOpen = openTitle, onExit = ::finish, onRailSelect = { item ->
+                            when (item) {
+                                RailItem.Series -> titles.pushList(getString(R.string.list_updated_series), "/archive/series/")
+                                RailItem.Films ->
+                                    titles.pushList(getString(R.string.list_new_films), "/archive/category/new-films/")
+                                else -> Unit
                             }
-                            val played by graph.titleInfo.playedBackdrops.collectAsStateWithLifecycle()
-                            TitleScreen(
-                                top.ref, titleVm,
-                                onPlay = ::play,
-                                onOpenTitle = { titles.push(it, homeVm.featuredBackdrop(it)) },
-                                featuredBackdropHash = top.featuredBackdrop,
-                                playedBackdrops = played,
-                            )
+                        })
+                    } else {
+                        holder.SaveableStateProvider("entry:${top.id}") {
+                            BackHandler { titles.pop()?.let { holder.removeState("entry:${it.id}") } }
+                            when (top) {
+                                is TitleStack.Entry.Title -> {
+                                    val titleVm = remember(top.id) {
+                                        ViewModelProvider(titles.owner(top), TitleViewModelFactory(graph, top.ref))[TitleViewModel::class.java]
+                                    }
+                                    val played by graph.titleInfo.playedBackdrops.collectAsStateWithLifecycle()
+                                    TitleScreen(
+                                        top.ref, titleVm,
+                                        onPlay = ::play,
+                                        onOpenTitle = openTitle,
+                                        featuredBackdropHash = top.featuredBackdrop,
+                                        playedBackdrops = played,
+                                    )
+                                }
+                                is TitleStack.Entry.List -> {
+                                    val listVm = remember(top.id) {
+                                        ViewModelProvider(titles.owner(top), ListViewModelFactory(graph, top.path, top.title))[ListViewModel::class.java]
+                                    }
+                                    ListScreen(listVm, onOpen = openTitle)
+                                }
+                            }
                         }
                     }
                 }

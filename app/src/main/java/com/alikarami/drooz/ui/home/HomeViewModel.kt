@@ -3,7 +3,6 @@ package com.alikarami.drooz.ui.home
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.alikarami.drooz.data.Backdrop
-import com.alikarami.drooz.data.BackdropResolver
 import com.alikarami.drooz.data.HomeRowConfig
 import com.alikarami.drooz.data.HomeRows
 import com.alikarami.drooz.data.RowSource
@@ -11,14 +10,10 @@ import com.alikarami.drooz.data.SiteApi
 import com.alikarami.drooz.data.TitleInfoRepository
 import com.alikarami.drooz.site.ImageUrls
 import com.alikarami.drooz.site.model.TitleCard
-import com.alikarami.drooz.site.model.TitleDetail
 import com.alikarami.drooz.site.model.TitleRef
-import com.alikarami.drooz.ui.common.UiStrings
-import com.alikarami.drooz.ui.common.prettifySlug
 import com.alikarami.drooz.ui.common.safeLaunch
 import com.alikarami.drooz.ui.common.toPersianDigits
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -77,10 +72,11 @@ class HomeViewModel(
 
     /** Home's featured backdrop hash for [ref] (only home knows it), so the title page can reuse it. */
     fun featuredBackdrop(ref: TitleRef): String? = featured[ref]
-    private var dwellJob: Job? = null
+    private val heroes = HeroController(viewModelScope, titleInfo, dwellMs, { featured }) { h ->
+        _state.update { it.copy(hero = h) }
+    }
     private var refreshJob: Job? = null
     private val listJobs = HashMap<String, Job>()
-    private var focusedRef: TitleRef? = null
 
     init { refresh() }
 
@@ -149,7 +145,8 @@ class HomeViewModel(
     }
 
     private fun cardUi(e: Entry, landscape: Boolean): CardUi {
-        val title = e.card?.title?.takeIf { it != e.ref.slug } ?: prettifySlug(e.ref.slug)
+        if (!landscape && e.card != null) return e.card.toPosterCardUi()
+        val title = cardTitle(e.ref, e.card?.title)
         val url = if (landscape) {
             (featured[e.ref]?.let { ImageUrls.backdrop(it, 440, 248) }
                 ?: e.posterHash?.let { ImageUrls.poster(it, 440, 248) })
@@ -166,33 +163,6 @@ class HomeViewModel(
     fun onFocus(rowKey: String, index: Int) {
         focus[rowKey] = index
         val entry = entries[rowKey]?.getOrNull(index) ?: return
-        dwellJob?.cancel()
-        focusedRef = entry.ref
-        _state.update { it.copy(hero = hero(entry, titleInfo.peek(entry.ref))) }
-        if (titleInfo.peek(entry.ref) != null) return
-        dwellJob = viewModelScope.safeLaunch(onError = { /* keep the poster hero */ }) {
-            delay(dwellMs)
-            val detail = titleInfo.get(entry.ref)
-            if (focusedRef == entry.ref) _state.update { it.copy(hero = hero(entry, detail)) }
-        }
-    }
-
-    private fun hero(e: Entry, detail: TitleDetail?): HeroUi {
-        val card = detail?.card ?: e.card
-        val title = card?.title?.takeIf { it != e.ref.slug } ?: prettifySlug(e.ref.slug)
-        val meta = buildList {
-            card?.year?.let { add(it.toString().toPersianDigits()) }
-            card?.durationMin?.let { add(UiStrings.minutes(it)) }
-            card?.episodeLabel?.let { add(it) }
-        }
-        val chips = buildList {
-            val episodes = detail?.catalog?.main.orEmpty().flatMap { it.episodes }
-            if (detail?.catalog?.dub?.isNotEmpty() == true) add(UiStrings.DUB)
-            if (episodes.any { it.subtitles.isNotEmpty() }) add(UiStrings.SUBTITLE)
-            if (episodes.any { ep -> ep.videos.any { it.height >= 2160 } }) add("4K")
-        }
-        val backdrop = BackdropResolver.resolve(e.ref, featured, titleInfo.playedBackdrops.value, detail, e.posterHash)
-        val poster = (detail?.card?.posterHash ?: e.posterHash)?.let { Backdrop.BlurredPoster(ImageUrls.poster(it, 240, 360)) }
-        return HeroUi(e.ref, title, meta, chips, card?.synopsis, backdrop, card?.imdb?.score, card?.genres.orEmpty(), poster)
+        heroes.focus(entry.ref, entry.card, entry.posterHash)
     }
 }

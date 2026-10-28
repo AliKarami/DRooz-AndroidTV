@@ -67,9 +67,12 @@ fun HeroBackdrop(hero: HeroUi?, modifier: Modifier = Modifier) {
     }
 }
 
-/** Title, IMDb badge + meta + chips, and a 3-line synopsis for the focused card; cross-fades per title. */
+/**
+ * Title, IMDb badge + meta + chips, and a 3-line synopsis for the focused card; cross-fades per title.
+ * [compact] (list grids' shorter hero strip) keeps the title to one line and the synopsis to two.
+ */
 @Composable
-fun HeroInfo(hero: HeroUi?, rowTitle: String?, modifier: Modifier = Modifier) {
+fun HeroInfo(hero: HeroUi?, rowTitle: String?, modifier: Modifier = Modifier, compact: Boolean = false) {
     AnimatedContent(
         targetState = hero,
         modifier = modifier,
@@ -94,11 +97,11 @@ fun HeroInfo(hero: HeroUi?, rowTitle: String?, modifier: Modifier = Modifier) {
             TitleText(
                 h.title,
                 MaterialTheme.typography.displayMedium.copy(
-                    fontSize = 34.sp, lineHeight = 38.sp, fontWeight = FontWeight.ExtraBold, textAlign = TextAlign.Right,
+                    fontSize = if (compact) 30.sp else 34.sp, lineHeight = if (compact) 34.sp else 38.sp, fontWeight = FontWeight.ExtraBold, textAlign = TextAlign.Right,
                 ),
                 modifier = Modifier.fillMaxWidth(),
                 color = Color.White,
-                maxLines = 2,
+                maxLines = if (compact) 1 else 2,
             )
             MetaLine(h)
             h.synopsis?.takeIf { it.isNotBlank() }?.let {
@@ -106,7 +109,7 @@ fun HeroInfo(hero: HeroUi?, rowTitle: String?, modifier: Modifier = Modifier) {
                     it,
                     style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 25.sp),
                     color = Color(0xFFE3E5EA),
-                    maxLines = 3,
+                    maxLines = if (compact) 2 else 3,
                     overflow = TextOverflow.Ellipsis,
                 )
             }

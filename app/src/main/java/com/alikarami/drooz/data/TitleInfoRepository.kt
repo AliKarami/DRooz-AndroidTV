@@ -29,7 +29,8 @@ class TitleInfoRepository(
     private class Entry(val detail: TitleDetail, val at: Long)
 
     private val mutex = Mutex()
-    private val cache = HashMap<TitleRef, Entry>()
+    // Concurrent: peek() is called from UI code while fetches write from IO threads.
+    private val cache = java.util.concurrent.ConcurrentHashMap<TitleRef, Entry>()
     private val inFlight = HashMap<TitleRef, Deferred<TitleDetail>>()
     private val limiter = Semaphore(2)
     private val played = MutableStateFlow<Map<TitleRef, String>>(emptyMap())
@@ -55,7 +56,7 @@ class TitleInfoRepository(
         return job.await()
     }
 
-    fun peek(ref: TitleRef): TitleDetail? = synchronized(cache) { fresh(ref) }
+    fun peek(ref: TitleRef): TitleDetail? = fresh(ref)
 
     fun remember(ref: TitleRef, backdropPath: String) = played.update { it + (ref to backdropPath) }
 

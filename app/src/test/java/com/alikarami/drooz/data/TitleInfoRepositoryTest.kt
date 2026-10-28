@@ -88,4 +88,23 @@ class TitleInfoRepositoryTest {
         repo.remember(ref(1), "/img/1920-1080/h.jpg.webp")
         assertEquals("/img/1920-1080/h.jpg.webp", repo.playedBackdrops.value[ref(1)])
     }
+
+    @Test fun peekIsSafeDuringConcurrentWrites() {
+        val api = FakeApi { detail(it) }
+        val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
+        val repo = TitleInfoRepository(api, { 0 }, 1000, scope)
+        val errors = java.util.concurrent.ConcurrentLinkedQueue<Throwable>()
+        val readers = (1..4).map {
+            Thread {
+                try { repeat(200_000) { i -> repo.peek(ref((i % 2000).toLong())) } } catch (t: Throwable) { errors.add(t) }
+            }.also { it.start() }
+        }
+        kotlinx.coroutines.runBlocking {
+            (0L until 2000L).map { scope.async { repo.get(ref(it)) } }.awaitAll()
+        }
+        readers.forEach { it.join() }
+        scope.coroutineContext[kotlinx.coroutines.Job]!!.cancel()
+        assertTrue(errors.toString(), errors.isEmpty())
+        assertNotNull(repo.peek(ref(1999)))
+    }
 }

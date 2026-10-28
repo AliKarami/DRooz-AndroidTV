@@ -13,9 +13,13 @@ import com.alikarami.drooz.site.model.TitleRef
 import com.alikarami.drooz.ui.common.UiStrings
 import com.alikarami.drooz.ui.common.episodeLabel
 import com.alikarami.drooz.ui.common.safeLaunch
-import kotlinx.coroutines.flow.MutableSharedFlow
+import com.alikarami.drooz.site.SiteException
+import com.alikarami.drooz.site.model.StreamSession
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 
@@ -33,10 +37,17 @@ data class TitleUiState(
     val dubSelected: Boolean,
     val inWatchlist: Boolean?,
     val error: String?,
+    /** A stream is being opened for this press: its button / tile shows a spinner, further presses wait. */
+    val playBusy: PlayBusy? = null,
 )
 
-/** [lang] is "original" or "dubbed-fa". */
-data class PlayRequest(val episode: Episode, val ref: TitleRef, val lang: String)
+/** Which control started the pending play: the primary button ([primary]) or the tile of [streamId]. */
+data class PlayBusy(val streamId: String, val primary: Boolean)
+
+sealed interface PlayEvent {
+    data class Start(val session: StreamSession) : PlayEvent
+    data class Failed(val message: String) : PlayEvent
+}
 
 class TitleViewModel(
     private val ref: TitleRef,
@@ -50,12 +61,15 @@ class TitleViewModel(
     private var inWatchlist: Boolean? = null
     private var error: String? = null
     private var watchlistInFlight = false
+    private var playBusy: PlayBusy? = null
+    private var playJob: Job? = null
 
     private val _state = MutableStateFlow(build())
     val uiState: StateFlow<TitleUiState> = _state
 
-    private val _play = MutableSharedFlow<PlayRequest>(extraBufferCapacity = 1)
-    val playRequests: SharedFlow<PlayRequest> = _play
+    private val _play = Channel<PlayEvent>(Channel.BUFFERED)
+    /** One-shot: open the player, or toast why not. Collect only while the page is resumed. */
+    val playEvents: Flow<PlayEvent> = _play.receiveAsFlow()
 
     init { load() }
 
@@ -101,9 +115,42 @@ class TitleViewModel(
         }
     }
 
+    /** Opens the stream of [episode] (null: the primary button's episode); presses while one is pending are ignored. */
     fun play(episode: Episode? = null) {
+        if (playJob?.isActive == true) return
         val ep = episode ?: _state.value.primaryEpisode ?: return
-        _play.tryEmit(PlayRequest(ep, ref, if (dub) "dubbed-fa" else "original"))
+        val lang = if (dub) "dubbed-fa" else "original"
+        playBusy = PlayBusy(ep.streamId, primary = episode == null)
+        publish()
+        playJob = viewModelScope.safeLaunch(onError = { e ->
+            playBusy = null
+            publish()
+            // A lost session is routed to Login by the app (SessionEvents); a toast would only flash over it.
+            if (e !is SiteException.NotLoggedIn) _play.trySend(PlayEvent.Failed(playFailure(e)))
+        }) {
+            val session = api.openStream(ep, ref, lang, STREAM_HEIGHT)
+            session.backdropPath?.let { titleInfo.remember(ref, it) }
+            playBusy = null
+            publish()
+            _play.send(PlayEvent.Start(session))
+        }
+    }
+
+    /** The user left the page (or the app): the pending stream must never open the player afterwards. */
+    fun cancelPlay() {
+        playJob?.cancel()
+        playJob = null
+        while (_play.tryReceive().isSuccess) { /* drop */ }
+        if (playBusy != null) {
+            playBusy = null
+            publish()
+        }
+    }
+
+    private fun playFailure(e: Throwable): String = when (e) {
+        is SiteException.NetworkError, is SiteException.Blocked -> UiStrings.PLAY_FAILED_NETWORK
+        is SiteException.HttpError -> if (e.code >= 500) UiStrings.PLAY_FAILED_NETWORK else UiStrings.PLAY_FAILED
+        else -> UiStrings.PLAY_FAILED
     }
 
     private fun publish() = _state.update { build() }
@@ -139,6 +186,10 @@ class TitleViewModel(
             dubSelected = dub,
             inWatchlist = inWatchlist,
             error = error,
+            playBusy = playBusy,
         )
     }
 }
+
+/** Plan 2 always asks for 1080p; the real player (Plan 3) picks quality itself. */
+private const val STREAM_HEIGHT = 1080

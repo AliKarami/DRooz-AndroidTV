@@ -125,6 +125,8 @@ fun EpisodeTile(
     progress: Float?,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    /** Its stream is being opened: a spinner replaces the number. */
+    busy: Boolean = false,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
@@ -145,11 +147,15 @@ fun EpisodeTile(
     ) {
         Box(Modifier.fillMaxWidth().fillMaxHeight().padding(6.dp)) {
             Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    number.toString().toPersianDigits(),
-                    style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.ExtraBold, lineHeight = 30.sp),
-                    maxLines = 1,
-                )
+                if (busy) {
+                    Box(Modifier.height(30.dp), contentAlignment = Alignment.Center) { BusySpinner(size = 24.dp, stroke = 3.dp) }
+                } else {
+                    Text(
+                        number.toString().toPersianDigits(),
+                        style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.ExtraBold, lineHeight = 30.sp),
+                        maxLines = 1,
+                    )
+                }
                 if (minutes != null) {
                     Text(
                         stringResource(R.string.minutes_short, minutes.toString().toPersianDigits()),

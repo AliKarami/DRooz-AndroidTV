@@ -24,7 +24,6 @@
     <string name="title_director">کارگردان: %1$s</string>
     <string name="title_failed">بارگذاری نشد</string>
     <string name="title_watchlist_failed">لیست من به‌روز نشد</string>
-    <string name="title_play_failed">پخش شروع نشد</string>
     <string name="list_updated_series">سریال های بروز شده</string>
     <string name="list_new_films">فیلم های جدید</string>
     <string name="list_failed">فهرست بارگذاری نشد</string>
@@ -38,4 +37,11 @@
     <string name="search_voice">جستجوی صوتی</string>
     <string name="search_voice_prompt">نام فیلم یا سریال را بگویید</string>
     <string name="search_voice_unavailable">جستجوی صوتی در دسترس نیست</string>
+    <string name="login_heading">ورود به حساب کاربری</string>
+    <string name="login_username">نام کاربری یا ایمیل</string>
+    <string name="login_password">رمز عبور</string>
+    <string name="login_mobile_hint">لطفا شماره موبایل خود را کامل کنید</string>
+    <string name="login_submit">ورود</string>
+    <string name="login_tip">برای نوشتن در هر کادر، OK را بزنید</string>
+    <string name="soon">به‌زودی</string>
 </resources>

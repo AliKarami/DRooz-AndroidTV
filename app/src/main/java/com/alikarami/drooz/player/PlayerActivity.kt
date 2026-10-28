@@ -1,4 +1,4 @@
-package com.alikarami.drooz.ui.debug
+package com.alikarami.drooz.player
 
 import android.content.Context
 import android.content.Intent
@@ -21,8 +21,10 @@ import androidx.media3.ui.PlayerView
 import com.alikarami.drooz.DroozApp
 import com.alikarami.drooz.site.model.StreamSession
 
-/** Minimal Media3 player for the end-to-end check. The real player is Plan 3. */
-class DebugPlayerActivity : ComponentActivity() {
+/**
+ * Minimal Media3 player (Plan 3 replaces it). Logging is debug-only: stream URLs carry the user's token.
+ */
+class PlayerActivity : ComponentActivity() {
     private var player: ExoPlayer? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -81,7 +83,7 @@ class DebugPlayerActivity : ComponentActivity() {
         private const val EXTRA_SUB_FA = "sub_fa"
 
         fun intent(context: Context, session: StreamSession): Intent =
-            Intent(context, DebugPlayerActivity::class.java)
+            Intent(context, PlayerActivity::class.java)
                 .putExtra(EXTRA_URL, session.masterUrl)
                 .putExtra(EXTRA_SUB_FA, session.subtitles.firstOrNull { it.label == "Farsi" }?.url)
     }

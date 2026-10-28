@@ -6,6 +6,8 @@ import com.alikarami.drooz.data.AuthApi
 import com.alikarami.drooz.data.AuthApiAdapter
 import com.alikarami.drooz.data.SiteApi
 import com.alikarami.drooz.data.SiteApiAdapter
+import com.alikarami.drooz.data.SessionEvents
+import com.alikarami.drooz.data.SessionGuardedSiteApi
 import com.alikarami.drooz.data.DataStoreTitlePrefs
 import com.alikarami.drooz.data.TitleInfoRepository
 import com.alikarami.drooz.data.TitlePrefs
@@ -43,7 +45,9 @@ class AppGraph(context: Context) {
     val http = SiteHttp(SiteConfig.BASE_URL.toHttpUrl(), cookieJar, baseClient)
     val auth = AuthService(http, cookieJar, CredentialStore(dir.resolve("creds.bin"), KeystoreSecretBox()))
     val repository = SiteRepository(http, auth)
-    val siteApi: SiteApi = SiteApiAdapter(repository)
+    /** Every screen's failures pass through here; a lost session sends the app to Login (see AppViewModel). */
+    val sessionEvents = SessionEvents()
+    val siteApi: SiteApi = SessionGuardedSiteApi(SiteApiAdapter(repository), sessionEvents)
     val authApi: AuthApi = AuthApiAdapter(auth)
     val titleInfo = TitleInfoRepository(siteApi)
     val titlePrefs: TitlePrefs = DataStoreTitlePrefs(appContext)

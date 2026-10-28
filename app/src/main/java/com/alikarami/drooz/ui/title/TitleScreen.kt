@@ -67,6 +67,13 @@ import androidx.compose.ui.zIndex
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
+import androidx.compose.runtime.DisposableEffect
+import com.alikarami.drooz.site.model.StreamSession
+import com.alikarami.drooz.ui.common.BusySpinner
 import androidx.tv.material3.Border
 import androidx.tv.material3.ClickableSurfaceDefaults
 import androidx.tv.material3.MaterialTheme
@@ -132,15 +139,29 @@ private sealed interface Tab {
 fun TitleScreen(
     ref: TitleRef,
     vm: TitleViewModel,
-    onPlay: (PlayRequest) -> Unit,
+    onStartPlayer: (StreamSession) -> Unit,
     onOpenTitle: (TitleRef) -> Unit,
     featuredBackdropHash: String? = null,
     playedBackdrops: Map<TitleRef, String> = emptyMap(),
 ) {
     val state by vm.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val play by rememberUpdatedState(onPlay)
-    LaunchedEffect(vm) { vm.playRequests.collect { play(it) } }
+    val startPlayer by rememberUpdatedState(onStartPlayer)
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    // Only a resumed page opens the player: a stream that resolves after the user left never starts it.
+    LaunchedEffect(vm, lifecycle) {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            vm.playEvents.collect { e ->
+                when (e) {
+                    is PlayEvent.Start -> startPlayer(e.session)
+                    is PlayEvent.Failed -> Toast.makeText(context, e.message, Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+    // Leaving the page (Back, a suggestion) or the app cancels a pending play.
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) { vm.cancelPlay() }
+    DisposableEffect(vm) { onDispose { vm.cancelPlay() } }
 
     val detail = state.detail
     LaunchedEffect(state.error) {
@@ -407,7 +428,10 @@ private fun Buttons(
     ) {
         val hasPrimary = state.primaryLabel.isNotEmpty()
         if (hasPrimary) {
-            PillButton("▶  ${state.primaryLabel}", { vm.play() }, down.focusRequester(primaryRequester))
+            PillButton(
+                "▶  ${state.primaryLabel}", { vm.play() }, down.focusRequester(primaryRequester),
+                busy = state.playBusy?.primary == true,
+            )
         }
         val heart = if (state.inWatchlist == true) "♥" else "♡"
         PillButton(
@@ -422,7 +446,7 @@ private val PillShape = RoundedCornerShape(8.dp)
 
 /** Mockup `.btn`: translucent pill, white with black text when focused. */
 @Composable
-private fun PillButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+private fun PillButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, busy: Boolean = false) {
     Surface(
         onClick = onClick,
         modifier = modifier,
@@ -437,11 +461,15 @@ private fun PillButton(text: String, onClick: () -> Unit, modifier: Modifier = M
             pressedContentColor = Color.Black,
         ),
     ) {
-        Text(
-            text, Modifier.padding(horizontal = 20.dp, vertical = 9.dp),
-            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-            maxLines = 1, softWrap = false,
-        )
+        Box(contentAlignment = Alignment.Center) {
+            // The label keeps the button's width while the spinner shows (no layout jump).
+            Text(
+                text, Modifier.padding(horizontal = 20.dp, vertical = 9.dp).alpha(if (busy) 0f else 1f),
+                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                maxLines = 1, softWrap = false,
+            )
+            if (busy) BusySpinner()
+        }
     }
 }
 
@@ -570,6 +598,7 @@ private fun Episodes(state: TitleUiState, vm: TitleViewModel, requester: FocusRe
                 watched = e.watched,
                 progress = null,
                 onClick = { vm.play(e.episode) },
+                busy = state.playBusy?.let { !it.primary && it.streamId == e.episode.streamId } == true,
                 modifier = Modifier
                     .then(if (i == last.coerceIn(0, eps.lastIndex)) Modifier.focusRequester(slot) else Modifier)
                     .onFocusChanged { if (it.isFocused) last = i },

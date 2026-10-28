@@ -7,6 +7,8 @@ object UiStrings {
     const val FILM = "پخش"
     const val DUB = "دوبله"
     const val SUBTITLE = "زیرنویس"
+    const val PLAY_FAILED = "پخش شروع نشد"
+    const val PLAY_FAILED_NETWORK = "اتصال به سایت برقرار نشد؛ دوباره تلاش کنید"
 
     fun continueWatching(season: Int, episode: Int): String = "ادامه فصل $season قسمت $episode".toPersianDigits()
     fun minutes(n: Int): String = "$n دقیقه".toPersianDigits()

@@ -74,6 +74,7 @@ import androidx.tv.material3.Text
 import com.alikarami.drooz.R
 import com.alikarami.drooz.site.model.TitleRef
 import com.alikarami.drooz.ui.common.ErrorState
+import com.alikarami.drooz.ui.common.TvTextField
 import com.alikarami.drooz.ui.common.requestFocusSoon
 import com.alikarami.drooz.ui.home.HeroBackdrop
 import com.alikarami.drooz.ui.home.HeroInfo
@@ -107,7 +108,6 @@ private val FieldHeight = 56.dp
 fun SearchScreen(vm: SearchViewModel, onOpen: (TitleRef) -> Unit) {
     val state by vm.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val backDispatcher = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
 
@@ -118,21 +118,17 @@ fun SearchScreen(vm: SearchViewModel, onOpen: (TitleRef) -> Unit) {
     }
     var editing by remember { mutableStateOf(false) }
     val fieldRequester = remember { FocusRequester() }
-    val inputRequester = remember { FocusRequester() }
     val firstCard = remember { FocusRequester() }
-    // Set by the IME's Search key and by voice: focus the first result once the answer lands.
+    // Set by the IME's Search key, voice and retry: focus the first result once the answer lands.
     var jumpToResults by remember { mutableStateOf(false) }
+    // Set by the error's retry button: if the retry fails too, focus goes back to the (new) retry button.
+    var refocusRetry by remember { mutableStateOf(false) }
+    val retryRequester = remember { FocusRequester() }
     // Coming back from a title page with focus in the results: that grid restores its focused card.
     var restoreKey by remember { mutableStateOf(if (vm.focusInResults && state.items.isNotEmpty()) state.searchedFor else null) }
 
     LaunchedEffect(Unit) {
         if (restoreKey == null) fieldRequester.requestFocusSoon()
-    }
-    LaunchedEffect(editing) {
-        if (editing) {
-            inputRequester.requestFocusSoon()
-            keyboard?.show()
-        }
     }
     // Keyed on the decision, not the whole state: hero updates while focus moves must not restart it.
     val jump = state.resultsJump()
@@ -142,6 +138,22 @@ fun SearchScreen(vm: SearchViewModel, onOpen: (TitleRef) -> Unit) {
             ResultsJump.Wait -> Unit
             ResultsJump.Focus -> { firstCard.requestFocusSoon(); jumpToResults = false }
             ResultsJump.Drop -> jumpToResults = false
+        }
+    }
+    // A retry that ends without results: back on the retry button if it failed again, else on the field
+    // (the button that had focus is gone, and focus must not be left nowhere).
+    val retryOutcome = when {
+        state.loading -> null
+        state.error != null -> 1
+        state.items.isEmpty() -> 2
+        else -> 0
+    }
+    LaunchedEffect(refocusRetry, retryOutcome) {
+        if (!refocusRetry || retryOutcome == null) return@LaunchedEffect
+        refocusRetry = false
+        when (retryOutcome) {
+            1 -> retryRequester.requestFocusSoon()
+            2 -> fieldRequester.requestFocusSoon()
         }
     }
 
@@ -156,13 +168,6 @@ fun SearchScreen(vm: SearchViewModel, onOpen: (TitleRef) -> Unit) {
         }
     }
 
-    /** Leaves the text field in [dir] (or back to its shell if nothing is there) and closes the keyboard. */
-    fun leaveField(dir: FocusDirection) {
-        if (!focusManager.moveFocus(dir)) runCatching { fieldRequester.requestFocus() }
-        editing = false
-        keyboard?.hide()
-    }
-
     BoxWithConstraints(Modifier.fillMaxSize().background(DroozColors.Background)) {
         val gridTop = maxHeight * GridFraction
         val cellWidth = gridCellWidth(maxWidth)
@@ -175,99 +180,43 @@ fun SearchScreen(vm: SearchViewModel, onOpen: (TitleRef) -> Unit) {
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                // The shell: focusable, ring on focus; OK switches to the real text field (keyboard opens).
-                Row(
-                    Modifier
-                        .weight(1f)
-                        .height(FieldHeight)
-                        .focusRequester(fieldRequester)
-                        .onFocusChanged {
-                            if (it.hasFocus) {
-                                vm.onFieldFocused()
-                                restoreKey = null
-                            } else {
-                                editing = false
-                            }
+                // The shell takes focus without opening the keyboard; OK switches to editing (see TvTextField).
+                TvTextField(
+                    value = field,
+                    onValueChange = { v ->
+                        val changed = v.text != field.text
+                        field = v
+                        if (changed) {
+                            // Typing again cancels a pending jump: results must never pull focus mid-word.
+                            jumpToResults = false
+                            vm.onQueryChange(v.text)
                         }
-                        .droozFocus(FocusScale.FIELD)
-                        .background(DroozColors.Surface, DroozCardShape)
-                        .onPreviewKeyEvent { e ->
-                            if (editing || e.type != KeyEventType.KeyUp || !e.key.isOk()) return@onPreviewKeyEvent false
-                            editing = true
-                            true
+                    },
+                    editing = editing,
+                    onEditingChange = { editing = it },
+                    shellRequester = fieldRequester,
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Text,
+                        autoCorrectEnabled = false,
+                        imeAction = ImeAction.Search,
+                    ),
+                    onImeAction = {
+                        vm.submit()
+                        keyboard?.hide()
+                        jumpToResults = true
+                    },
+                    modifier = Modifier.weight(1f).height(FieldHeight),
+                    placeholder = stringResource(R.string.search_placeholder),
+                    onFocusChanged = { focused ->
+                        if (focused) {
+                            vm.onFieldFocused()
+                            restoreKey = null
                         }
-                        .focusable()
-                        .padding(horizontal = 18.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                    },
+                    // One Back after the keyboard closed exits search.
+                    onBack = { backDispatcher?.onBackPressed() },
                 ) {
                     Icon(RailItem.Search.icon, null, Modifier.size(26.dp), tint = DroozColors.TextSecondary)
-                    Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
-                        if (field.text.isEmpty()) {
-                            Text(
-                                stringResource(R.string.search_placeholder), Modifier.fillMaxWidth(),
-                                style = MaterialTheme.typography.titleMedium, color = DroozColors.TextSecondary,
-                                maxLines = 1,
-                            )
-                        }
-                        BasicTextField(
-                            value = field,
-                            onValueChange = { v ->
-                                val changed = v.text != field.text
-                                field = v
-                                if (changed) {
-                                    // Typing again cancels a pending jump: results must never pull focus mid-word.
-                                    jumpToResults = false
-                                    vm.onQueryChange(v.text)
-                                }
-                            },
-                            singleLine = true,
-                            textStyle = MaterialTheme.typography.titleMedium.copy(
-                                color = Color.White, fontSize = 22.sp,
-                                // Persian and English queries both hug the search icon on the right.
-                                textAlign = TextAlign.Right, textDirection = TextDirection.Content,
-                            ),
-                            cursorBrush = SolidColor(if (editing) DroozColors.Accent else Color.Transparent),
-                            keyboardOptions = KeyboardOptions(
-                                keyboardType = KeyboardType.Text,
-                                autoCorrectEnabled = false,
-                                imeAction = ImeAction.Search,
-                            ),
-                            keyboardActions = KeyboardActions(onSearch = {
-                                vm.submit()
-                                keyboard?.hide()
-                                jumpToResults = true
-                            }),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .focusRequester(inputRequester)
-                                // Only focusable while editing, so focus landing on the field never opens the IME.
-                                .focusProperties { canFocus = editing }
-                                .onPreviewKeyEvent { e ->
-                                    // Back reaches the field only once the keyboard is closed (the IME eats the
-                                    // first one). The text field would spend it on dropping its own focus, an
-                                    // invisible step; leave edit mode and pass Back on so one press exits search.
-                                    if (e.key == Key.Back) {
-                                        if (e.type == KeyEventType.KeyUp) {
-                                            runCatching { fieldRequester.requestFocus() }
-                                            editing = false
-                                            backDispatcher?.onBackPressed()
-                                        }
-                                        return@onPreviewKeyEvent true
-                                    }
-                                    if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                                    when {
-                                        // Text fields swallow Up/Down; on a remote they must leave the field.
-                                        e.key == Key.DirectionDown -> { leaveField(FocusDirection.Down); true }
-                                        e.key == Key.DirectionUp -> { leaveField(FocusDirection.Up); true }
-                                        // Keyboard dismissed with Back: OK brings it back. (Enter falls through:
-                                        // a hardware Enter runs the Search action.)
-                                        e.key == Key.DirectionCenter -> { keyboard?.show(); true }
-                                        else -> false
-                                    }
-                                },
-                        )
-                    }
                 }
                 if (voiceAvailable) {
                     Surface(
@@ -312,8 +261,13 @@ fun SearchScreen(vm: SearchViewModel, onOpen: (TitleRef) -> Unit) {
             }
             state.loading -> SkeletonGrid(cellWidth, content)
             state.error != null -> ErrorState(
-                stringResource(R.string.search_failed), stringResource(R.string.retry), vm::retry,
-                content.padding(bottom = 96.dp).focusGroup(),
+                stringResource(R.string.search_failed), stringResource(R.string.retry),
+                {
+                    refocusRetry = true
+                    jumpToResults = true
+                    vm.retry()
+                },
+                content.padding(bottom = 96.dp).focusRequester(retryRequester).focusGroup(),
             )
             state.isEmptyResult -> Message(
                 stringResource(R.string.search_empty),
@@ -336,8 +290,6 @@ private fun Message(title: String, tip: String?, modifier: Modifier) {
         tip?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = DroozColors.TextSecondary) }
     }
 }
-
-private fun Key.isOk() = this == Key.DirectionCenter || this == Key.Enter || this == Key.NumPadEnter
 
 /** Arabic-script letters (Persian queries usually find nothing on the site's search). */
 private fun String.hasPersian() = any { it in '؀'..'ۿ' }

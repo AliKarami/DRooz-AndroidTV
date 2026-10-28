@@ -49,11 +49,19 @@ class TitleViewModelTest {
         val watchlist = mutableListOf<Pair<Long, String>>()
         var failWatchlist = false
         var gate: CompletableDeferred<Unit>? = null
+        val streams = mutableListOf<Triple<String, String, Int>>()
+        var streamGate: CompletableDeferred<Unit>? = null
+        var streamFailure: Exception? = null
         override suspend fun home() = error("unused")
         override suspend fun list(path: String, page: Int) = error("unused")
         override suspend fun title(ref: TitleRef) = d
         override suspend fun search(query: String) = error("unused")
-        override suspend fun openStream(episode: Episode, ref: TitleRef, lang: String, height: Int) = error("unused")
+        override suspend fun openStream(episode: Episode, ref: TitleRef, lang: String, height: Int): StreamSession {
+            streams += Triple(episode.streamId, lang, height)
+            streamGate?.await()
+            streamFailure?.let { throw it }
+            return StreamSession("T", "https://x/master.m3u8", "/bd.jpg", emptyList(), emptyMap(), emptyList(), null, null, emptyList(), episode.streamId)
+        }
         override suspend fun setWatchlist(postId: Long, state: String) {
             gate?.await()
             if (failWatchlist) error("boom")
@@ -136,22 +144,72 @@ class TitleViewModelTest {
 
     @Test fun dubSelectionPlaysDubStream() = runTest(dispatcher) {
         val dub = listOf(Season(1, listOf(ep(1, 1, id = "dub1"))))
-        val (v, _) = load(series(0, dub = dub))
+        val (v, api) = load(series(0, dub = dub))
         assertTrue(v.uiState.value.dubAvailable)
-        val got = mutableListOf<PlayRequest>()
-        val job = launch(got, v)
-        v.play(); runCurrent()
-        assertEquals("original", got.last().lang)
+        val got = collect(v)
+        v.play(); settle()
+        assertEquals(Triple("s1e1", "original", 1080), api.streams.last())
         v.toggleDub()
         assertTrue(v.uiState.value.dubSelected)
-        v.play(); runCurrent()
-        assertEquals("dubbed-fa", got.last().lang)
-        assertEquals("dub1", got.last().episode.streamId)
-        job.cancel()
+        v.play(); settle()
+        assertEquals(Triple("dub1", "dubbed-fa", 1080), api.streams.last())
+        assertEquals(2, got.count { it is PlayEvent.Start })
     }
 
-    private fun TestScope.launch(into: MutableList<PlayRequest>, v: TitleViewModel) =
-        backgroundScope.launch(dispatcher) { v.playRequests.collect { into += it } }.also { runCurrent() }
+    @Test fun playShowsBusyAndIgnoresRepeats() = runTest(dispatcher) {
+        val (v, api) = load(series(2))
+        val got = collect(v)
+        api.streamGate = CompletableDeferred()
+        v.play(); runCurrent()
+        assertEquals(PlayBusy("s1e3", primary = true), v.uiState.value.playBusy)
+        v.play(); v.play(v.uiState.value.episodes[0].episode); runCurrent()
+        assertEquals(1, api.streams.size)
+        api.streamGate!!.complete(Unit); settle()
+        assertNull(v.uiState.value.playBusy)
+        assertEquals(1, got.size)
+        assertTrue(got.single() is PlayEvent.Start)
+    }
+
+    @Test fun cancelledPlayNeverStarts() = runTest(dispatcher) {
+        val (v, api) = load(series(0))
+        val got = collect(v)
+        api.streamGate = CompletableDeferred()
+        v.play(v.uiState.value.episodes[1].episode); runCurrent()
+        assertEquals(PlayBusy("s1e2", primary = false), v.uiState.value.playBusy)
+        v.cancelPlay()
+        assertNull(v.uiState.value.playBusy)
+        api.streamGate!!.complete(Unit); settle()
+        assertTrue(got.isEmpty())
+        // A new press works again.
+        v.play(); settle()
+        assertEquals(1, got.size)
+    }
+
+    @Test fun playFailureMessages() = runTest(dispatcher) {
+        val (v, api) = load(series(0))
+        val got = collect(v)
+        api.streamFailure = com.alikarami.drooz.site.SiteException.NetworkError(RuntimeException("x"))
+        v.play(); settle()
+        assertEquals(PlayEvent.Failed("اتصال به سایت برقرار نشد؛ دوباره تلاش کنید"), got.last())
+        api.streamFailure = com.alikarami.drooz.site.SiteException.ParseError("stream")
+        v.play(); settle()
+        assertEquals(PlayEvent.Failed("پخش شروع نشد"), got.last())
+        // A lost session is routed to Login by the app; no toast.
+        api.streamFailure = com.alikarami.drooz.site.SiteException.NotLoggedIn()
+        v.play(); settle()
+        assertEquals(2, got.size)
+        assertNull(v.uiState.value.playBusy)
+    }
+
+    /** advanceUntilIdle does not run backgroundScope collectors; runCurrent does. */
+    private fun TestScope.settle() { advanceUntilIdle(); runCurrent() }
+
+    private fun TestScope.collect(v: TitleViewModel): MutableList<PlayEvent> {
+        val into = mutableListOf<PlayEvent>()
+        backgroundScope.launch(dispatcher) { v.playEvents.collect { into += it } }
+        runCurrent()
+        return into
+    }
 
     @Test fun watchlistToggleCallsSiteOnce() = runTest(dispatcher) {
         val (v, api) = load(series(0))

@@ -71,6 +71,12 @@ class HomeViewModelTest {
         return HomeViewModel(api, repo)
     }
 
+    @Test fun exposesFeaturedBackdropForTitlePage() = runTest(dispatcher) {
+        val vm = vm(FakeApi(home())); advanceUntilIdle()
+        assertEquals("bd10", vm.featuredBackdrop(ref(10)))
+        assertEquals(null, vm.featuredBackdrop(ref(11)))
+    }
+
     @Test fun firstRowIsRecentlyStreamedLandscape() = runTest(dispatcher) {
         val vm = vm(FakeApi(home())); advanceUntilIdle()
         val row = vm.uiState.value.rows[0]

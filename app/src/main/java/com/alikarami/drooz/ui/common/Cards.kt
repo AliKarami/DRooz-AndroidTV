@@ -1,6 +1,11 @@
 package com.alikarami.drooz.ui.common
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -103,7 +108,10 @@ fun LandscapeCard(
     }
 }
 
-/** Episode number tile: Persian digits, a green check when watched, optional progress bar. */
+/**
+ * Episode number tile (mockup A `.tile`): large Persian number, minutes underneath, a green check when
+ * watched, optional progress bar. Focus turns it white with black text, on top of the usual scale + ring.
+ */
 @Composable
 fun EpisodeTile(
     number: Int,
@@ -113,27 +121,42 @@ fun EpisodeTile(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
     Surface(
         onClick = onClick,
         modifier = modifier.droozFocus(FocusScale.TILE).size(width = 96.dp, height = 72.dp),
         shape = ClickableSurfaceDefaults.shape(DroozCardShape),
         scale = droozSurfaceScale,
-        colors = droozSurfaceColors(),
+        colors = ClickableSurfaceDefaults.colors(
+            containerColor = DroozColors.Surface,
+            contentColor = Color.White,
+            focusedContainerColor = Color.White,
+            focusedContentColor = Color.Black,
+            pressedContainerColor = Color.White,
+            pressedContentColor = Color.Black,
+        ),
+        interactionSource = interaction,
     ) {
-        Box(Modifier.fillMaxWidth().fillMaxHeight().padding(8.dp)) {
+        Box(Modifier.fillMaxWidth().fillMaxHeight().padding(6.dp)) {
             Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(number.toString().toPersianDigits(), style = MaterialTheme.typography.titleMedium, color = Color.White)
+                Text(
+                    number.toString().toPersianDigits(),
+                    style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.ExtraBold, lineHeight = 30.sp),
+                    maxLines = 1,
+                )
                 if (minutes != null) {
                     Text(
                         stringResource(R.string.minutes_short, minutes.toString().toPersianDigits()),
                         style = MaterialTheme.typography.labelSmall,
-                        color = DroozColors.TextSecondary,
+                        color = if (focused) Color(0xFF333333) else DroozColors.TextSecondary,
+                        maxLines = 1, softWrap = false,
                     )
                 }
             }
             if (watched) {
-                Text("✓", Modifier.align(Alignment.TopStart), color = DroozColors.Watched,
-                    style = MaterialTheme.typography.labelMedium)
+                Text("✓", Modifier.align(Alignment.TopEnd), color = DroozColors.Watched,
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.ExtraBold))
             }
             if (progress != null && !watched) ProgressBar(progress, Modifier.align(Alignment.BottomStart))
         }

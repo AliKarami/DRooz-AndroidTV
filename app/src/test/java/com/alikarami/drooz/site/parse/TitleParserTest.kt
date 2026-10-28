@@ -40,6 +40,8 @@ class TitleParserTest {
         assertEquals("قسمت ۰۹ فصل اول", d.card.episodeLabel)
         assertEquals("پایان فصل", d.card.status)
         assertEquals(listOf(20835L, 4444536L, 5688281L, 5733846L), d.suggestions.take(4).map { it.postId })
+        assertEquals("933a5416ee8344d0532c9e34ecf5b267.jpg.webp", d.suggestionPosters[d.suggestions.first()])
+        assertEquals(d.suggestions.toSet(), d.suggestionPosters.keys)
         assertTrue(d.awards.any { it.contains("برنده بهترین بازیگر نقش اول زن") })
         assertTrue(d.card.synopsis!!.startsWith("داستان بدبخت‌ترین فرد"))
         assertEquals("eac12b446fe94c8ef5485a2291db460a.jpg.webp", d.card.posterHash)

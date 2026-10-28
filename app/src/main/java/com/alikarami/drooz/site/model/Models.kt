@@ -81,6 +81,8 @@ data class TitleDetail(
     val catalog: StreamCatalog,
     val suggestions: List<TitleRef>,
     val trailerThumbHash: String?,
+    /** Poster image hash per suggestion, when the page carries one. */
+    val suggestionPosters: Map<TitleRef, String> = emptyMap(),
 )
 
 /** Labels as on the site: Farsi, English, English + Farsi, Farsi for Dub. */

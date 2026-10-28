@@ -74,6 +74,9 @@ class HomeViewModel(
     private val focus = HashMap<String, Int>()
     private val started = HashSet<String>()
     private var featured: Map<TitleRef, String> = emptyMap()
+
+    /** Home's featured backdrop hash for [ref] (only home knows it), so the title page can reuse it. */
+    fun featuredBackdrop(ref: TitleRef): String? = featured[ref]
     private var dwellJob: Job? = null
     private var refreshJob: Job? = null
     private val listJobs = HashMap<String, Job>()

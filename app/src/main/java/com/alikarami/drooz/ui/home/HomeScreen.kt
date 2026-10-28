@@ -60,7 +60,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
@@ -96,6 +95,7 @@ import com.alikarami.drooz.data.HomeRows
 import com.alikarami.drooz.data.RowSource
 import com.alikarami.drooz.site.model.TitleRef
 import com.alikarami.drooz.ui.common.ErrorState
+import com.alikarami.drooz.ui.common.requestFocusSoon
 import com.alikarami.drooz.ui.common.LandscapeCard
 import com.alikarami.drooz.ui.common.PosterCard
 import com.alikarami.drooz.ui.theme.DroozCardShape
@@ -294,15 +294,6 @@ private fun Modifier.bringIntoViewOnFocus(onFocused: () -> Unit = {}): Modifier 
             scope.launch { requester.bringIntoView() }
         }
     }
-}
-
-/** Retries for a few frames: a node that just appeared may attach a frame late. */
-private suspend fun FocusRequester.requestFocusSoon(): Boolean {
-    repeat(30) {
-        withFrameNanos { }
-        if (runCatching { requestFocus(FocusDirection.Enter) }.getOrDefault(false)) return true
-    }
-    return false
 }
 
 @Composable

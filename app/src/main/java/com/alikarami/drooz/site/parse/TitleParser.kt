@@ -38,14 +38,20 @@ object TitleParser {
             val title = heading.text().trim().trimEnd(':', ' ')
             box.select("div.col-12.px-0").map { "$title: ${it.text().trim()}" }
         }
-        val suggestions = doc.select("h2").firstOrNull { it.text().contains(SUGGESTIONS) }
+        val suggestionLinks = doc.select("h2").firstOrNull { it.text().contains(SUGGESTIONS) }
             ?.parent()?.parent()
             ?.select("a[href*=/post/]")
-            ?.mapNotNull { TitleRef.fromPath(it.attr("href")) }
-            ?.distinct()
             .orEmpty()
+            .mapNotNull { a ->
+                val ref = TitleRef.fromPath(a.attr("href")) ?: return@mapNotNull null
+                val img = a.selectFirst("img")
+                val poster = (img?.attr("data-src")?.ifBlank { null } ?: img?.attr("src"))?.let(ImageUrls::hashOf)
+                ref to poster
+            }
+        val suggestions = suggestionLinks.map { it.first }.distinct()
+        val posters = suggestionLinks.mapNotNull { (ref, hash) -> hash?.let { ref to it } }.toMap()
         val trailer = TRAILER.find(html)?.value?.let(ImageUrls::hashOf)
-        return TitleDetail(card, channel, awards, catalog, suggestions, trailer)
+        return TitleDetail(card, channel, awards, catalog, suggestions, trailer, posters)
     }
 
     /** `STREAM` is `{"main": seasons, "dub"?: seasons, "subtitle": bool}`; films use arrays, series objects keyed by number. */

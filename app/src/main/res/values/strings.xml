@@ -12,4 +12,17 @@
     <string name="rail_films">فیلم‌ها</string>
     <string name="rail_my_list">لیست من</string>
     <string name="rail_settings">تنظیمات</string>
+    <string name="title_my_list">لیست من</string>
+    <string name="title_original">زبان اصلی</string>
+    <string name="title_dubbed">دوبله</string>
+    <string name="title_suggestions">آثار پیشنهادی</string>
+    <string name="title_season">فصل %1$s</string>
+    <string name="title_season_count">%1$s فصل</string>
+    <string name="title_persian_subtitle">زیرنویس فارسی</string>
+    <string name="title_subtitle">زیرنویس</string>
+    <string name="title_creator">خالق: %1$s</string>
+    <string name="title_director">کارگردان: %1$s</string>
+    <string name="title_failed">بارگذاری نشد</string>
+    <string name="title_watchlist_failed">لیست من به‌روز نشد</string>
+    <string name="title_play_failed">پخش شروع نشد</string>
 </resources>

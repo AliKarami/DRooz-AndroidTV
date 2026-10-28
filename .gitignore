@@ -1,0 +1,18 @@
+# Gradle / Android
+.gradle/
+build/
+local.properties
+*.apk
+*.aab
+captures/
+.externalNativeBuild/
+.cxx/
+# IDE
+.idea/
+*.iml
+.kotlin/
+# Local tooling
+.superpowers/
+.claude/settings.local.json
+# Secrets / site captures with personal tokens
+secrets.properties

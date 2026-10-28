@@ -99,8 +99,12 @@ class SearchViewModel(
             _state.update { it.copy(loading = false) }
             return
         }
+        // An immediate search is in flight from now on (a stale error must not read as this one's answer).
+        if (delayMs == 0L) _state.update { it.copy(loading = true, error = null) }
         job = viewModelScope.safeLaunch(onError = { e ->
-            _state.update { it.copy(loading = false, error = e.message ?: "error") }
+            // Drop the previous answer too: it must not pose as results for the query that failed.
+            show(emptyList(), searchedFor = null)
+            _state.update { it.copy(error = e.message ?: "error") }
         }) {
             delay(delayMs)
             _state.update { it.copy(loading = true, error = null) }
@@ -125,8 +129,20 @@ class SearchViewModel(
             )
         }
     }
+}
 
-    private companion object {
-        const val MIN_QUERY = 2
+/** Queries shorter than this are not searched. */
+internal const val MIN_QUERY = 2
+
+/** What a pending "focus the results" request (IME Search key, voice) should do for this state. */
+enum class ResultsJump { Wait, Focus, Drop }
+
+fun SearchUiState.resultsJump(): ResultsJump {
+    val q = query.trim()
+    return when {
+        q.length < MIN_QUERY || error != null -> ResultsJump.Drop
+        loading || searchedFor != q -> ResultsJump.Wait
+        items.isEmpty() -> ResultsJump.Drop
+        else -> ResultsJump.Focus
     }
 }

@@ -142,4 +142,62 @@ class SearchViewModelTest {
         assertNull(vm.uiState.value.hero)
         assertEquals("Title 11", vm.uiState.value.items.first().title)
     }
+
+    @Test fun failedSearchClearsPreviousResults() = runTest(dispatcher) {
+        val api = FakeApi { q -> if (q == "severance") error("offline") else listOf(card(1)) }
+        val vm = vm(api)
+        vm.onQueryChange("pluribus"); advanceUntilIdle()
+        vm.onFocusIndex(0); runCurrent()
+        assertNotNull(vm.uiState.value.hero)
+        vm.onQueryChange("severance"); advanceUntilIdle()
+        val s = vm.uiState.value
+        // The old answer must not pose as results for the new query: the screen shows the error + retry.
+        assertTrue(s.items.isEmpty())
+        assertNull(s.searchedFor)
+        assertNull(s.hero)
+        assertEquals("offline", s.error)
+        assertFalse(s.loading)
+        assertEquals(0, vm.focusedIndex)
+    }
+
+    @Test fun resultsJumpWaitsThenFocusesOnlyForTheCurrentAnswer() = runTest(dispatcher) {
+        val gate = CompletableDeferred<List<TitleCard>>()
+        val api = FakeApi { gate.await() }
+        val vm = vm(api)
+        vm.onQueryChange("pluribus"); runCurrent()
+        vm.submit()
+        // Submitted but not landed yet: wait (not drop) even before the coroutine has run.
+        assertEquals(ResultsJump.Wait, vm.uiState.value.resultsJump())
+        runCurrent()
+        assertEquals(ResultsJump.Wait, vm.uiState.value.resultsJump())
+        gate.complete(listOf(card(1))); advanceUntilIdle()
+        assertEquals(ResultsJump.Focus, vm.uiState.value.resultsJump())
+    }
+
+    @Test fun resultsJumpDropsForShortEmptyOrFailedAnswers() = runTest(dispatcher) {
+        var mode = "empty"
+        val api = FakeApi { if (mode == "fail") error("offline") else emptyList() }
+        val vm = vm(api)
+        vm.onVoiceResult("p"); runCurrent()
+        assertEquals(ResultsJump.Drop, vm.uiState.value.resultsJump())
+        vm.onVoiceResult("qxjvwkz"); advanceUntilIdle()
+        assertEquals(ResultsJump.Drop, vm.uiState.value.resultsJump())
+        mode = "fail"
+        vm.onVoiceResult("severance"); advanceUntilIdle()
+        assertEquals(ResultsJump.Drop, vm.uiState.value.resultsJump())
+    }
+
+    @Test fun submitAfterAnErrorWaitsForTheNewAnswer() = runTest(dispatcher) {
+        var fail = true
+        val api = FakeApi { if (fail) error("offline") else listOf(card(1)) }
+        val vm = vm(api)
+        vm.onQueryChange("pluribus"); advanceUntilIdle()
+        assertEquals("offline", vm.uiState.value.error)
+        fail = false
+        vm.submit()
+        // The stale error must not make the screen drop the jump before the new search runs.
+        assertEquals(ResultsJump.Wait, vm.uiState.value.resultsJump())
+        advanceUntilIdle()
+        assertEquals(ResultsJump.Focus, vm.uiState.value.resultsJump())
+    }
 }

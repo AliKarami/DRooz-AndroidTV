@@ -134,10 +134,15 @@ fun SearchScreen(vm: SearchViewModel, onOpen: (TitleRef) -> Unit) {
             keyboard?.show()
         }
     }
-    LaunchedEffect(jumpToResults, state.loading, state.searchedFor) {
-        if (!jumpToResults || state.loading || state.searchedFor != state.query.trim()) return@LaunchedEffect
-        if (state.items.isNotEmpty()) firstCard.requestFocusSoon()
-        jumpToResults = false
+    // Keyed on the decision, not the whole state: hero updates while focus moves must not restart it.
+    val jump = state.resultsJump()
+    LaunchedEffect(jumpToResults, jump) {
+        if (!jumpToResults) return@LaunchedEffect
+        when (jump) {
+            ResultsJump.Wait -> Unit
+            ResultsJump.Focus -> { firstCard.requestFocusSoon(); jumpToResults = false }
+            ResultsJump.Drop -> jumpToResults = false
+        }
     }
 
     val voiceIntent = remember { voiceIntent(context.getString(R.string.search_voice_prompt)) }
@@ -210,7 +215,11 @@ fun SearchScreen(vm: SearchViewModel, onOpen: (TitleRef) -> Unit) {
                             onValueChange = { v ->
                                 val changed = v.text != field.text
                                 field = v
-                                if (changed) vm.onQueryChange(v.text)
+                                if (changed) {
+                                    // Typing again cancels a pending jump: results must never pull focus mid-word.
+                                    jumpToResults = false
+                                    vm.onQueryChange(v.text)
+                                }
                             },
                             singleLine = true,
                             textStyle = MaterialTheme.typography.titleMedium.copy(

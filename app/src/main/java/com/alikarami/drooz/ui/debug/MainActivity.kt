@@ -105,14 +105,18 @@ class MainActivity : ComponentActivity() {
                     val top = titles.entries.lastOrNull()
                     val openTitle: (TitleRef) -> Unit = { titles.push(it, homeVm.featuredBackdrop(it)) }
                     if (top == null) {
-                        HomeScreen(homeVm, onOpen = openTitle, onExit = ::finish, onRailSelect = { item ->
-                            when (item) {
-                                RailItem.Series -> titles.pushList(getString(R.string.list_updated_series), "/archive/series/")
-                                RailItem.Films ->
-                                    titles.pushList(getString(R.string.list_new_films), "/archive/category/new-films/")
-                                else -> Unit
-                            }
-                        })
+                        // Kept in the holder so Back from a pushed page restores home's focused row and scroll.
+                        holder.SaveableStateProvider("home") {
+                            HomeScreen(homeVm, onOpen = openTitle, onExit = ::finish, onRailSelect = { item ->
+                                when (item) {
+                                    RailItem.Series ->
+                                        titles.pushList(getString(R.string.list_updated_series), "/archive/series/")
+                                    RailItem.Films ->
+                                        titles.pushList(getString(R.string.list_new_films), "/archive/category/new-films/")
+                                    else -> Unit
+                                }
+                            })
+                        }
                     } else {
                         holder.SaveableStateProvider("entry:${top.id}") {
                             BackHandler { titles.pop()?.let { holder.removeState("entry:${it.id}") } }

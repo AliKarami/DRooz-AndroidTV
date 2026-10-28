@@ -63,7 +63,12 @@ fun PosterCard(
         ) {
             DroozImage(posterUrl, ImageSizes.POSTER_W, ImageSizes.POSTER_H, Modifier.fillMaxWidth().fillMaxHeight())
         }
-        TitleText(title, MaterialTheme.typography.bodySmall, Modifier.zIndex(AboveFocusedCard), color = Color.White, maxLines = 2)
+        // Full width + absolute right alignment: Latin titles lay out LTR, so without this a wrapped Latin
+        // caption sat on the left while one-line captions sat on the right.
+        TitleText(
+            title, MaterialTheme.typography.bodySmall.copy(textAlign = TextAlign.Right),
+            Modifier.fillMaxWidth().zIndex(AboveFocusedCard), color = Color.White, maxLines = 2,
+        )
     }
 }
 

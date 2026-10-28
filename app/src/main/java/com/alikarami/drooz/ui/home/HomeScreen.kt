@@ -86,7 +86,7 @@ import androidx.tv.material3.DrawerValue
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.ModalNavigationDrawer
 import androidx.tv.material3.Text
-import androidx.tv.material3.rememberDrawerState
+import androidx.tv.material3.DrawerState
 import com.alikarami.drooz.AppGraph
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -138,7 +138,9 @@ fun HomeScreen(
     val state by vm.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
-    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    // Not saveable: home's state is kept across pushed pages, but it must come back with the rail closed
+    // (a rail pick leaves the drawer open at the moment home is saved).
+    val drawerState = remember { DrawerState(DrawerValue.Closed) }
     var focusedRowKey by rememberSaveable { mutableStateOf<String?>(null) }
     var lastBack by remember { mutableLongStateOf(0L) }
 

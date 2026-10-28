@@ -151,6 +151,17 @@ class ListViewModelTest {
         assertEquals(ref(300), vm.uiState.value.items.last().ref)
     }
 
+    @Test fun sameTitleWithDifferentSlugIsDeduped() = runTest(dispatcher) {
+        // The grid keys cards by kind + postId; a renamed/re-encoded slug must not slip through as a duplicate.
+        val renamed = card(119).copy(ref = TitleRef(TitleKind.FILM, 119, "renamed-slug"))
+        val api = FakeApi { _, p -> if (p == 1) page(1, 5) else ListPage(listOf(renamed, card(300)), 2, 5) }
+        val vm = vm(api); advanceUntilIdle()
+        vm.onFocusIndex(19); advanceUntilIdle()
+        val keys = vm.uiState.value.items.map { it.ref.kind to it.ref.postId }
+        assertEquals(keys.size, keys.toSet().size)
+        assertEquals(21, keys.size)
+    }
+
     @Test fun heroFollowsFocusAndIndexIsRemembered() = runTest(dispatcher) {
         val api = FakeApi { _, p -> page(p, 5) }
         val vm = vm(api); advanceUntilIdle()

@@ -5,7 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.alikarami.drooz.data.SiteApi
 import com.alikarami.drooz.data.TitleInfoRepository
 import com.alikarami.drooz.site.model.TitleCard
-import com.alikarami.drooz.site.model.TitleRef
+import com.alikarami.drooz.site.model.TitleKind
 import com.alikarami.drooz.ui.common.safeLaunch
 import com.alikarami.drooz.ui.home.CardUi
 import com.alikarami.drooz.ui.home.HeroController
@@ -45,7 +45,8 @@ class ListViewModel(
     val uiState: StateFlow<ListUiState> = _state
 
     private val cards = ArrayList<TitleCard>()
-    private val seen = HashSet<TitleRef>()
+    /** Identity used to drop repeats: kind + postId, the same as the grid key (slugs can differ for one post). */
+    private val seen = HashSet<Pair<TitleKind, Long>>()
     private var loadedPage = 0
     private var lastPage = 1
     private var job: Job? = null
@@ -89,7 +90,7 @@ class ListViewModel(
                 val page = api.list(path, next)
                 loadedPage = next
                 lastPage = maxOf(page.lastPage, next)
-                val added = page.items.filter { seen.add(it.ref) }
+                val added = page.items.filter { seen.add(it.ref.kind to it.ref.postId) }
                 cards += added
                 val more = loadedPage < lastPage && (added.isEmpty() || focusedIndex >= cards.size - prefetch)
                 _state.update {

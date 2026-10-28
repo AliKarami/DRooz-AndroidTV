@@ -57,6 +57,27 @@ class AuthServiceTest {
         assertTrue(post.headers["Cookie"]!!.contains("sf=dev1"))
     }
 
+    @Test fun loginWhileAlreadyLoggedInLogsOutFirstKeepingDevice() = runTest {
+        // An existing session makes /user/login/ redirect to the user panel.
+        server.enqueue(MockResponse.Builder().code(302).addHeader("Location", "/user/panel/")
+            .addHeader("Set-Cookie", "sf=dev1; Max-Age=31536000; path=/")
+            .addHeader("Set-Cookie", "cf=old; Max-Age=31536000; path=/").build())
+        server.enqueue(MockResponse.Builder().body("<html>panel</html>").build())
+        server.enqueue(MockResponse.Builder().body("bye").build())             // /user/logout/
+        server.enqueue(page("login_form.html"))                                 // form again
+        server.enqueue(page("login_success.html", "cf=new"))
+        server.enqueue(MockResponse.Builder().body("ok").build())              // device report
+
+        assertEquals(LoginResult.Success, auth.login("testuser", "secret", null))
+
+        val targets = List(server.requestCount) { server.takeRequest().let { "${it.method} ${it.url.encodedPath}" } }
+        assertEquals(listOf("GET /user/login/", "GET /user/panel/", "GET /user/logout/", "GET /user/login/",
+            "POST /user/login/", "GET /json/device/"), targets)
+        assertEquals("dev1", jar.cookie("sf"))
+        assertEquals("new", jar.cookie("cf"))
+        assertEquals(Credentials("testuser", "secret", null), creds.load())
+    }
+
     @Test fun twoStepLoginPostsMobileAndRecaptchaPass() = runTest {
         form()
         server.enqueue(page("login_needs_mobile.html", "sf=dev1"))

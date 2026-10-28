@@ -29,7 +29,14 @@ class AuthService(
     suspend fun login(username: String, password: String, mobile: String?): LoginResult {
         // Like a browser, load the form first: the site pairs its `sf` session cookie with the
         // `recaptchaPass` token, and posting without one makes the mobile step fail (HTTP 502).
-        http.get(SiteConfig.LOGIN_PATH, requiresAuth = false)
+        val form = http.get(SiteConfig.LOGIN_PATH, requiresAuth = false)
+        if (!form.finalPath.startsWith(SiteConfig.LOGIN_PATH)) {
+            // Already logged in (the site redirects the form to the user panel): end that session
+            // server-side, keep the `sf` device cookie, and log in as requested.
+            http.get(LOGOUT_PATH, requiresAuth = false, retry = false)
+            jar.clear(keep = setOf(DEVICE_COOKIE))
+            http.get(SiteConfig.LOGIN_PATH, requiresAuth = false)
+        }
         val base = listOf("username" to username, "password" to password)
         val result = when (val first = post(base)) {
             is LoginPage.NeedsMobile -> {
@@ -55,7 +62,7 @@ class AuthService(
     }
 
     suspend fun logout() {
-        runCatching { http.get("/user/logout/", requiresAuth = false) }
+        runCatching { http.get(LOGOUT_PATH, requiresAuth = false, retry = false) }
         jar.clear(keep = setOf(DEVICE_COOKIE))
         creds.clear()
     }
@@ -82,5 +89,6 @@ class AuthService(
     private companion object {
         const val SESSION_COOKIE = "cf"
         const val DEVICE_COOKIE = "sf"
+        const val LOGOUT_PATH = "/user/logout/"
     }
 }

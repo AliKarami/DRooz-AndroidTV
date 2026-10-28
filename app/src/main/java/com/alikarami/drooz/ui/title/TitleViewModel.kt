@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.alikarami.drooz.data.SiteApi
 import com.alikarami.drooz.data.TitleInfoRepository
+import com.alikarami.drooz.data.TitlePrefs
 import com.alikarami.drooz.site.model.Episode
 import com.alikarami.drooz.site.model.Season
 import com.alikarami.drooz.site.model.TitleDetail
@@ -41,12 +42,14 @@ class TitleViewModel(
     private val ref: TitleRef,
     private val api: SiteApi,
     private val titleInfo: TitleInfoRepository,
+    private val prefs: TitlePrefs,
 ) : ViewModel() {
     private var detail: TitleDetail? = null
     private var seasonOverride: Int? = null
     private var dub = false
     private var inWatchlist: Boolean? = null
     private var error: String? = null
+    private var watchlistInFlight = false
 
     private val _state = MutableStateFlow(build())
     val uiState: StateFlow<TitleUiState> = _state
@@ -60,7 +63,11 @@ class TitleViewModel(
         error = null
         publish()
         viewModelScope.safeLaunch(onError = { error = it.message ?: "error"; publish() }) {
-            detail = titleInfo.get(ref)
+            val d = titleInfo.get(ref)
+            // A failing prefs read must not hide the title.
+            val saved = runCatching { prefs.dubSelected(ref.postId) }.getOrNull()
+            dub = saved == true && d.catalog.dub.isNotEmpty()
+            detail = d
             publish()
         }
     }
@@ -71,15 +78,26 @@ class TitleViewModel(
         if (detail?.catalog?.dub.isNullOrEmpty()) return
         dub = !dub
         publish()
+        val chosen = dub
+        viewModelScope.safeLaunch(onError = { /* choice just won't persist */ }) {
+            prefs.setDubSelected(ref.postId, chosen)
+        }
     }
 
     fun toggleWatchlist() {
+        // The site toggles server-side: overlapping requests could invert the real state.
+        if (watchlistInFlight) return
+        watchlistInFlight = true
         val previous = inWatchlist
         inWatchlist = previous?.not() ?: true
         error = null
         publish()
-        viewModelScope.safeLaunch(onError = { inWatchlist = previous; error = it.message ?: "error"; publish() }) {
+        viewModelScope.safeLaunch(onError = {
+            watchlistInFlight = false
+            inWatchlist = previous; error = it.message ?: "error"; publish()
+        }) {
             api.setWatchlist(ref.postId, "watch")
+            watchlistInFlight = false
         }
     }
 

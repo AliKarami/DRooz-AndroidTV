@@ -2,6 +2,8 @@ package com.alikarami.drooz.ui.title
 
 import com.alikarami.drooz.data.SiteApi
 import com.alikarami.drooz.data.TitleInfoRepository
+import com.alikarami.drooz.data.TitlePrefs
+import kotlinx.coroutines.CompletableDeferred
 import com.alikarami.drooz.site.model.*
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -46,20 +48,29 @@ class TitleViewModelTest {
     private class FakeApi(val d: TitleDetail) : SiteApi {
         val watchlist = mutableListOf<Pair<Long, String>>()
         var failWatchlist = false
+        var gate: CompletableDeferred<Unit>? = null
         override suspend fun home() = error("unused")
         override suspend fun list(path: String, page: Int) = error("unused")
         override suspend fun title(ref: TitleRef) = d
         override suspend fun search(query: String) = error("unused")
         override suspend fun openStream(episode: Episode, ref: TitleRef, lang: String, height: Int) = error("unused")
         override suspend fun setWatchlist(postId: Long, state: String) {
+            gate?.await()
             if (failWatchlist) error("boom")
             watchlist += postId to state
         }
     }
 
+    private class FakePrefs(val map: MutableMap<Long, Boolean> = mutableMapOf()) : TitlePrefs {
+        override suspend fun dubSelected(postId: Long) = map[postId]
+        override suspend fun setDubSelected(postId: Long, selected: Boolean) { map[postId] = selected }
+    }
+    private var prefs = FakePrefs()
+    @Before fun resetPrefs() { prefs = FakePrefs() }
+
     private fun TestScope.vm(api: FakeApi): TitleViewModel {
         val repo = TitleInfoRepository(api, fetchScope = CoroutineScope(dispatcher + SupervisorJob()))
-        return TitleViewModel(api.d.card.ref, api, repo)
+        return TitleViewModel(api.d.card.ref, api, repo, prefs)
     }
 
     private suspend fun TestScope.load(d: TitleDetail): Pair<TitleViewModel, FakeApi> {
@@ -150,6 +161,39 @@ class TitleViewModelTest {
         assertEquals(true, v.uiState.value.inWatchlist)
         v.toggleWatchlist(); advanceUntilIdle()
         assertEquals(false, v.uiState.value.inWatchlist)
+        assertEquals(2, api.watchlist.size)
+    }
+
+    @Test fun dubChoiceRestoredOnLoad() = runTest(dispatcher) {
+        prefs = FakePrefs(mutableMapOf(7L to true))
+        val dub = listOf(Season(1, listOf(ep(1, 1, id = "dub1"))))
+        val (v, _) = load(series(0, dub = dub))
+        assertTrue(v.uiState.value.dubSelected)
+        assertEquals("dub1", v.uiState.value.primaryEpisode?.streamId)
+        // Stored choice is ignored when the title has no dub.
+        prefs = FakePrefs(mutableMapOf(7L to true))
+        val (v2, _) = load(series(0))
+        assertFalse(v2.uiState.value.dubSelected)
+    }
+
+    @Test fun toggleDubPersists() = runTest(dispatcher) {
+        prefs = FakePrefs()
+        val (v, _) = load(series(0, dub = listOf(Season(1, listOf(ep(1, 1))))))
+        v.toggleDub(); advanceUntilIdle()
+        assertEquals(true, prefs.map[7L])
+        v.toggleDub(); advanceUntilIdle()
+        assertEquals(false, prefs.map[7L])
+    }
+
+    @Test fun secondPressWhileInFlightIsIgnored() = runTest(dispatcher) {
+        val (v, api) = load(series(0))
+        api.gate = CompletableDeferred()
+        v.toggleWatchlist(); runCurrent()
+        v.toggleWatchlist(); runCurrent()
+        api.gate!!.complete(Unit); advanceUntilIdle()
+        assertEquals(1, api.watchlist.size)
+        assertEquals(true, v.uiState.value.inWatchlist)
+        v.toggleWatchlist(); advanceUntilIdle()
         assertEquals(2, api.watchlist.size)
     }
 

@@ -6,7 +6,9 @@ import com.alikarami.drooz.data.AuthApi
 import com.alikarami.drooz.data.AuthApiAdapter
 import com.alikarami.drooz.data.SiteApi
 import com.alikarami.drooz.data.SiteApiAdapter
+import com.alikarami.drooz.data.DataStoreTitlePrefs
 import com.alikarami.drooz.data.TitleInfoRepository
+import com.alikarami.drooz.data.TitlePrefs
 import com.alikarami.drooz.site.SiteConfig
 import com.alikarami.drooz.ui.common.buildImageLoader
 import com.alikarami.drooz.site.SiteRepository
@@ -44,6 +46,7 @@ class AppGraph(context: Context) {
     val siteApi: SiteApi = SiteApiAdapter(repository)
     val authApi: AuthApi = AuthApiAdapter(auth)
     val titleInfo = TitleInfoRepository(siteApi)
+    val titlePrefs: TitlePrefs = DataStoreTitlePrefs(appContext)
 
     /** For Media3: carries the site cookies (subtitles need them) and the browser UA. */
     val mediaClient: OkHttpClient = baseClient.newBuilder()

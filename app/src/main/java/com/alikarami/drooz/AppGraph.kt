@@ -1,7 +1,9 @@
 package com.alikarami.drooz
 
 import android.content.Context
+import coil3.ImageLoader
 import com.alikarami.drooz.site.SiteConfig
+import com.alikarami.drooz.ui.common.buildImageLoader
 import com.alikarami.drooz.site.SiteRepository
 import com.alikarami.drooz.site.auth.AuthService
 import com.alikarami.drooz.site.auth.CredentialStore
@@ -42,4 +44,6 @@ class AppGraph(context: Context) {
             chain.proceed(chain.request().newBuilder().header("User-Agent", SiteConfig.USER_AGENT).build())
         }
         .build()
+
+    val imageLoader: ImageLoader = buildImageLoader(appContext, mediaClient)
 }

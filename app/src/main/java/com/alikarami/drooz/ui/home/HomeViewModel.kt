@@ -36,6 +36,8 @@ data class RowUi(
     val items: List<CardUi>,
     val loading: Boolean,
     val error: Boolean,
+    /** False only for lazy list rows that have not been asked to load yet (distinguishes "not yet" from "empty"). */
+    val requested: Boolean = true,
 )
 
 data class HeroUi(
@@ -67,21 +69,29 @@ class HomeViewModel(
     private val started = HashSet<String>()
     private var featured: Map<TitleRef, String> = emptyMap()
     private var dwellJob: Job? = null
+    private var refreshJob: Job? = null
+    private val listJobs = HashMap<String, Job>()
     private var focusedRef: TitleRef? = null
 
     init { refresh() }
 
     private fun initialRows() = HomeRows.rows.map {
-        RowUi(it.key, it.title, emptyList(), loading = it.source !is RowSource.ListPath, error = false)
+        RowUi(it.key, it.title, emptyList(), loading = it.source !is RowSource.ListPath, error = false,
+            requested = it.source !is RowSource.ListPath)
     }
 
+    /** Reloads the home() sources only; lazily loaded list rows keep their state. */
     fun refresh() {
-        started.clear()
-        entries.clear()
-        _state.update { HomeUiState(initialRows(), it.hero, null) }
-        viewModelScope.safeLaunch(onError = { e ->
+        refreshJob?.cancel()
+        _state.update { s ->
+            s.copy(
+                rows = s.rows.map { if (isHomeRow(it.key)) it.copy(loading = true, error = false) else it },
+                error = null,
+            )
+        }
+        refreshJob = viewModelScope.safeLaunch(onError = { e ->
             _state.update { s ->
-                s.copy(rows = s.rows.map { if (configs[it.key]?.source is RowSource.ListPath) it else it.copy(loading = false) },
+                s.copy(rows = s.rows.map { if (isHomeRow(it.key)) it.copy(loading = false) else it },
                     error = e.message ?: "error")
             }
         }) {
@@ -99,6 +109,8 @@ class HomeViewModel(
         }
     }
 
+    private fun isHomeRow(key: String) = configs[key]?.source !is RowSource.ListPath
+
     fun loadRowIfNeeded(rowKey: String) {
         val src = configs[rowKey]?.source as? RowSource.ListPath ?: return
         if (started.add(rowKey)) loadList(rowKey, src.path)
@@ -107,13 +119,15 @@ class HomeViewModel(
     fun retryRow(rowKey: String) {
         when (val src = configs[rowKey]?.source) {
             is RowSource.ListPath -> { started.add(rowKey); loadList(rowKey, src.path) }
-            else -> refresh()
+            null -> Unit
+            else -> if (refreshJob?.isActive != true) refresh()
         }
     }
 
     private fun loadList(key: String, path: String) {
-        updateRow(key) { it.copy(loading = true, error = false) }
-        viewModelScope.safeLaunch(onError = { updateRow(key) { r -> r.copy(loading = false, error = true) } }) {
+        if (listJobs[key]?.isActive == true) return
+        updateRow(key) { it.copy(loading = true, error = false, requested = true) }
+        listJobs[key] = viewModelScope.safeLaunch(onError = { updateRow(key) { r -> r.copy(loading = false, error = true) } }) {
             val page = api.list(path)
             setItems(key, page.items.map { Entry(it.ref, it, it.posterHash) })
         }

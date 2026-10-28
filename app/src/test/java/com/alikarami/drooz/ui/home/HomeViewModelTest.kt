@@ -48,7 +48,8 @@ class HomeViewModelTest {
     ) : SiteApi {
         val listCalls = mutableListOf<String>()
         val titleCalls = mutableListOf<TitleRef>()
-        override suspend fun home() = homePage
+        var onHome: suspend () -> HomePage = { homePage }
+        override suspend fun home() = onHome()
         override suspend fun list(path: String, page: Int): ListPage { listCalls += path; return onList(path) }
         override suspend fun title(ref: TitleRef): TitleDetail { titleCalls += ref; return onTitle(ref) }
         override suspend fun search(query: String) = error("unused")
@@ -166,5 +167,52 @@ class HomeViewModelTest {
         vm.retryRow("popular"); advanceUntilIdle()
         val ok = vm.uiState.value.rows.first { it.key == "popular" }
         assertFalse(ok.error); assertEquals(1, ok.items.size)
+    }
+
+    @Test fun homeFailureSetsErrorAndRetryRecovers() = runTest(dispatcher) {
+        val api = FakeApi(home())
+        api.onHome = { error("offline") }
+        val vm = vm(api); advanceUntilIdle()
+        assertEquals("offline", vm.uiState.value.error)
+        assertFalse(vm.uiState.value.rows[0].loading)
+        api.onHome = { home() }
+        vm.retryRow("recent"); advanceUntilIdle()
+        assertNull(vm.uiState.value.error)
+        assertEquals(2, vm.uiState.value.rows[0].items.size)
+    }
+
+    @Test fun refreshKeepsLoadedListRows() = runTest(dispatcher) {
+        val api = FakeApi(home(), onList = { ListPage(listOf(card(ref(30))), 1, 1) })
+        val vm = vm(api); advanceUntilIdle()
+        assertFalse(vm.uiState.value.rows.first { it.key == "popular" }.requested)
+        vm.loadRowIfNeeded("popular"); advanceUntilIdle()
+        vm.retryRow("recent"); advanceUntilIdle()
+        val popular = vm.uiState.value.rows.first { it.key == "popular" }
+        assertEquals(1, popular.items.size)
+        assertTrue(popular.requested)
+        assertEquals(1, api.listCalls.size)
+    }
+
+    @Test fun staleRefreshDoesNotOverwriteNewer() = runTest(dispatcher) {
+        val stale = CompletableDeferred<HomePage>()
+        val api = FakeApi(home())
+        var n = 0
+        api.onHome = { if (n++ == 0) stale.await() else home() }
+        val vm = vm(api); runCurrent()
+        vm.refresh(); advanceUntilIdle()
+        assertEquals(2, vm.uiState.value.rows[0].items.size)
+        stale.complete(HomePage(emptyList(), emptyList(), emptyList())); advanceUntilIdle()
+        assertEquals(2, vm.uiState.value.rows[0].items.size)
+    }
+
+    @Test fun retryRowDoesNotDuplicateInFlightLoad() = runTest(dispatcher) {
+        val gate = CompletableDeferred<ListPage>()
+        val api = FakeApi(home(), onList = { gate.await() })
+        val vm = vm(api); advanceUntilIdle()
+        vm.loadRowIfNeeded("popular"); runCurrent()
+        vm.retryRow("popular"); runCurrent()
+        assertEquals(1, api.listCalls.size)
+        gate.complete(ListPage(listOf(card(ref(30))), 1, 1)); advanceUntilIdle()
+        assertEquals(1, vm.uiState.value.rows.first { it.key == "popular" }.items.size)
     }
 }

@@ -28,6 +28,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -45,27 +46,33 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.tv.material3.Button
 import androidx.tv.material3.Text
 import com.alikarami.drooz.site.model.TitleDetail
-import com.alikarami.drooz.site.model.TitleRef
 
 private val Bg = Color(0xFF0B0B0F)
 
-/** Throwaway screens proving login → browse → play on the device. Replaced in Plan 2. */
+/**
+ * Throwaway login/title screens proving login → browse → play on the device. Replaced in Plan 2.
+ * The logged-in home is the real [home] screen; it is kept in a saveable-state holder so its scroll
+ * positions survive a trip to the debug title screen.
+ */
 @Composable
-fun DebugApp(vm: DebugViewModel) {
+fun DebugApp(vm: DebugViewModel, home: @Composable () -> Unit) {
     val state by vm.state.collectAsState()
+    val holder = rememberSaveableStateHolder()
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
-        Box(Modifier.fillMaxSize().background(Bg).padding(32.dp)) {
+        if (state == DebugState.Home) holder.SaveableStateProvider("home") { home() }
+        else Box(Modifier.fillMaxSize().background(Bg).padding(32.dp)) {
             when (val s = state) {
                 DebugState.Loading -> Text("در حال بارگذاری…", color = Color.White, fontSize = 24.sp)
                 is DebugState.Login -> LoginScreen(s, vm::login)
-                is DebugState.Home -> HomeScreen(s, vm::openTitle)
+                DebugState.Home -> Unit
                 is DebugState.Title -> {
                     BackHandler { vm.backToHome() }
                     TitleScreen(s.detail, onPlay = { vm.play(it) })
                 }
                 is DebugState.Error -> Column {
+                    BackHandler { vm.backToHome() }
                     Text("خطا: ${s.message}", color = Color(0xFFFF6B6B), fontSize = 22.sp)
-                    Button(onClick = vm::loadHome) { Text("تلاش دوباره") }
+                    Button(onClick = vm::backToHome) { Text("تلاش دوباره") }
                 }
             }
         }
@@ -119,24 +126,6 @@ private fun LoginScreen(s: DebugState.Login, onLogin: (String, String, String?) 
         Button(onClick = { onLogin(user.trim(), pass, mobile.trim().ifEmpty { null }) }, modifier = Modifier.padding(top = 12.dp)) {
             Text("ورود")
         }
-    }
-}
-
-@Composable
-private fun RowOf(title: String, refs: List<Pair<TitleRef, String>>, onOpen: (TitleRef) -> Unit) {
-    Column(Modifier.padding(vertical = 8.dp)) {
-        Text(title, color = Color.White, fontSize = 22.sp)
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(refs) { (ref, label) -> Button(onClick = { onOpen(ref) }) { Text(label) } }
-        }
-    }
-}
-
-@Composable
-private fun HomeScreen(s: DebugState.Home, onOpen: (TitleRef) -> Unit) {
-    LazyColumn {
-        item { RowOf("مشاهدات اخیر پخش آنلاین", s.page.recentlyStreamed.map { it.ref to it.ref.slug }, onOpen) }
-        items(s.page.sections) { sec -> RowOf(sec.title, sec.items.map { it.ref to it.title }, onOpen) }
     }
 }
 

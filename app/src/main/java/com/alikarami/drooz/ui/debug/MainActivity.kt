@@ -13,6 +13,10 @@ import com.alikarami.drooz.BuildConfig
 import com.alikarami.drooz.DroozApp
 import com.alikarami.drooz.site.model.Episode
 import com.alikarami.drooz.site.model.TitleRef
+import com.alikarami.drooz.ui.home.HomeScreen
+import com.alikarami.drooz.ui.home.HomeViewModel
+import com.alikarami.drooz.ui.home.HomeViewModelFactory
+import com.alikarami.drooz.ui.theme.DroozTheme
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -24,7 +28,6 @@ class MainActivity : ComponentActivity() {
                 override val isLoggedIn get() = graph.auth.isLoggedIn
                 override suspend fun login(username: String, password: String, mobile: String?) =
                     graph.auth.login(username, password, mobile)
-                override suspend fun home() = graph.repository.home()
                 override suspend fun title(ref: TitleRef) = graph.repository.title(ref)
                 override suspend fun openStream(episode: Episode, ref: TitleRef, lang: String, height: Int) =
                     graph.repository.openStream(episode, ref, lang, height)
@@ -32,9 +35,15 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private val homeVm: HomeViewModel by viewModels { HomeViewModelFactory((application as DroozApp).graph) }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { DebugApp(vm) }
+        setContent {
+            DebugApp(vm) {
+                DroozTheme { HomeScreen(homeVm, onOpen = vm::openTitle, onExit = ::finish) }
+            }
+        }
         // Debug builds only: `adb shell am start ... --es debug_user U --es debug_pass P --es debug_mobile M`
         // logs in without typing on the TV keyboard.
         val user = intent.getStringExtra("debug_user")

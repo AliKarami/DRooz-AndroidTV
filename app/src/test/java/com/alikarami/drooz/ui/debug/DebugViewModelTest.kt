@@ -2,8 +2,6 @@ package com.alikarami.drooz.ui.debug
 
 import com.alikarami.drooz.site.auth.LoginResult
 import com.alikarami.drooz.site.model.Episode
-import com.alikarami.drooz.site.model.HomePage
-import com.alikarami.drooz.site.model.PosterRef
 import com.alikarami.drooz.site.model.Season
 import com.alikarami.drooz.site.model.StreamCatalog
 import com.alikarami.drooz.site.model.StreamSession
@@ -24,7 +22,6 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class DebugViewModelTest {
     private val ref = TitleRef(TitleKind.SERIES, 5735053, "pluribus")
-    private val home = HomePage(emptyList(), listOf(PosterRef(ref, "p.webp")), emptyList())
 
     private fun ep(n: Int, played: Boolean) = Episode(1, n, "s$n", emptyList(), emptyList(), emptyList(), played)
 
@@ -42,7 +39,6 @@ class DebugViewModelTest {
             if (loginResult == LoginResult.Success) loggedIn = true
             return loginResult
         }
-        override suspend fun home() = home
         override suspend fun title(ref: TitleRef) = detail
         override suspend fun openStream(episode: Episode, ref: TitleRef, lang: String, height: Int): StreamSession {
             opened += Triple(episode.streamId, lang, height)
@@ -60,7 +56,7 @@ class DebugViewModelTest {
 
     @Test fun startsAtHomeWhenLoggedIn() {
         val vm = DebugViewModel(FakeBackend(loggedIn = true))
-        assertEquals(DebugState.Home(home), vm.state.value)
+        assertEquals(DebugState.Home, vm.state.value)
     }
 
     @Test fun needsMobileShowsHint() {
@@ -78,8 +74,7 @@ class DebugViewModelTest {
     @Test fun successLoadsHome() {
         val vm = DebugViewModel(FakeBackend(false))
         vm.login("testuser", "secret", "09120000000")
-        val s = vm.state.value as DebugState.Home
-        assertEquals(5735053L, s.page.recentlyStreamed.first().ref.postId)
+        assertEquals(DebugState.Home, vm.state.value)
     }
 
     @Test fun playFetchesStreamSessionForFirstUnplayedEpisode() {

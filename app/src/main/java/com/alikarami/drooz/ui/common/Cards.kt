@@ -15,6 +15,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.zIndex
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.alikarami.drooz.R
 import androidx.tv.material3.ClickableSurfaceDefaults
@@ -28,20 +30,32 @@ import com.alikarami.drooz.ui.theme.droozFocus
 import com.alikarami.drooz.ui.theme.droozSurfaceColors
 import com.alikarami.drooz.ui.theme.droozSurfaceScale
 
-/** Poster (2:3) with the title underneath. */
+/**
+ * tv-material's Surface raises its z-index while focused, which would draw the card's shadow over
+ * the caption beneath it; captions sit above that.
+ */
+private const val AboveFocusedCard = 10f
+
+/** Poster (2:3, [width] wide) with the title underneath. */
 @Composable
-fun PosterCard(title: String, posterUrl: String?, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    Column(modifier.width(160.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+fun PosterCard(
+    title: String,
+    posterUrl: String?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    width: Dp = 160.dp,
+) {
+    Column(modifier.width(width), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Surface(
             onClick = onClick,
-            modifier = Modifier.droozFocus(FocusScale.CARD).fillMaxWidth().height(240.dp),
+            modifier = Modifier.droozFocus(FocusScale.CARD).fillMaxWidth().height(width * 1.5f),
             shape = ClickableSurfaceDefaults.shape(DroozCardShape),
             scale = droozSurfaceScale,
             colors = droozSurfaceColors(),
         ) {
             DroozImage(posterUrl, ImageSizes.POSTER_W, ImageSizes.POSTER_H, Modifier.fillMaxWidth().fillMaxHeight())
         }
-        TitleText(title, MaterialTheme.typography.bodySmall, color = Color.White, maxLines = 2)
+        TitleText(title, MaterialTheme.typography.bodySmall, Modifier.zIndex(AboveFocusedCard), color = Color.White, maxLines = 2)
     }
 }
 
@@ -68,9 +82,10 @@ fun LandscapeCard(
                 if (progress != null) ProgressBar(progress, Modifier.align(Alignment.BottomStart))
             }
         }
-        TitleText(title, MaterialTheme.typography.bodySmall, color = Color.White, maxLines = 1)
+        TitleText(title, MaterialTheme.typography.bodySmall, Modifier.zIndex(AboveFocusedCard), color = Color.White, maxLines = 1)
         if (subtitle != null) {
-            Text(subtitle, style = MaterialTheme.typography.labelSmall, color = DroozColors.TextSecondary, maxLines = 1)
+            Text(subtitle, Modifier.zIndex(AboveFocusedCard), style = MaterialTheme.typography.labelSmall,
+                color = DroozColors.TextSecondary, maxLines = 1)
         }
     }
 }

@@ -4,7 +4,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.alikarami.drooz.site.auth.LoginResult
 import com.alikarami.drooz.site.model.Episode
-import com.alikarami.drooz.site.model.HomePage
 import com.alikarami.drooz.site.model.StreamCatalog
 import com.alikarami.drooz.site.model.StreamSession
 import com.alikarami.drooz.site.model.TitleDetail
@@ -17,7 +16,6 @@ import kotlinx.coroutines.launch
 interface DebugBackend {
     val isLoggedIn: Boolean
     suspend fun login(username: String, password: String, mobile: String?): LoginResult
-    suspend fun home(): HomePage
     suspend fun title(ref: TitleRef): TitleDetail
     suspend fun openStream(episode: Episode, ref: TitleRef, lang: String, height: Int): StreamSession
 }
@@ -25,7 +23,8 @@ interface DebugBackend {
 sealed interface DebugState {
     data object Loading : DebugState
     data class Login(val mobileHint: String?, val error: String?) : DebugState
-    data class Home(val page: HomePage) : DebugState
+    /** The real home screen (ui/home) is shown; it loads its own data. */
+    data object Home : DebugState
     data class Title(val detail: TitleDetail) : DebugState
     data class Error(val message: String) : DebugState
 }
@@ -43,25 +42,21 @@ class DebugViewModel(private val backend: DebugBackend) : ViewModel() {
     private val _playback = MutableStateFlow<StreamSession?>(null)
     val playback: StateFlow<StreamSession?> = _playback
 
-    private var home: HomePage? = null
-
     init {
-        if (backend.isLoggedIn) loadHome() else _state.value = DebugState.Login(null, null)
+        _state.value = if (backend.isLoggedIn) DebugState.Home else DebugState.Login(null, null)
     }
 
     fun login(username: String, password: String, mobile: String?) = launch {
         _state.value = when (val r = backend.login(username, password, mobile)) {
-            LoginResult.Success -> { loadHomeNow(); return@launch }
+            LoginResult.Success -> DebugState.Home
             is LoginResult.NeedsMobile -> DebugState.Login(mobileHint = r.hint, error = null)
             LoginResult.WrongCredentials -> DebugState.Login(mobileHint = null, error = "نام کاربری یا رمز عبور اشتباه است")
             is LoginResult.Failed -> DebugState.Login(mobileHint = null, error = r.message)
         }
     }
 
-    fun loadHome() = launch { loadHomeNow() }
-
     fun backToHome() {
-        home?.let { _state.value = DebugState.Home(it) } ?: loadHome()
+        _state.value = DebugState.Home
     }
 
     fun openTitle(ref: TitleRef) = launch {
@@ -85,13 +80,6 @@ class DebugViewModel(private val backend: DebugBackend) : ViewModel() {
 
     fun playbackStarted() {
         _playback.value = null
-    }
-
-    private suspend fun loadHomeNow() {
-        _state.value = DebugState.Loading
-        val page = backend.home()
-        home = page
-        _state.value = DebugState.Home(page)
     }
 
     private fun launch(block: suspend () -> Unit) {

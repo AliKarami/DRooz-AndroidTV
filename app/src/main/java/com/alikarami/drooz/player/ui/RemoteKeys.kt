@@ -10,7 +10,12 @@ const val CONTROLS_HIDE_MS = 4_000L
 const val SEEK_STEP_MS = 10_000L
 
 /** What sits on top of the video. Panels are opened from the controls' buttons. */
-enum class Overlay { NONE, CONTROLS, SUBTITLE_AUDIO, QUALITY, SPEED, EPISODES }
+enum class Overlay {
+    NONE, CONTROLS, SUBTITLE_AUDIO, QUALITY, SPEED, EPISODES;
+
+    /** A side panel or the episodes strip (the seek bar is not on screen). */
+    val isPanel: Boolean get() = this != NONE && this != CONTROLS
+}
 
 sealed interface KeyAction {
     data object ShowControls : KeyAction
@@ -50,8 +55,12 @@ fun mapKey(
         KeyEvent.KEYCODE_MEDIA_PLAY -> return if (firstDown) KeyAction.PlayAndShow else KeyAction.None
         KeyEvent.KEYCODE_MEDIA_PAUSE -> return if (firstDown) KeyAction.PauseAndShow else KeyAction.None
         // FF / REW work everywhere, like the arrows on the seek bar: tap seeks, hold scrubs, release commits.
-        KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> return seekKey(1, isDown, repeatCount, scrubbing)
-        KeyEvent.KEYCODE_MEDIA_REWIND -> return seekKey(-1, isDown, repeatCount, scrubbing)
+        // Except a hold inside a panel: the seek bar is hidden there, so the scrub head would move unseen.
+        KeyEvent.KEYCODE_MEDIA_FAST_FORWARD, KeyEvent.KEYCODE_MEDIA_REWIND -> {
+            if (isDown && repeatCount > 0 && overlay.isPanel) return KeyAction.None
+            val direction = if (keyCode == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD) 1 else -1
+            return seekKey(direction, isDown, repeatCount, scrubbing)
+        }
         KeyEvent.KEYCODE_BACK ->
             return if (isDown) KeyAction.None else KeyAction.Back
     }

@@ -169,6 +169,8 @@ class PlayerViewModel(
     private var seasons: List<Season> = emptyList()
     /** "Watch credits": no card for this episode. */
     private var upNextDismissed = false
+    /** A panel is open over the video (reported by the overlay). */
+    private var panelOpen = false
     /** Playing time the card has been on screen. */
     private var upNextShownMs = 0L
     /**
@@ -208,7 +210,10 @@ class PlayerViewModel(
     private var smoother = GainSmoother()
 
     init {
-        viewModelScope.launch { engine.events.collect(::onEvent) }
+        // Unconfined: each event is handled the moment the engine emits it (on its thread), never after a
+        // later engine.load, so a stream's event is judged against the state it was emitted in
+        // (e.g. oldStreamOnEngine during a switch).
+        viewModelScope.launch(Dispatchers.Unconfined) { engine.events.collect(::onEvent) }
         viewModelScope.launch { engine.tracks.collect(::onTracks) }
         viewModelScope.launch { ensureSettings() }
         viewModelScope.launch {
@@ -459,6 +464,8 @@ class PlayerViewModel(
         }
         upNextReached = true
         if (upNextDismissed) return false
+        // Never over an open panel: the card (and its countdown) starts once the panel closes.
+        if (panelOpen && _state.value.upNext == null) return false
         if (_state.value.upNext == null) upNextShownMs = 0L else upNextShownMs += TICK_MS
         val left = UP_NEXT_COUNTDOWN_S - (upNextShownMs / 1000).toInt()
         if (left <= 0) {
@@ -635,7 +642,7 @@ class PlayerViewModel(
     private fun onTracks(t: EngineTracks) {
         _state.update {
             it.copy(
-                qualities = qualityOptions(t.heights, session?.qualityLabels.orEmpty()),
+                qualities = qualityOptions(t.variants, session?.qualityLabels.orEmpty()),
                 playingHeight = t.playingHeight,
                 audio = t.audio,
                 selectedAudio = if (t.audio.isEmpty()) null else t.selectedAudio ?: it.selectedAudio,
@@ -744,6 +751,11 @@ class PlayerViewModel(
         oldStreamOnEngine = true
         switchingFrom = this.streamId
         open(streamId, startAt = null)
+    }
+
+    /** The overlay reports a side panel / the episodes strip: a due up-next card waits until it closes. */
+    fun setPanelOpen(open: Boolean) {
+        panelOpen = open
     }
 
     /** "Watch credits": hides the card for this episode. */

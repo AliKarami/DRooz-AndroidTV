@@ -64,6 +64,34 @@ class PlaybackRulesTest {
 
     @Test fun qualityOptionsUseSiteLabelsByHeight() = assertEquals(
         listOf(QualityOption(1080, "1080 [ 2.48 GB ]"), QualityOption(720, "720 [ 1.14 GB ]"), QualityOption(480, "480 [ 553 MB ]"), QualityOption(360, "360p")),
-        qualityOptions(listOf(480, 1080, 720, 1080, 360), mapOf(2475 to "1080 [ 2.48 GB ]", 1100 to "720 [ 1.14 GB ]", 488 to "480 [ 553 MB ]")),
+        qualityOptions(
+            listOf(480, 1080, 720, 1080, 360).map { VariantInfo(it, null) },
+            mapOf(2475 to "1080 [ 2.48 GB ]", 1100 to "720 [ 1.14 GB ]", 488 to "480 [ 553 MB ]"),
+        ),
+    )
+
+    // Two 1080 renditions: the label of the smaller one comes first in the map (height matching would pick it).
+    private val labels1080 = linkedMapOf(1200 to "1080 [ 1.2 GB ]", 2475 to "1080 [ 2.48 GB ]")
+
+    @Test fun qualityOptions_matchesByBitrateKey() = assertEquals(
+        listOf(QualityOption(1080, "1080 [ 2.48 GB ]")),
+        qualityOptions(listOf(VariantInfo(1080, 2475), VariantInfo(1080, 1200)), labels1080),
+    )
+
+    @Test fun qualityOptions_nearestWithin15Percent() {
+        assertEquals(
+            listOf(QualityOption(1080, "1080 [ 2.48 GB ]")),
+            qualityOptions(listOf(VariantInfo(1080, 2400)), labels1080),
+        )
+        // Beyond 15 % of every key: back to the height match.
+        assertEquals(
+            listOf(QualityOption(1080, "1080 [ 1.2 GB ]")),
+            qualityOptions(listOf(VariantInfo(1080, 5000)), labels1080),
+        )
+    }
+
+    @Test fun qualityOptions_unknownBitrate_fallsBackToHeight() = assertEquals(
+        listOf(QualityOption(720, "720 [ 900 MB ]"), QualityOption(480, "480p")),
+        qualityOptions(listOf(VariantInfo(480, null), VariantInfo(720, null)), mapOf(1500 to "720 [ 900 MB ]")),
     )
 }

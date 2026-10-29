@@ -5,15 +5,20 @@ package com.alikarami.drooz.player.engine
 import androidx.media3.common.Format
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.HttpDataSource
+import com.alikarami.drooz.player.VariantInfo
 import com.alikarami.drooz.player.audio.AudioOption
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
+import kotlin.math.roundToInt
 
 data class EngineTracks(
+    /** Distinct supported video heights, highest first. */
     val heights: List<Int> = emptyList(),
     val playingHeight: Int? = null,
     val audio: List<AudioOption> = emptyList(),
     val selectedAudio: Int? = null,
+    /** Every supported video variant with its bitrate (kbps), for the site's bitrate-keyed labels. */
+    val variants: List<VariantInfo> = heights.map { VariantInfo(it, null) },
 )
 
 sealed interface EngineEvent {
@@ -61,6 +66,12 @@ internal fun httpStatusOf(error: Throwable?): Int? {
         depth++
     }
     return null
+}
+
+/** [Format.bitrate], else [Format.peakBitrate], in kbps; null when neither is known. */
+internal fun bitrateKbps(format: Format): Int? {
+    val bps = format.bitrate.takeIf { it > 0 } ?: format.peakBitrate.takeIf { it > 0 } ?: return null
+    return (bps / 1000.0).roundToInt()
 }
 
 /** HLS rendition name (EXT-X-MEDIA NAME → label), else id, else language. */

@@ -212,7 +212,9 @@ internal fun PlayerOverlayHost(
     // Where the key event does arrive, onKey consumes its KeyUp and this never fires.
     BackHandler { handleBack() }
 
-    // The card takes over when it appears (whatever was open) and is dismissed by Back.
+    // The view model holds a due up-next card back while a panel is open.
+    LaunchedEffect(c.overlay.isPanel) { vm.setPanelOpen(c.overlay.isPanel) }
+    // The card takes over when it appears (the controls, if open) and is dismissed by Back.
     LaunchedEffect(upNextShown) {
         if (upNextShown) {
             c.scrubMs = null

@@ -35,4 +35,10 @@ class EngineMappingTest {
         assertEquals("en", audioLabel(Format.Builder().setLanguage("en").build()))
         assertEquals("und", audioLabel(Format.Builder().build()))
     }
+
+    @Test fun bitrateKbpsFromBitrateElsePeakElseNull() {
+        assertEquals(2475, bitrateKbps(Format.Builder().setAverageBitrate(2_475_000).build()))
+        assertEquals(1200, bitrateKbps(Format.Builder().setPeakBitrate(1_199_600).build()))
+        assertNull(bitrateKbps(Format.Builder().build()))
+    }
 }

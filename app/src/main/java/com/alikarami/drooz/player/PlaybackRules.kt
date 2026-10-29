@@ -58,8 +58,29 @@ fun scrubStepMs(repeatCount: Int): Long = when {
 
 data class QualityOption(val height: Int, val label: String)
 
-fun qualityOptions(heights: List<Int>, siteLabels: Map<Int, String>): List<QualityOption> =
-    heights.distinct().sortedDescending().map { h ->
-        val label = siteLabels.values.firstOrNull { it.trimStart().takeWhile(Char::isDigit).toIntOrNull() == h }
-        QualityOption(h, label ?: "${h}p")
-    }
+/** One video rendition as the engine reports it; [bitrateKbps] null when the playlist gives none. */
+data class VariantInfo(val height: Int, val bitrateKbps: Int?)
+
+/** A site label within this fraction of a variant's bitrate is its label (the site rounds its keys). */
+const val QUALITY_BITRATE_TOLERANCE = 0.15
+
+/**
+ * One option per height (the highest-bitrate variant of each), highest first. The site keys its labels
+ * by bitrate in kbps: exact key, else the nearest key within [QUALITY_BITRATE_TOLERANCE]; only an unknown
+ * bitrate or no match falls back to a label starting with the height, then to «{h}p».
+ */
+fun qualityOptions(variants: List<VariantInfo>, siteLabels: Map<Int, String>): List<QualityOption> =
+    variants.groupBy { it.height }
+        .map { (_, same) -> same.maxBy { it.bitrateKbps ?: -1 } }
+        .sortedByDescending { it.height }
+        .map { v ->
+            val label = v.bitrateKbps?.let { labelByBitrate(it, siteLabels) }
+                ?: siteLabels.values.firstOrNull { it.trimStart().takeWhile(Char::isDigit).toIntOrNull() == v.height }
+            QualityOption(v.height, label ?: "${v.height}p")
+        }
+
+private fun labelByBitrate(kbps: Int, siteLabels: Map<Int, String>): String? {
+    siteLabels[kbps]?.let { return it }
+    val nearest = siteLabels.keys.minByOrNull { abs(it - kbps) } ?: return null
+    return if (abs(nearest - kbps) <= kbps * QUALITY_BITRATE_TOLERANCE) siteLabels[nearest] else null
+}

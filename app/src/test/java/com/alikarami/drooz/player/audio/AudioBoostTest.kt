@@ -61,6 +61,17 @@ class AudioBoostTest {
         assertEquals(listOf(2000, -2000, 32767, -32768), readShorts(p.getOutput()))
     }
 
+    @Test fun gainProcessor_resetRestoresUnityGain() {
+        val p = GainAudioProcessor()
+        p.configure(fmt(C.ENCODING_PCM_16BIT)); p.flush(); p.gain = 2f
+        p.queueInput(shortBuf(0, 0)); p.getOutput() // applied gain is now 2
+        p.reset()
+        p.configure(fmt(C.ENCODING_PCM_16BIT)); p.flush(); p.gain = 1f
+        // From unity to unity: no ramp down from the old 2x.
+        p.queueInput(shortBuf(1000, -1000, 1000, -1000))
+        assertEquals(listOf(1000, -1000, 1000, -1000), readShorts(p.getOutput()))
+    }
+
     @Test fun processorRampsWithinABuffer() {
         val p = GainAudioProcessor()
         p.configure(fmt(C.ENCODING_PCM_16BIT, 1)); p.flush(); p.gain = 3f

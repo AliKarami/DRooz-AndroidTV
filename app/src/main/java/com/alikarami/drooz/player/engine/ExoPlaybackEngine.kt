@@ -23,6 +23,7 @@ import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import com.alikarami.drooz.BuildConfig
+import com.alikarami.drooz.player.VariantInfo
 import com.alikarami.drooz.player.audio.AudioOption
 import com.alikarami.drooz.player.audio.GainAudioProcessor
 import kotlinx.coroutines.flow.Flow
@@ -94,6 +95,7 @@ class ExoPlaybackEngine(context: Context, client: OkHttpClient) : PlaybackEngine
     /** Audio tracks in the order of [EngineTracks.audio]: (group, track index in group). */
     private var audioRefs: List<Pair<Tracks.Group, Int>> = emptyList()
     private var awaitingReady = false
+    private var released = false
 
     private val listener = object : Player.Listener {
         override fun onPlaybackStateChanged(playbackState: Int) {
@@ -140,12 +142,12 @@ class ExoPlaybackEngine(context: Context, client: OkHttpClient) : PlaybackEngine
     }
 
     private fun publishTracks(tracks: Tracks) {
-        val heights = tracks.groups
+        val variants = tracks.groups
             .filter { it.type == C.TRACK_TYPE_VIDEO }
-            .flatMap { g -> (0 until g.length).filter { g.isTrackSupported(it) }.map { g.getTrackFormat(it).height } }
-            .filter { it > 0 }
-            .distinct()
-            .sortedDescending()
+            .flatMap { g -> (0 until g.length).filter { g.isTrackSupported(it) }.map { g.getTrackFormat(it) } }
+            .filter { it.height > 0 }
+            .map { VariantInfo(it.height, bitrateKbps(it)) }
+        val heights = variants.map { it.height }.distinct().sortedDescending()
         val refs = tracks.groups
             .filter { it.type == C.TRACK_TYPE_AUDIO }
             .flatMap { g -> (0 until g.length).filter { g.isTrackSupported(it) }.map { g to it } }
@@ -155,8 +157,8 @@ class ExoPlaybackEngine(context: Context, client: OkHttpClient) : PlaybackEngine
             AudioOption(audioLabel(f), if (f.channelCount == Format.NO_VALUE) 0 else f.channelCount)
         }
         val selected = refs.indexOfFirst { (g, i) -> g.isTrackSelected(i) }.takeIf { it >= 0 }
-        _tracks.value = EngineTracks(heights, currentHeight(), audio, selected)
-        if (BuildConfig.DEBUG) Log.d(TAG, "tracks heights=$heights audio=${audio.map { it.label }} selected=$selected")
+        _tracks.value = EngineTracks(heights, currentHeight(), audio, selected, variants)
+        if (BuildConfig.DEBUG) Log.d(TAG, "tracks variants=$variants audio=${audio.map { it.label }} selected=$selected")
     }
 
     override fun load(masterUrl: String, startMs: Long) {
@@ -213,6 +215,8 @@ class ExoPlaybackEngine(context: Context, client: OkHttpClient) : PlaybackEngine
     }
 
     override fun release() {
+        if (released) return
+        released = true
         exoPlayer.removeListener(listener)
         exoPlayer.release()
     }

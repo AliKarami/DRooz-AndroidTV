@@ -75,9 +75,18 @@ class RemoteKeysTest {
 
     @Test fun heldFastForwardAndRewindScrubThenCommit() {
         assertEquals(KeyAction.Scrub(30_000), mapKey(KEYCODE_MEDIA_FAST_FORWARD, true, 5, Overlay.NONE, false, true))
-        assertEquals(KeyAction.Scrub(-10_000), mapKey(KEYCODE_MEDIA_REWIND, true, 1, Overlay.QUALITY, false, false))
+        assertEquals(KeyAction.Scrub(-10_000), mapKey(KEYCODE_MEDIA_REWIND, true, 1, Overlay.CONTROLS, false, false))
         assertEquals(KeyAction.CommitScrub, mapKey(KEYCODE_MEDIA_FAST_FORWARD, false, 0, Overlay.CONTROLS, false, true))
         assertEquals(KeyAction.None, mapKey(KEYCODE_MEDIA_REWIND, false, 0, Overlay.NONE, false, false))
+    }
+
+    @Test fun heldFastForwardAndRewindInAPanelAreIgnored() {
+        for (panel in listOf(Overlay.SUBTITLE_AUDIO, Overlay.QUALITY, Overlay.SPEED, Overlay.EPISODES)) {
+            assertEquals(KeyAction.None, mapKey(KEYCODE_MEDIA_FAST_FORWARD, true, 3, panel, false, false))
+            assertEquals(KeyAction.None, mapKey(KEYCODE_MEDIA_REWIND, true, 12, panel, false, false))
+            // A tap still seeks.
+            assertEquals(KeyAction.Seek(10_000), mapKey(KEYCODE_MEDIA_FAST_FORWARD, true, 0, panel, false, false))
+        }
     }
 
     @Test fun backOnlyOnKeyUp() {

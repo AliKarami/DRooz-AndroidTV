@@ -1257,4 +1257,56 @@ class PlayerViewModelTest {
         runCurrent()
         assertEquals(listOf("s1e1", "s1e2"), env.api.opens.map { it.first })
     }
+
+    // ---- Plan 4 task 8: player polish ----
+
+    /**
+     * Exo posts the old stream's error while the switch's stream page is still loading; the collector
+     * only gets to it after the switch has called engine.load. It must still count as the old stream's.
+     */
+    @Test fun oldStreamErrorAfterSwitch_isIgnored() = playerTest {
+        val env = Env()
+        val v = started(env)
+        env.api.gate = CompletableDeferred()
+        v.playNext()
+        runCurrent()
+        env.api.gate!!.complete(Unit) // the new load is now scheduled...
+        engine.emit(EngineEvent.Error(2004, "ERROR_CODE_IO_BAD_HTTP_STATUS", 500)) // ...the old stream fails first
+        runCurrent()
+        assertEquals(2, engine.loads.size)
+        assertFalse(v.state.value.phase is PlayerPhase.Failed)
+        assertEquals(listOf("s1e1"), env.api.reports.map { it.first })
+        engine.emit(EngineEvent.Ready)
+        runCurrent()
+        assertEquals(PlayerPhase.Playing, v.state.value.phase)
+        assertEquals("s1e2", v.state.value.currentStreamId)
+    }
+
+    @Test fun upNextDue_withPanelOpen_waitsForClose() = playerTest {
+        val env = Env()
+        val v = started(env)
+        v.setPanelOpen(true)
+        engine.durationMs = HOUR
+        engine.positionMs = NEAR_END
+        advanceTimeBy(UP_NEXT_COUNTDOWN_S * 2_000L); runCurrent()
+        assertNull(v.state.value.upNext)
+        assertEquals(1, env.api.opens.size) // no switch behind the panel
+        v.setPanelOpen(false)
+        advanceTimeBy(TICK_MS); runCurrent()
+        assertEquals(UP_NEXT_COUNTDOWN_S, v.state.value.upNext?.secondsLeft)
+        advanceTimeBy(3_000); runCurrent()
+        assertEquals(UP_NEXT_COUNTDOWN_S - 3, v.state.value.upNext?.secondsLeft)
+    }
+
+    @Test fun upNextWindowWithPanelOpenStillCountsAsFinished() = playerTest {
+        val env = Env()
+        val v = started(env)
+        v.setPanelOpen(true)
+        engine.durationMs = HOUR
+        engine.positionMs = NEAR_END
+        advanceTimeBy(TICK_MS); runCurrent()
+        v.onStop()
+        runCurrent()
+        assertTrue(watch.map["s1e1"]!!.finished)
+    }
 }

@@ -96,6 +96,11 @@ class GainAudioProcessor : BaseAudioProcessor() {
         applied = target
         out.flip()
     }
+
+    /** A new stream (or output) starts at unity, not ramping down from the last stream's gain. */
+    override fun onReset() {
+        applied = 1f
+    }
 }
 
 data class AudioOption(val label: String, val channels: Int)

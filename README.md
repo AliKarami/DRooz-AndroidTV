@@ -1,76 +1,125 @@
+<div align="center">
+
 # DRooz for Android TV
 
-An unofficial, native Android TV app for **DLRooz** ([robin.robert-redford.net](https://robin.robert-redford.net/)), the Persian movie and series site. It turns your existing DLRooz account into a TV experience: big artwork, a Persian right-to-left interface, and a player built for the remote.
+**Your DLRooz movies and series, made for the big screen.**
 
-> This is a personal hobby project. It is not affiliated with or endorsed by DLRooz. You need your own paid DLRooz account; the app does not bypass anything on the site.
+A fast, good-looking TV app for [DLRooz](https://robin.robert-redford.net/): browse with the remote, pick up where you left off, and watch with Persian subtitles that look great.
 
-## What it does
+[**⬇ Download the latest APK**](https://github.com/AliKarami/DRooz-AndroidTV/releases/latest/download/DRooz.apk) · [All releases](https://github.com/AliKarami/DRooz-AndroidTV/releases) · [راهنمای فارسی](#راهنمای-فارسی)
 
-- **Browse like a streaming app.** Home rows from the site (featured, new films, updated series, and more), a hero area that follows focus, full grids for every list, and search.
-- **Title pages.** Synopsis, IMDb rating, cast, awards, season tabs with episode tiles, original or Persian-dubbed audio, and your site watchlist («لیست من»).
-- **A full player** with everything the site's web player has:
-  - **Quality:** the site's quality list with file sizes, plus Automatic.
-  - **Audio:** 5.1 audio when your TV or soundbar supports it, and Audio Boost.
-  - **Subtitles:** Farsi, English, or both at once, with adjustable size, colour, background and timing.
-  - **Navigation:** resume where you stopped, ±10 seconds on ←/→ (hold to scrub), and next-episode autoplay.
-- **Menus in Persian** (RTL); titles keep their original language.
+<img src="docs/screenshots/home.jpg" alt="Home screen with Continue Watching" width="860">
 
-## Requirements
+</div>
 
-- An Android TV or Google TV device on **Android 12 or newer**, such as a Google TV Streamer or Chromecast with Google TV.
-- A **DLRooz account**. You sign in once with your username and password; the site may also ask for your mobile number. Your credentials stay on the TV, encrypted with the Android Keystore, and are only sent to the site.
-- The site allows a limited number of devices per account (currently 3). The TV counts as one of them.
+## Why you'll like it
 
-## Install
+- **Feels like a real streaming app.** Big artwork, a hero banner that follows what you're looking at, and smooth remote navigation. It's not a website squeezed onto a TV.
+- **One press to keep watching.** «ادامه تماشا» knows the next episode and where you stopped. Press OK and it plays.
+- **Subtitles done right.** Farsi, English, or **both at once**. Pick the size, colour and background, and fix out-of-sync subtitles in half-second steps.
+- **Everything the site's player has.** Quality picker, 5.1 surround sound, Persian dub, Audio Boost for quiet dialogue, playback speed, and next-episode autoplay.
+- **Persian first.** Menus are fully right-to-left in Persian; titles keep their original names.
 
-There are no prebuilt downloads yet, so you build the APK yourself and install it on the TV over your local network.
+<table>
+  <tr>
+    <td><img src="docs/screenshots/player.jpg" alt="Player controls"></td>
+    <td><img src="docs/screenshots/episodes.jpg" alt="Switching season and episode inside the player"></td>
+  </tr>
+  <tr>
+    <td align="center">Simple player controls</td>
+    <td align="center">Jump to any season or episode without leaving the player</td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/title.jpg" alt="Series page with seasons and episodes"></td>
+    <td><img src="docs/screenshots/browse.jpg" alt="Browsing series"></td>
+  </tr>
+  <tr>
+    <td align="center">Series pages with every season</td>
+    <td align="center">Browse new and updated titles</td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center"><img src="docs/screenshots/settings.jpg" alt="Subtitle settings with live preview" width="49%"><br>Subtitle style with a live preview</td>
+  </tr>
+</table>
 
-### 1. Build the APK
+## What you need
 
-You need **JDK 17 or newer** and the **Android SDK**. The easiest route is to install [Android Studio](https://developer.android.com/studio), which bundles both.
+- A TV, TV box or stick running **Android TV or Google TV** (Android 12 or newer).
+- A **DLRooz account**. You sign in once with your usual username and password.
+
+## Install in 3 minutes
+
+The app isn't on the Play Store, so you install it from the file here. It's easy:
+
+1. **Get the Downloader app.** On your TV, open the **Play Store**, search for **Downloader** (the orange app by AFTVnews) and install it.
+2. **Allow it to install apps.** Open **Settings → Apps → Security & restrictions → Unknown sources** (on some TVs: **Settings → Privacy → Security → Install unknown apps**) and turn on **Downloader**.
+3. **Download and install DRooz.** Open Downloader, type this address and press **Go**:
+
+   ```
+   github.com/AliKarami/DRooz-AndroidTV/releases/latest/download/DRooz.apk
+   ```
+
+   When the download finishes, choose **Install**. Then **Open**, sign in, and enjoy.
+
+You'll find **DRooz** with your other apps. Downloader can delete the APK file afterwards, since you don't need it any more.
+
+**Updating:** repeat step 3 whenever there's a new release. Your login and settings are kept.
+
+<details>
+<summary>Other ways to install</summary>
+
+- **From your phone:** download [DRooz.apk](https://github.com/AliKarami/DRooz-AndroidTV/releases/latest/download/DRooz.apk) on your phone and send it to the TV with an app like *Send Files to TV*, then open it on the TV.
+- **From a computer (adb):** turn on *Developer options → USB debugging* on the TV, then run
+  `adb connect <TV-IP>` and `adb install -r DRooz.apk`.
+
+</details>
+
+## Good to know
+
+- DRooz is an **unofficial** app made by a fan. It's not affiliated with DLRooz. You need your own DLRooz subscription, and the app only uses what your account already gives you.
+- Your password is stored encrypted on your TV and is only ever sent to the DLRooz site.
+- DLRooz allows a limited number of devices per account; your TV counts as one.
+
+Found a bug or have an idea? [Open an issue](https://github.com/AliKarami/DRooz-AndroidTV/issues).
+
+---
+
+## راهنمای فارسی
+
+<div dir="rtl">
+
+**دی‌ال‌روز برای تلویزیون**: فیلم‌ها و سریال‌های دی‌ال‌روز روی تلویزیون، با منوی فارسی، «ادامه تماشا» با یک دکمه، و زیرنویس فارسی و انگلیسی (حتی هر دو با هم).
+
+**نصب:**
+
+۱. در **Play Store** تلویزیون، برنامه‌ی **Downloader** را نصب کنید.<br>
+۲. در تنظیمات تلویزیون، اجازه‌ی **نصب برنامه از منابع ناشناس** را به Downloader بدهید.<br>
+۳. Downloader را باز کنید، این آدرس را وارد کنید و **Install** را بزنید:
+
+</div>
+
+```
+github.com/AliKarami/DRooz-AndroidTV/releases/latest/download/DRooz.apk
+```
+
+<div dir="rtl">
+
+بعد از نصب، با نام کاربری و رمز دی‌ال‌روز خودتان وارد شوید. نیازمندی‌ها: Android TV یا Google TV با اندروید ۱۲ یا بالاتر، و حساب دی‌ال‌روز.
+
+</div>
+
+---
+
+<details>
+<summary>For developers</summary>
+
+Kotlin, Jetpack Compose for TV and Media3 ExoPlayer. Build with JDK 17+ and the Android SDK:
 
 ```bash
-git clone https://github.com/AliKarami/DRooz-AndroidTV.git
-cd DRooz-AndroidTV
+./gradlew testDebugUnitTest   # unit tests (site parsers run against sanitized saved pages)
 ./gradlew assembleDebug
 ```
 
-The APK is written to `app/build/outputs/apk/debug/app-debug.apk`.
+Release APKs are signed with a private key that isn't in this repository, so an APK you build yourself can't update one installed from Releases. Never commit cookies, tokens, credentials or captured stream URLs; `scripts/sanitize_fixture.py` cleans captured pages before they become test fixtures. Design notes and plans live in [`docs/superpowers`](docs/superpowers).
 
-### 2. Allow installs on the TV
-
-1. On the TV, go to **Settings → System → About** and press OK on **Android TV OS build** seven times until it says you are a developer.
-2. Go to **Settings → System → Developer options** and turn on **USB debugging** (on Google TV this also enables wireless debugging).
-3. Note the TV's IP address from **Settings → Network & Internet**.
-
-### 3. Install over the network
-
-From the computer where you built the APK (`adb` comes with the Android SDK, in `platform-tools`):
-
-```bash
-adb connect <TV-IP-address>:5555
-adb install -r app/build/outputs/apk/debug/app-debug.apk
-```
-
-The first time, the TV asks whether to allow debugging from this computer. Choose **Always allow**.
-
-If the TV shows a pairing code instead (**Wireless debugging → Pair device with pairing code**), run `adb pair <ip>:<pairing-port>` with that code first. Then connect to the port shown on the Wireless debugging screen.
-
-The app appears in the TV's app list as **دی‌ال‌روز**. To update it later, pull the latest code and repeat steps 1 and 3; your login and settings are kept.
-
-## Using it
-
-- **First launch:** sign in with your DLRooz account. You stay signed in from then on.
-- **Remote, on browse screens:** the arrow keys move around, OK opens a title, and Back goes back.
-- **Remote, in the player:**
-  - OK shows the controls.
-  - ←/→ jump 10 seconds; hold them to scrub faster.
-  - «زیرنویس و صدا» opens subtitle and audio options.
-
-## For developers
-
-- **Code:** Kotlin, Jetpack Compose for TV (`androidx.tv:tv-material`), Media3 ExoPlayer, OkHttp, and Jsoup for reading the site's pages.
-- **Tests:** `./gradlew testDebugUnitTest`. The site parsers are tested against saved pages in `app/src/test/resources/fixtures`, which are sanitized so that no personal tokens are committed.
-- **Docs:** design and implementation plans are in [`docs/superpowers`](docs/superpowers).
-
-Never commit cookies, tokens, credentials or captured stream URLs. `scripts/sanitize_fixture.py` cleans a captured page before it becomes a test fixture.
+</details>

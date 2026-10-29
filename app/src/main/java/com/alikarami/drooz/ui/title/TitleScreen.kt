@@ -7,7 +7,6 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.gestures.BringIntoViewSpec
 import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
@@ -72,7 +71,6 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import com.alikarami.drooz.player.PlayerArgs
-import androidx.tv.material3.Border
 import androidx.tv.material3.ClickableSurfaceDefaults
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Surface
@@ -94,6 +92,9 @@ import com.alikarami.drooz.ui.common.ImageSizes
 import com.alikarami.drooz.ui.common.ImdbBadge
 import com.alikarami.drooz.ui.common.MetaChip
 import com.alikarami.drooz.ui.common.MetaText
+import com.alikarami.drooz.ui.common.PillButton
+import com.alikarami.drooz.ui.common.PillShape
+import com.alikarami.drooz.ui.common.SegmentSwitch
 import com.alikarami.drooz.ui.common.TitleText
 import com.alikarami.drooz.ui.common.UiStrings
 import com.alikarami.drooz.ui.common.posterUrl
@@ -444,69 +445,10 @@ private fun Buttons(
     }
 }
 
-private val PillShape = RoundedCornerShape(8.dp)
-
-/** Mockup `.btn`: translucent pill, white with black text when focused. */
-@Composable
-private fun PillButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    Surface(
-        onClick = onClick,
-        modifier = modifier,
-        shape = ClickableSurfaceDefaults.shape(PillShape),
-        scale = ClickableSurfaceDefaults.scale(focusedScale = 1.05f),
-        colors = ClickableSurfaceDefaults.colors(
-            containerColor = Color.White.copy(alpha = 0.16f),
-            contentColor = Color.White,
-            focusedContainerColor = Color.White,
-            focusedContentColor = Color.Black,
-            pressedContainerColor = Color.White.copy(alpha = 0.85f),
-            pressedContentColor = Color.Black,
-        ),
-    ) {
-        Box(contentAlignment = Alignment.Center) {
-            Text(
-                text, Modifier.padding(horizontal = 20.dp, vertical = 9.dp),
-                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                maxLines = 1, softWrap = false,
-            )
-        }
-    }
-}
-
 /** Mockup `.seg`: «زبان اصلی | دوبله»; one focus stop, a click switches language. */
 @Composable
 private fun LanguageSwitch(dub: Boolean, onToggle: () -> Unit, modifier: Modifier) {
-    Surface(
-        onClick = onToggle,
-        modifier = modifier,
-        shape = ClickableSurfaceDefaults.shape(PillShape),
-        scale = ClickableSurfaceDefaults.scale(focusedScale = 1.05f),
-        border = ClickableSurfaceDefaults.border(focusedBorder = Border(BorderStroke(2.dp, Color.White), shape = PillShape)),
-        colors = ClickableSurfaceDefaults.colors(
-            containerColor = Color.White.copy(alpha = 0.12f),
-            contentColor = Color.White,
-            focusedContainerColor = Color.White.copy(alpha = 0.28f),
-            focusedContentColor = Color.White,
-        ),
-    ) {
-        Row(Modifier.padding(3.dp)) {
-            Segment(stringResource(R.string.title_original), !dub)
-            Segment(stringResource(R.string.title_dubbed), dub)
-        }
-    }
-}
-
-@Composable
-private fun Segment(text: String, on: Boolean) {
-    Text(
-        text,
-        Modifier
-            .background(if (on) Color.White.copy(alpha = 0.9f) else Color.Transparent, RoundedCornerShape(6.dp))
-            .padding(horizontal = 14.dp, vertical = 6.dp),
-        color = if (on) Color.Black else Color.White,
-        style = MaterialTheme.typography.labelMedium.copy(fontWeight = if (on) FontWeight.Bold else FontWeight.Medium),
-        maxLines = 1, softWrap = false,
-    )
+    SegmentSwitch(stringResource(R.string.title_original), stringResource(R.string.title_dubbed), dub, onToggle, modifier)
 }
 
 /** Season tabs + «آثار پیشنهادی»; focusing a tab selects it (TV tab behaviour). */

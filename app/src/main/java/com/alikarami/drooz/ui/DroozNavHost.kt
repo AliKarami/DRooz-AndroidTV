@@ -1,6 +1,5 @@
 package com.alikarami.drooz.ui
 
-import android.widget.Toast
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.runtime.Composable
@@ -37,6 +36,10 @@ import com.alikarami.drooz.ui.login.LoginViewModelFactory
 import com.alikarami.drooz.ui.search.SearchScreen
 import com.alikarami.drooz.ui.search.SearchViewModel
 import com.alikarami.drooz.ui.search.SearchViewModelFactory
+import com.alikarami.drooz.ui.settings.SettingsEvent
+import com.alikarami.drooz.ui.settings.SettingsScreen
+import com.alikarami.drooz.ui.settings.SettingsViewModel
+import com.alikarami.drooz.ui.settings.SettingsViewModelFactory
 import com.alikarami.drooz.ui.title.TitleScreen
 import com.alikarami.drooz.ui.title.TitleViewModel
 import com.alikarami.drooz.ui.title.TitleViewModelFactory
@@ -125,8 +128,7 @@ fun DroozNavHost(
                             context.getString(R.string.title_my_list), "/user/watchlist/",
                             context.getString(R.string.my_list_empty),
                         ))
-                    RailItem.Settings -> // Plan 4
-                        Toast.makeText(context, R.string.soon, Toast.LENGTH_SHORT).show()
+                    RailItem.Settings -> go(entry, Settings)
                 }
             })
         }
@@ -159,6 +161,18 @@ fun DroozNavHost(
         composable<Search> { entry ->
             val vm: SearchViewModel = viewModel(factory = SearchViewModelFactory(graph))
             SearchScreen(vm, onOpen = { openTitle(entry, it) })
+        }
+        composable<Settings> {
+            val vm: SettingsViewModel = viewModel(factory = SettingsViewModelFactory(graph))
+            LaunchedEffect(vm) {
+                vm.events.collect {
+                    if (it == SettingsEvent.LoggedOut) {
+                        appVm.onLoggedOut()
+                        resetTo(Login) // clears the back stack: Back from Login can't return here
+                    }
+                }
+            }
+            SettingsScreen(vm)
         }
     }
 }

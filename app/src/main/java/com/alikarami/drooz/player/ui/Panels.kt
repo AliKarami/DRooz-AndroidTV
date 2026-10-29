@@ -189,7 +189,7 @@ private fun StepButton(symbol: String, enabled: Boolean, onStep: () -> Unit, mod
 
 /** Label at the start; LTR «− value +» at the end (or centred when there is no label). */
 @Composable
-private fun StepperRow(
+internal fun StepperRow(
     label: String?,
     value: String,
     canDecrease: Boolean,
@@ -221,7 +221,7 @@ private fun StepperRow(
 }
 
 @Composable
-private fun subtitleChoiceLabel(c: SubtitleChoice): String = stringResource(
+internal fun subtitleChoiceLabel(c: SubtitleChoice): String = stringResource(
     when (c) {
         SubtitleChoice.FA -> R.string.player_sub_fa
         SubtitleChoice.EN -> R.string.player_sub_en
@@ -302,7 +302,7 @@ internal fun SubtitleAudioPanel(state: PlayerUiState, vm: PlayerViewModel, focus
 }
 
 @Composable
-private fun ColorRow(selected: SubtitleColor, onPick: (SubtitleColor) -> Unit) {
+internal fun ColorRow(selected: SubtitleColor, onPick: (SubtitleColor) -> Unit) {
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,

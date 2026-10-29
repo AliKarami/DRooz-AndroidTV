@@ -7,6 +7,7 @@ import kotlinx.serialization.Serializable
 @Serializable data object Login
 @Serializable data object Home
 @Serializable data object Search
+@Serializable data object Settings
 
 /**
  * A title page. [featuredBackdrop] is home's featured image hash for it (only home knows it), so the page

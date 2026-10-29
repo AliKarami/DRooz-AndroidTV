@@ -44,7 +44,21 @@
     <string name="login_mobile_hint">لطفا شماره موبایل خود را کامل کنید</string>
     <string name="login_submit">ورود</string>
     <string name="login_tip">برای نوشتن در هر کادر، OK را بزنید</string>
-    <string name="soon">به‌زودی</string>
+    <string name="settings_section_subtitle">زیرنویس</string>
+    <string name="settings_section_audio">صدا</string>
+    <string name="settings_section_storage">حافظه</string>
+    <string name="settings_section_account">حساب کاربری</string>
+    <string name="settings_section_about">درباره</string>
+    <string name="settings_sub_language">زبان</string>
+    <string name="settings_sub_preview">نمونه زیرنویس — Sample subtitle</string>
+    <string name="settings_default_dub">زبان پیش‌فرض: دوبله فارسی (در صورت وجود)</string>
+    <string name="settings_clear_cache">پاک کردن حافظه موقت</string>
+    <string name="settings_cache_cleared">پاک شد</string>
+    <string name="settings_logout">خروج از حساب</string>
+    <string name="settings_logout_confirm">از حساب خارج می‌شوید؟</string>
+    <string name="settings_logout_yes">خروج</string>
+    <string name="settings_cancel">انصراف</string>
+    <string name="settings_version">نسخه %1$s</string>
     <string name="player_subtitle_sample">این یک زیرنویس نمونه است</string>
     <string name="player_subtitle_sample_en" translatable="false">This is a sample subtitle</string>
     <string name="player_seek_back">−۱۰</string>

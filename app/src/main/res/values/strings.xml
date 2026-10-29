@@ -1,4 +1,47 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">دی‌ال‌روز</string>
+    <string name="minutes_short">%1$s دقیقه</string>
+    <string name="home_exit_hint">برای خروج دوباره بازگشت را بزنید</string>
+    <string name="home_row_failed">بارگذاری نشد</string>
+    <string name="home_failed">صفحه اصلی بارگذاری نشد</string>
+    <string name="retry">تلاش دوباره</string>
+    <string name="rail_search">جستجو</string>
+    <string name="rail_home">خانه</string>
+    <string name="rail_series">سریال‌ها</string>
+    <string name="rail_films">فیلم‌ها</string>
+    <string name="rail_my_list">لیست من</string>
+    <string name="rail_settings">تنظیمات</string>
+    <string name="title_my_list">لیست من</string>
+    <string name="title_original">زبان اصلی</string>
+    <string name="title_dubbed">دوبله</string>
+    <string name="title_suggestions">آثار پیشنهادی</string>
+    <string name="title_season">فصل %1$s</string>
+    <string name="title_season_count">%1$s فصل</string>
+    <string name="title_persian_subtitle">زیرنویس فارسی</string>
+    <string name="title_subtitle">زیرنویس</string>
+    <string name="title_creator">خالق: %1$s</string>
+    <string name="title_director">کارگردان: %1$s</string>
+    <string name="title_failed">بارگذاری نشد</string>
+    <string name="title_watchlist_failed">لیست من به‌روز نشد</string>
+    <string name="list_updated_series">سریال های بروز شده</string>
+    <string name="list_new_films">فیلم های جدید</string>
+    <string name="list_failed">فهرست بارگذاری نشد</string>
+    <string name="list_empty">موردی پیدا نشد</string>
+    <string name="search_placeholder">جستجوی فیلم و سریال</string>
+    <string name="search_idle">نام فیلم یا سریال را بنویسید یا با میکروفون بگویید</string>
+    <string name="search_idle_tip">نام انگلیسی بهترین نتیجه را می‌دهد</string>
+    <string name="search_empty">نتیجه‌ای پیدا نشد</string>
+    <string name="search_empty_persian_tip">نام انگلیسی فیلم یا سریال را امتحان کنید</string>
+    <string name="search_failed">جستجو انجام نشد</string>
+    <string name="search_voice">جستجوی صوتی</string>
+    <string name="search_voice_prompt">نام فیلم یا سریال را بگویید</string>
+    <string name="search_voice_unavailable">جستجوی صوتی در دسترس نیست</string>
+    <string name="login_heading">ورود به حساب کاربری</string>
+    <string name="login_username">نام کاربری یا ایمیل</string>
+    <string name="login_password">رمز عبور</string>
+    <string name="login_mobile_hint">لطفا شماره موبایل خود را کامل کنید</string>
+    <string name="login_submit">ورود</string>
+    <string name="login_tip">برای نوشتن در هر کادر، OK را بزنید</string>
+    <string name="soon">به‌زودی</string>
 </resources>

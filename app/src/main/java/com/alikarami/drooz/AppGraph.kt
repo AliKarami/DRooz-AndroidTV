@@ -1,7 +1,19 @@
 package com.alikarami.drooz
 
 import android.content.Context
+import coil3.ImageLoader
+import com.alikarami.drooz.data.AuthApi
+import com.alikarami.drooz.data.AuthApiAdapter
+import com.alikarami.drooz.data.SiteApi
+import com.alikarami.drooz.data.SiteApiAdapter
+import com.alikarami.drooz.data.SessionEvents
+import com.alikarami.drooz.data.SessionGuardedSiteApi
+import com.alikarami.drooz.data.DataStoreTitlePrefs
+import com.alikarami.drooz.data.HomePageCache
+import com.alikarami.drooz.data.TitleInfoRepository
+import com.alikarami.drooz.data.TitlePrefs
 import com.alikarami.drooz.site.SiteConfig
+import com.alikarami.drooz.ui.common.buildImageLoader
 import com.alikarami.drooz.site.SiteRepository
 import com.alikarami.drooz.site.auth.AuthService
 import com.alikarami.drooz.site.auth.CredentialStore
@@ -34,6 +46,13 @@ class AppGraph(context: Context) {
     val http = SiteHttp(SiteConfig.BASE_URL.toHttpUrl(), cookieJar, baseClient)
     val auth = AuthService(http, cookieJar, CredentialStore(dir.resolve("creds.bin"), KeystoreSecretBox()))
     val repository = SiteRepository(http, auth)
+    /** Every screen's failures pass through here; a lost session sends the app to Login (see AppViewModel). */
+    val sessionEvents = SessionEvents()
+    val siteApi: SiteApi = SessionGuardedSiteApi(SiteApiAdapter(repository), sessionEvents)
+    val authApi: AuthApi = AuthApiAdapter(auth)
+    val titleInfo = TitleInfoRepository(siteApi)
+    val homeCache = HomePageCache()
+    val titlePrefs: TitlePrefs = DataStoreTitlePrefs(appContext)
 
     /** For Media3: carries the site cookies (subtitles need them) and the browser UA. */
     val mediaClient: OkHttpClient = baseClient.newBuilder()
@@ -42,4 +61,6 @@ class AppGraph(context: Context) {
             chain.proceed(chain.request().newBuilder().header("User-Agent", SiteConfig.USER_AGENT).build())
         }
         .build()
+
+    val imageLoader: ImageLoader = buildImageLoader(appContext, mediaClient)
 }

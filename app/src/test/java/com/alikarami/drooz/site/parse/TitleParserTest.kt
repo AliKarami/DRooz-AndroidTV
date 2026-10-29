@@ -40,6 +40,8 @@ class TitleParserTest {
         assertEquals("قسمت ۰۹ فصل اول", d.card.episodeLabel)
         assertEquals("پایان فصل", d.card.status)
         assertEquals(listOf(20835L, 4444536L, 5688281L, 5733846L), d.suggestions.take(4).map { it.postId })
+        assertEquals("933a5416ee8344d0532c9e34ecf5b267.jpg.webp", d.suggestionPosters[d.suggestions.first()])
+        assertEquals(d.suggestions.toSet(), d.suggestionPosters.keys)
         assertTrue(d.awards.any { it.contains("برنده بهترین بازیگر نقش اول زن") })
         assertTrue(d.card.synopsis!!.startsWith("داستان بدبخت‌ترین فرد"))
         assertEquals("eac12b446fe94c8ef5485a2291db460a.jpg.webp", d.card.posterHash)
@@ -71,5 +73,34 @@ class TitleParserTest {
     @Test fun missingStreamJsonThrowsParseError() {
         val e = assertThrows(SiteException.ParseError::class.java) { TitleParser.parse("<html></html>", pluribusRef) }
         assertEquals("STREAM", e.what)
+    }
+
+    // The site renders the watchlist toggle as `btn-gray` (off) or `btn-warning` (on); its JS swaps the two.
+    private val watchButton = """class="btn btn-gray py-1 watchlist" value="5735053" value2='watch'"""
+    private val favoriteButton = """class="btn btn-gray py-1 watchlist" value="5735053" value2='favorite'"""
+
+    @Test fun watchlistOffAsRendered() {
+        assertEquals(false, pluribus.inWatchlist)
+        assertEquals(false, ouatime.inWatchlist)
+    }
+
+    @Test fun watchlistOnWhenButtonIsActive() {
+        val html = fixture("title_series_pluribus.html")
+        assertTrue(html.contains(watchButton))
+        val on = html.replace(watchButton, watchButton.replace("btn-gray", "btn-warning"))
+        assertEquals(true, TitleParser.parse(on, pluribusRef).inWatchlist)
+    }
+
+    @Test fun watchlistIgnoresOtherToggles() {
+        val html = fixture("title_series_pluribus.html")
+        val favOn = html.replace(favoriteButton, favoriteButton.replace("btn-gray", "btn-warning"))
+        assertEquals(false, TitleParser.parse(favOn, pluribusRef).inWatchlist)
+    }
+
+    @Test fun watchlistUnknownWithoutButtonOrMarker() {
+        val html = fixture("title_series_pluribus.html")
+        assertEquals(null, TitleParser.parse(html.replace("value2='watch'", "value2='other'"), pluribusRef).inWatchlist)
+        val unmarked = html.replace(watchButton, watchButton.replace("btn-gray ", ""))
+        assertEquals(null, TitleParser.parse(unmarked, pluribusRef).inWatchlist)
     }
 }

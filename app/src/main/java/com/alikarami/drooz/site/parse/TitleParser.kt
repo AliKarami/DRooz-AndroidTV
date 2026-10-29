@@ -23,6 +23,7 @@ object TitleParser {
     private val STREAM = Regex("""var STREAM=(\{.*?\});\s*\n""", RegexOption.DOT_MATCHES_ALL)
     private val TRAILER = Regex("""/img/590-331/trailer/[^'"\s]+""")
     private const val SUGGESTIONS = "آثار پیشنهادی"
+    private const val WATCH_BUTTON = "button.watchlist[value2=watch]"
 
     fun parse(html: String, ref: TitleRef): TitleDetail {
         val streamJson = STREAM.find(html)?.groupValues?.get(1) ?: throw SiteException.ParseError("STREAM")
@@ -38,14 +39,31 @@ object TitleParser {
             val title = heading.text().trim().trimEnd(':', ' ')
             box.select("div.col-12.px-0").map { "$title: ${it.text().trim()}" }
         }
-        val suggestions = doc.select("h2").firstOrNull { it.text().contains(SUGGESTIONS) }
+        val suggestionLinks = doc.select("h2").firstOrNull { it.text().contains(SUGGESTIONS) }
             ?.parent()?.parent()
             ?.select("a[href*=/post/]")
-            ?.mapNotNull { TitleRef.fromPath(it.attr("href")) }
-            ?.distinct()
             .orEmpty()
+            .mapNotNull { a ->
+                val ref = TitleRef.fromPath(a.attr("href")) ?: return@mapNotNull null
+                val img = a.selectFirst("img")
+                val poster = (img?.attr("data-src")?.ifBlank { null } ?: img?.attr("src"))?.let(ImageUrls::hashOf)
+                ref to poster
+            }
+        val suggestions = suggestionLinks.map { it.first }.distinct()
+        val posters = suggestionLinks.mapNotNull { (ref, hash) -> hash?.let { ref to it } }.toMap()
         val trailer = TRAILER.find(html)?.value?.let(ImageUrls::hashOf)
-        return TitleDetail(card, channel, awards, catalog, suggestions, trailer)
+        return TitleDetail(card, channel, awards, catalog, suggestions, trailer, posters, watchlistState(doc.selectFirst(WATCH_BUTTON)))
+    }
+
+    /**
+     * The «لیست تماشا» toggle is rendered `btn-warning` when the title is on the watchlist and `btn-gray`
+     * when not (the site's JS swaps the two on a press); anything else is unknown.
+     */
+    private fun watchlistState(button: org.jsoup.nodes.Element?): Boolean? = when {
+        button == null -> null
+        button.hasClass("btn-warning") -> true
+        button.hasClass("btn-gray") -> false
+        else -> null
     }
 
     /** `STREAM` is `{"main": seasons, "dub"?: seasons, "subtitle": bool}`; films use arrays, series objects keyed by number. */

@@ -818,4 +818,197 @@ class PlayerViewModelTest {
         assertEquals(3, env.api.subtitleCalls.size)
         assertEquals(SubtitleCues("سلام", null), v.cues.value)
     }
+
+    // ---- Task 9: up next, episode switching ----
+
+    private val NEAR_END = 3_565_000L
+    private val HOUR = 3_600_000L
+
+    /** Started at [streamId], playing an hour-long episode at [pos]. */
+    private fun TestScope.nearEnd(env: Env, streamId: String = "s1e1", pos: Long = NEAR_END): PlayerViewModel {
+        val v = started(env, streamId)
+        engine.durationMs = HOUR
+        engine.positionMs = pos
+        advanceTimeBy(TICK_MS); runCurrent()
+        return v
+    }
+
+    @Test fun upNextAppearsInLastFortySecondsAndCountsDown() = playerTest {
+        val v = nearEnd(Env())
+        assertTrue(v.state.value.hasNext)
+        assertEquals(UpNext("قسمت بعدی · فصل ۱ قسمت ۲", 8), v.state.value.upNext)
+        assertEquals("قسمت بعدی · فصل ۱ قسمت ۲", UiStrings.upNextLabel(1, 2))
+        advanceTimeBy(3_000); runCurrent()
+        assertEquals(5, v.state.value.upNext?.secondsLeft)
+    }
+
+    @Test fun countdownPausesWhilePaused() = playerTest {
+        val v = nearEnd(Env())
+        advanceTimeBy(2_000); runCurrent()
+        assertEquals(6, v.state.value.upNext?.secondsLeft)
+        v.togglePlay()
+        advanceTimeBy(10_000); runCurrent()
+        assertEquals(6, v.state.value.upNext?.secondsLeft)
+    }
+
+    @Test fun countdownZeroPlaysNext() = playerTest {
+        val env = Env()
+        val v = nearEnd(env)
+        advanceTimeBy(UP_NEXT_COUNTDOWN_S * 1_000L); runCurrent()
+        assertEquals(listOf("s1e1", "s1e2"), env.api.opens.map { it.first })
+        assertEquals("s1e2", v.state.value.currentStreamId)
+        assertTrue(watch.map["s1e1"]!!.finished)
+        assertNull(v.state.value.upNext)
+        assertEquals("فصل ۱ · قسمت ۲", v.state.value.episodeLabel)
+    }
+
+    @Test fun reachingWindowSavesFinishedEvenBeforeNinetyPercent() = playerTest {
+        val env = Env()
+        // 3-minute episode: 40 s before the end is below 90 %.
+        val v = started(env)
+        engine.durationMs = 180_000
+        engine.positionMs = 141_000
+        advanceTimeBy(TICK_MS); runCurrent()
+        assertNotNull(v.state.value.upNext)
+        v.onStop()
+        runCurrent()
+        assertTrue(watch.map["s1e1"]!!.finished)
+    }
+
+    @Test fun dismissKeepsWatchingCredits() = playerTest {
+        val env = Env()
+        val v = nearEnd(env)
+        assertNotNull(v.state.value.upNext)
+        v.dismissUpNext()
+        assertNull(v.state.value.upNext)
+        advanceTimeBy(UP_NEXT_COUNTDOWN_S * 2_000L); runCurrent()
+        assertNull(v.state.value.upNext)
+        assertEquals(1, env.api.opens.size)
+    }
+
+    @Test fun seekingBackHidesCardWithoutDismissing() = playerTest {
+        val v = nearEnd(Env())
+        advanceTimeBy(2_000); runCurrent()
+        assertEquals(6, v.state.value.upNext?.secondsLeft)
+        engine.positionMs = 1_000_000
+        advanceTimeBy(TICK_MS); runCurrent()
+        assertNull(v.state.value.upNext)
+        engine.positionMs = 3_570_000
+        advanceTimeBy(TICK_MS); runCurrent()
+        assertEquals(8, v.state.value.upNext?.secondsLeft)
+    }
+
+    @Test fun endedPlaysNextAcrossSeasons() = playerTest {
+        val env = Env()
+        val v = started(env, "s1e2")
+        engine.durationMs = HOUR
+        engine.positionMs = HOUR
+        engine.emit(EngineEvent.Ended)
+        runCurrent()
+        assertEquals(listOf("s1e2", "s2e1"), env.api.opens.map { it.first })
+        assertEquals("s2e1", v.state.value.currentStreamId)
+        assertTrue(watch.map["s1e2"]!!.finished)
+        assertTrue(env.exits.isEmpty())
+    }
+
+    @Test fun endedOnLastEpisodeExits() = playerTest {
+        val env = Env()
+        val v = nearEnd(env, "s2e1")
+        assertFalse(v.state.value.hasNext)
+        assertNull(v.state.value.upNext)
+        advanceTimeBy(UP_NEXT_COUNTDOWN_S * 2_000L); runCurrent()
+        assertNull(v.state.value.upNext)
+        engine.positionMs = HOUR
+        engine.emit(EngineEvent.Ended)
+        runCurrent()
+        assertEquals(1, env.exits.size)
+        assertEquals(listOf("s2e1"), env.api.opens.map { it.first })
+        assertTrue(watch.map["s2e1"]!!.finished)
+    }
+
+    @Test fun filmHasNoUpNext() = playerTest {
+        val env = Env(film)
+        val v = nearEnd(env, "f1")
+        assertFalse(v.state.value.hasNext)
+        assertNull(v.state.value.upNext)
+        engine.emit(EngineEvent.Ended)
+        runCurrent()
+        assertEquals(1, env.exits.size)
+        assertEquals(1, env.api.opens.size)
+    }
+
+    @Test fun playEpisodeSwitchesAndKeepsSpeed() = playerTest {
+        val env = Env()
+        val v = started(env)
+        engine.durationMs = HOUR
+        engine.positionMs = 600_000
+        v.setSpeed(1.25f)
+        v.playEpisode("s2e1")
+        runCurrent()
+        assertEquals(2, engine.loads.size)
+        assertEquals(1.25f, engine.speeds.last())
+        assertEquals(1.25f, v.state.value.speed)
+        assertEquals(listOf("s1e1", "s2e1"), env.api.opens.map { it.first })
+        assertEquals("s2e1", v.state.value.currentStreamId)
+        assertEquals(600_000L, watch.map["s1e1"]!!.positionMs)
+        assertFalse(watch.map["s1e1"]!!.finished)
+        assertEquals("فصل ۲ · قسمت ۱", v.state.value.episodeLabel)
+        assertEquals(listOf("s2e1"), v.state.value.seasonEpisodes.map { it.streamId })
+        assertFalse(v.state.value.hasNext)
+    }
+
+    @Test fun switchKeepsDubFlagAndReappliesQuality() = playerTest {
+        val env = Env()
+        val v = started(env, "d1e1", dub = true)
+        engine.tracks.value = EngineTracks(heights = listOf(1080, 720), audio = threeAudio)
+        runCurrent()
+        v.setQuality(720)
+        v.playNext()
+        runCurrent()
+        assertEquals(listOf(Triple("d1e1", "dubbed-fa", 1080), Triple("d1e2", "dubbed-fa", 1080)), env.api.opens)
+        engine.tracks.value = EngineTracks(heights = listOf(1080, 720), audio = threeAudio)
+        runCurrent()
+        assertEquals(listOf<Int?>(720, 720), engine.qualitySelections)
+    }
+
+    @Test fun switchWhereDubbedAudioIsMissingRestoresOriginalSubtitle() = playerTest {
+        val env = Env().withSubtitles(faDub = true)
+        val v = started(env)
+        engine.tracks.value = EngineTracks(audio = threeAudio)
+        runCurrent()
+        v.setAudio(2)
+        runCurrent()
+        assertEquals(SubtitleChoice.FA_DUB, v.state.value.subtitle)
+        v.playNext()
+        runCurrent()
+        engine.emit(EngineEvent.Ready)
+        engine.tracks.value = EngineTracks(audio = listOf(AudioOption("original", 2)))
+        runCurrent()
+        assertEquals(0, v.state.value.selectedAudio)
+        assertEquals(SubtitleChoice.FA, v.state.value.subtitle)
+        engine.positionMs = 2_000
+        advanceTimeBy(TICK_MS); runCurrent()
+        assertEquals(SubtitleCues("سلام", null), v.cues.value)
+    }
+
+    @Test fun seasonEpisodesMarkLocalAndServerWatched() = playerTest {
+        val detail = series.copy(
+            catalog = series.catalog.copy(
+                main = listOf(
+                    Season(1, listOf(ep(1, 1, "s1e1").copy(played = true), ep(1, 2, "s1e2"), ep(1, 3, "s1e3"))),
+                    Season(2, listOf(ep(2, 1, "s2e1"))),
+                ),
+            ),
+        )
+        watch.map["s1e2"] = WatchEntry("s1e2", seriesRef.path, 1, 2, 3_500_000, 3_600_000, 0, true)
+        val v = started(Env(detail))
+        assertEquals(
+            listOf(
+                PlayerEpisode("s1e1", "فصل ۱ · قسمت ۱", true),
+                PlayerEpisode("s1e2", "فصل ۱ · قسمت ۲", true),
+                PlayerEpisode("s1e3", "فصل ۱ · قسمت ۳", false),
+            ),
+            v.state.value.seasonEpisodes,
+        )
+    }
 }

@@ -28,6 +28,7 @@ import com.alikarami.drooz.player.engine.PlaybackEngine
 import com.alikarami.drooz.site.SiteConfig
 import com.alikarami.drooz.site.SiteException
 import com.alikarami.drooz.site.model.Episode
+import com.alikarami.drooz.site.model.Season
 import com.alikarami.drooz.site.model.StreamSession
 import com.alikarami.drooz.site.model.SubtitleKind
 import com.alikarami.drooz.site.model.TitleDetail
@@ -157,8 +158,16 @@ class PlayerViewModel(
     private var lastReopenAt: Long? = null
     private var lastReportAt: Long? = null
     private var playedSinceSaveMs = 0L
-    /** Set by the up-next countdown (Task 9): the episode counts as finished. */
+    /** In the up-next window (or Ended): the episode counts as finished. */
     private var upNextReached = false
+
+    // ---- up next / episodes ----
+    /** The chosen catalog (main or dub), from the title page. */
+    private var seasons: List<Season> = emptyList()
+    /** "Watch credits": no card for this episode. */
+    private var upNextDismissed = false
+    /** Playing time the card has been on screen. */
+    private var upNextShownMs = 0L
 
     // ---- subtitles ----
     private val _cues = MutableStateFlow(SubtitleCues())
@@ -226,12 +235,16 @@ class PlayerViewModel(
             everReady = false
             lastReopenAt = null
             upNextReached = false
+            upNextDismissed = false
+            upNextShownMs = 0L
             session = null
             episode = null
             knownDurationMs = 0L
             gainSchedule = null
             smoother = GainSmoother()
-            _state.update { it.copy(subtitleOffsetMs = 0, availableSubtitles = emptyList()) }
+            _state.update {
+                it.copy(subtitleOffsetMs = 0, availableSubtitles = emptyList(), upNext = null, hasNext = nextEpisode(seasons, id) != null)
+            }
             _cues.value = SubtitleCues()
         }
         if (!silent) _state.update { it.copy(phase = PlayerPhase.Loading, currentStreamId = id) }
@@ -284,17 +297,35 @@ class PlayerViewModel(
     /** Fetches the title page, fills the header and finds [id] in the chosen catalog. */
     private suspend fun resolveEpisode(id: String): Episode? {
         val detail = titleInfo.get(ref)
-        val seasons = if (dub) detail.catalog.dub else detail.catalog.main
-        val ep = seasons.flatMap { it.episodes }.firstOrNull { it.streamId == id }
+        val catalog = if (dub) detail.catalog.dub else detail.catalog.main
+        seasons = catalog
+        val ep = catalog.flatMap { it.episodes }.firstOrNull { it.streamId == id }
+        val isSeries = ref.kind == TitleKind.SERIES
+        val episodes = if (isSeries && ep != null) seasonEpisodes(catalog, ep.season) else emptyList()
         _state.update {
             it.copy(
                 title = detail.card.title,
-                episodeLabel = ep?.takeIf { ref.kind == TitleKind.SERIES }?.let { e -> episodeLabel(e.season, e.number) },
+                episodeLabel = ep?.takeIf { isSeries }?.let { e -> episodeLabel(e.season, e.number) },
                 backdropUrl = if (session == null) pageBackdrop(detail) ?: it.backdropUrl else it.backdropUrl,
+                seasonEpisodes = episodes,
+                hasNext = nextEpisode(catalog, id) != null,
             )
         }
         return ep
     }
+
+    /** [season]'s episodes in order; watched = played on the site or finished here. */
+    private suspend fun seasonEpisodes(catalog: List<Season>, season: Int): List<PlayerEpisode> =
+        catalog.firstOrNull { it.number == season }?.episodes.orEmpty().sortedBy { it.number }.map { e ->
+            val local = try {
+                watch.get(e.streamId)?.finished == true
+            } catch (c: CancellationException) {
+                throw c
+            } catch (x: Exception) {
+                false
+            }
+            PlayerEpisode(e.streamId, episodeLabel(e.season, e.number), e.played || local)
+        }
 
     /** Every engine load (start, retry, recovery, episode switch) goes through here. */
     private fun loadEngine(masterUrl: String, startMs: Long) {
@@ -335,7 +366,9 @@ class PlayerViewModel(
             }
             EngineEvent.Ended -> {
                 wantsPlay = false
-                save()
+                // Played to the end: saved as finished whatever the reported position.
+                upNextReached = true
+                if (everReady && episode != null && nextEpisode(seasons, streamId) != null) playNext() else close()
             }
             is EngineEvent.Error -> onError(e)
         }
@@ -372,8 +405,36 @@ class PlayerViewModel(
 
     private fun tick() {
         updateCues()
+        if (upNextTick()) return
         playedSinceSaveMs += TICK_MS
         if (playedSinceSaveMs >= SAVE_EVERY_MS) save()
+    }
+
+    /**
+     * The up-next card: shown while in [upNextDue]'s window, counting down once per second of playing time
+     * (ticks only run while playing); at 0 plays the next episode. Returns true when it switched.
+     */
+    private fun upNextTick(): Boolean {
+        // Only once this stream played: after a switch the engine still reports the previous episode.
+        if (!everReady || episode == null) return false
+        val next = nextEpisode(seasons, streamId) ?: return false
+        if (!upNextDue(engine.positionMs, durationMs())) {
+            upNextReached = false
+            upNextShownMs = 0L
+            if (_state.value.upNext != null) _state.update { it.copy(upNext = null) }
+            return false
+        }
+        upNextReached = true
+        if (upNextDismissed) return false
+        if (_state.value.upNext == null) upNextShownMs = 0L else upNextShownMs += TICK_MS
+        val left = UP_NEXT_COUNTDOWN_S - (upNextShownMs / 1000).toInt()
+        if (left <= 0) {
+            playNext()
+            return true
+        }
+        val card = UpNext(UiStrings.upNextLabel(next.season, next.number), left)
+        if (_state.value.upNext != card) _state.update { it.copy(upNext = card) }
+        return false
     }
 
     /** Saves the current position if anything of this stream played. Survives the VM being cleared. */
@@ -556,8 +617,20 @@ class PlayerViewModel(
             val manual = manualAudioLabel?.let { l -> t.audio.indexOfFirst { it.label == l }.takeIf { it >= 0 } }
             val index = manual ?: pickAudioTrack(t.audio, dub, engine.multichannelOutput) ?: return
             engine.selectAudio(index)
+            val wasDubbed = audioDubbed
             audioDubbed = isDubbed(t.audio[index].label)
             _state.update { it.copy(selectedAudio = index) }
+            // E.g. on dubbed audio and the next episode has no dubbed track: same rule as the initial choice.
+            if (audioDubbed != wasDubbed) {
+                val available = _state.value.availableSubtitles
+                applySubtitle(
+                    if (audioDubbed) {
+                        if (SubtitleChoice.FA_DUB in available) SubtitleChoice.FA_DUB else SubtitleChoice.OFF
+                    } else {
+                        originalChoice(available)
+                    }
+                )
+            }
         }
     }
 
@@ -612,6 +685,28 @@ class PlayerViewModel(
     }
 
     // ---- user actions ----
+
+    /** The episode after the current one (across seasons), if any. */
+    fun playNext() {
+        val next = nextEpisode(seasons, streamId) ?: return
+        playEpisode(next.streamId)
+    }
+
+    /**
+     * Switches to [streamId] of the same catalog: saves this episode first, then the regular open flow
+     * (same dub flag; speed kept by the engine; quality/audio reapplied by [loadEngine]; subtitles re-derived).
+     */
+    fun playEpisode(streamId: String) {
+        if (closed || streamId == this.streamId) return
+        save()
+        open(streamId, startAt = null)
+    }
+
+    /** "Watch credits": hides the card for this episode. */
+    fun dismissUpNext() {
+        upNextDismissed = true
+        _state.update { it.copy(upNext = null) }
+    }
 
     fun togglePlay() {
         if (wantsPlay) {

@@ -14,5 +14,6 @@ object UiStrings {
     /** Not-started series: names the episode that will play; the season only when it isn't the first. */
     fun playEpisode(season: Int, episode: Int): String =
         (if (season == 1) "پخش قسمت $episode" else "پخش فصل $season قسمت $episode").toPersianDigits()
+    fun upNextLabel(season: Int, episode: Int): String = "قسمت بعدی · فصل $season قسمت $episode".toPersianDigits()
     fun minutes(n: Int): String = "$n دقیقه".toPersianDigits()
 }

@@ -9,7 +9,12 @@ import com.alikarami.drooz.data.SiteApiAdapter
 import com.alikarami.drooz.data.SessionEvents
 import com.alikarami.drooz.data.SessionGuardedSiteApi
 import com.alikarami.drooz.data.DataStoreTitlePrefs
+import com.alikarami.drooz.data.DataStorePlayerPrefs
+import com.alikarami.drooz.data.FileWatchStore
 import com.alikarami.drooz.data.HomePageCache
+import com.alikarami.drooz.data.PlayerPrefs
+import com.alikarami.drooz.data.WatchStore
+import com.alikarami.drooz.data.playerPrefsStore
 import com.alikarami.drooz.data.TitleInfoRepository
 import com.alikarami.drooz.data.TitlePrefs
 import com.alikarami.drooz.site.SiteConfig
@@ -53,6 +58,8 @@ class AppGraph(context: Context) {
     val titleInfo = TitleInfoRepository(siteApi)
     val homeCache = HomePageCache()
     val titlePrefs: TitlePrefs = DataStoreTitlePrefs(appContext)
+    val playerPrefs: PlayerPrefs = DataStorePlayerPrefs(playerPrefsStore(appContext))
+    val watchStore: WatchStore = FileWatchStore(appContext.filesDir.resolve("watch_state.json"))
 
     /** For Media3: carries the site cookies (subtitles need them) and the browser UA. */
     val mediaClient: OkHttpClient = baseClient.newBuilder()

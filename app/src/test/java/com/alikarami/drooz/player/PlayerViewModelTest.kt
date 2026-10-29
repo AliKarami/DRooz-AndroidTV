@@ -1011,4 +1011,82 @@ class PlayerViewModelTest {
             v.state.value.seasonEpisodes,
         )
     }
+
+    // ---- Task 9 fix round 1: switches in flight ----
+
+    @Test fun lateEndedDuringSwitchDoesNotExit() = playerTest {
+        val env = Env()
+        val v = started(env)
+        env.api.gate = CompletableDeferred()
+        v.playEpisode("s1e2")
+        runCurrent()
+        engine.emit(EngineEvent.Ended)
+        runCurrent()
+        assertTrue(env.exits.isEmpty())
+        env.api.gate!!.complete(Unit)
+        runCurrent()
+        assertEquals(2, engine.loads.size)
+        assertEquals(listOf("s1e1", "s1e2"), env.api.opens.map { it.first })
+        assertEquals("s1e2", v.state.value.currentStreamId)
+        assertTrue(env.exits.isEmpty())
+    }
+
+    @Test fun doublePlayNextSwitchesOnce() = playerTest {
+        val env = Env()
+        val v = started(env)
+        env.api.gate = CompletableDeferred()
+        v.playNext()
+        v.playNext()
+        runCurrent()
+        env.api.gate!!.complete(Unit)
+        runCurrent()
+        assertEquals(listOf("s1e1", "s1e2"), env.api.opens.map { it.first })
+        assertEquals("s1e2", v.state.value.currentStreamId)
+        // Once the new episode is ready, switching works again.
+        engine.emit(EngineEvent.Ready)
+        runCurrent()
+        v.playNext()
+        runCurrent()
+        assertEquals(listOf("s1e1", "s1e2", "s2e1"), env.api.opens.map { it.first })
+    }
+
+    @Test fun countdownZeroThenEndedSwitchesOnce() = playerTest {
+        val env = Env()
+        val v = nearEnd(env)
+        env.api.gate = CompletableDeferred()
+        advanceTimeBy(UP_NEXT_COUNTDOWN_S * 1_000L); runCurrent()
+        engine.emit(EngineEvent.Ended)
+        runCurrent()
+        env.api.gate!!.complete(Unit)
+        runCurrent()
+        assertEquals(listOf("s1e1", "s1e2"), env.api.opens.map { it.first })
+        assertEquals("s1e2", v.state.value.currentStreamId)
+        assertTrue(env.exits.isEmpty())
+    }
+
+    @Test fun endedThenTickSwitchesOnce() = playerTest {
+        val env = Env()
+        val v = nearEnd(env)
+        env.api.gate = CompletableDeferred()
+        engine.emit(EngineEvent.Ended)
+        runCurrent()
+        advanceTimeBy(UP_NEXT_COUNTDOWN_S * 2_000L); runCurrent()
+        env.api.gate!!.complete(Unit)
+        runCurrent()
+        assertEquals(listOf("s1e1", "s1e2"), env.api.opens.map { it.first })
+        assertEquals("s1e2", v.state.value.currentStreamId)
+        assertTrue(env.exits.isEmpty())
+    }
+
+    @Test fun failedSwitchAllowsPickingAnotherEpisode() = playerTest {
+        val env = Env()
+        val v = started(env)
+        env.api.failures += SiteException.HttpError(500)
+        v.playEpisode("s1e2")
+        runCurrent()
+        assertTrue(v.state.value.phase is PlayerPhase.Failed)
+        v.playEpisode("s2e1")
+        runCurrent()
+        assertEquals(listOf("s1e1", "s1e2", "s2e1"), env.api.opens.map { it.first })
+    }
 }

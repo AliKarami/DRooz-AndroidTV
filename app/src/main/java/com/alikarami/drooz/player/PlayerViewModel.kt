@@ -168,6 +168,11 @@ class PlayerViewModel(
     private var upNextDismissed = false
     /** Playing time the card has been on screen. */
     private var upNextShownMs = 0L
+    /**
+     * An episode switch is in flight (until the new stream's Ready or a failure): further switches and
+     * the old stream's late Ended are ignored, so a double press never skips an episode.
+     */
+    private var switching = false
 
     // ---- subtitles ----
     private val _cues = MutableStateFlow(SubtitleCues())
@@ -344,6 +349,7 @@ class PlayerViewModel(
     }
 
     private fun fail(message: String) {
+        switching = false
         if (!closed) _state.update { it.copy(phase = PlayerPhase.Failed(message)) }
     }
 
@@ -362,9 +368,12 @@ class PlayerViewModel(
             EngineEvent.Ready -> {
                 readySinceLoad = true
                 everReady = true
+                switching = false
                 _state.update { it.copy(phase = PlayerPhase.Playing) }
             }
             EngineEvent.Ended -> {
+                // A late Ended of the previous episode while switching: the new open is under way.
+                if (switching) return
                 wantsPlay = false
                 // Played to the end: saved as finished whatever the reported position.
                 upNextReached = true
@@ -697,8 +706,9 @@ class PlayerViewModel(
      * (same dub flag; speed kept by the engine; quality/audio reapplied by [loadEngine]; subtitles re-derived).
      */
     fun playEpisode(streamId: String) {
-        if (closed || streamId == this.streamId) return
+        if (closed || switching || streamId == this.streamId) return
         save()
+        switching = true
         open(streamId, startAt = null)
     }
 

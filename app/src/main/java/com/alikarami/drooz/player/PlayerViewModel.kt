@@ -730,6 +730,16 @@ class PlayerViewModel(
         }
     }
 
+    /** Remote PLAY: plays, never pauses. */
+    fun play() {
+        if (!wantsPlay) togglePlay()
+    }
+
+    /** Remote PAUSE: pauses (and saves), never resumes. */
+    fun pause() {
+        if (wantsPlay) togglePlay()
+    }
+
     /** Snapped to the session's keyframes. */
     fun seekBy(deltaMs: Long) {
         val current = engine.positionMs

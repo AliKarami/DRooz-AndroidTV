@@ -8,6 +8,8 @@ import android.view.KeyEvent.KEYCODE_DPAD_RIGHT
 import android.view.KeyEvent.KEYCODE_DPAD_UP
 import android.view.KeyEvent.KEYCODE_ENTER
 import android.view.KeyEvent.KEYCODE_MEDIA_FAST_FORWARD
+import android.view.KeyEvent.KEYCODE_MEDIA_PAUSE
+import android.view.KeyEvent.KEYCODE_MEDIA_PLAY
 import android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE
 import android.view.KeyEvent.KEYCODE_MEDIA_REWIND
 import org.junit.Assert.assertEquals
@@ -62,6 +64,20 @@ class RemoteKeysTest {
         assertEquals(KeyAction.Seek(10_000), mapKey(KEYCODE_MEDIA_FAST_FORWARD, true, 0, Overlay.NONE, false, false))
         assertEquals(KeyAction.Seek(-10_000), mapKey(KEYCODE_MEDIA_REWIND, true, 0, Overlay.EPISODES, false, false))
         assertEquals(KeyAction.None, mapKey(KEYCODE_MEDIA_PLAY_PAUSE, false, 0, Overlay.NONE, false, false))
+    }
+
+    @Test fun explicitPlayAndPauseNeverToggle() {
+        assertEquals(KeyAction.PlayAndShow, mapKey(KEYCODE_MEDIA_PLAY, true, 0, Overlay.NONE, false, false))
+        assertEquals(KeyAction.PauseAndShow, mapKey(KEYCODE_MEDIA_PAUSE, true, 0, Overlay.SPEED, false, false))
+        assertEquals(KeyAction.None, mapKey(KEYCODE_MEDIA_PAUSE, false, 0, Overlay.NONE, false, false))
+        assertEquals(KeyAction.TogglePlayAndShow, mapKey(KEYCODE_MEDIA_PLAY_PAUSE, true, 0, Overlay.CONTROLS, false, false))
+    }
+
+    @Test fun heldFastForwardAndRewindScrubThenCommit() {
+        assertEquals(KeyAction.Scrub(30_000), mapKey(KEYCODE_MEDIA_FAST_FORWARD, true, 5, Overlay.NONE, false, true))
+        assertEquals(KeyAction.Scrub(-10_000), mapKey(KEYCODE_MEDIA_REWIND, true, 1, Overlay.QUALITY, false, false))
+        assertEquals(KeyAction.CommitScrub, mapKey(KEYCODE_MEDIA_FAST_FORWARD, false, 0, Overlay.CONTROLS, false, true))
+        assertEquals(KeyAction.None, mapKey(KEYCODE_MEDIA_REWIND, false, 0, Overlay.NONE, false, false))
     }
 
     @Test fun backOnlyOnKeyUp() {

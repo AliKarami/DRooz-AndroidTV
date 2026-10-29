@@ -5,6 +5,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -149,9 +151,14 @@ private fun ButtonsRow(
     onOpen: (Overlay) -> Unit,
     onNext: () -> Unit,
 ) {
+    // Centred when it fits; scrolls (the focused pill brings itself into view) if a long row would not,
+    // so no button is ever clipped out of reach.
+    Box(Modifier.fillMaxWidth().padding(top = 16.dp), contentAlignment = Alignment.Center) {
     Row(
-        Modifier.fillMaxWidth().padding(top = 20.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
+        Modifier
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // Physical right = forward, as on every TV app (designer's call against the RTL layout).
@@ -168,11 +175,8 @@ private fun ButtonsRow(
             stringResource(R.string.player_subtitle_audio), { onOpen(Overlay.SUBTITLE_AUDIO) },
             Modifier.focusRequester(requesters.getValue(ControlsTarget.SUBTITLE_AUDIO)),
         )
-        val qualityLabel = state.selectedQuality
-            ?.let { h -> state.qualities.firstOrNull { it.height == h }?.label ?: "${h}p" }
-            ?: UiStrings.qualityAuto(state.playingHeight)
         PlayerPill(
-            UiStrings.qualityButton(qualityLabel), { onOpen(Overlay.QUALITY) },
+            UiStrings.qualityButton(state.selectedQuality), { onOpen(Overlay.QUALITY) },
             Modifier.focusRequester(requesters.getValue(ControlsTarget.QUALITY)),
         )
         PlayerPill(
@@ -188,6 +192,7 @@ private fun ButtonsRow(
         if (state.hasNext) {
             PlayerPill(stringResource(R.string.player_next_episode), onNext)
         }
+    }
     }
 }
 

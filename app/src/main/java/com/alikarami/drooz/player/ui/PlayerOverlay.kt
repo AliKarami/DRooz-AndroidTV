@@ -84,12 +84,14 @@ internal class OverlayController {
 
     fun show(o: Overlay, target: ControlsTarget = ControlsTarget.PLAY) {
         if (o == Overlay.CONTROLS) controlsTarget = target
+        consumedDowns.clear()
         overlay = o
         lastKeyAt = SystemClock.uptimeMillis()
         focusToken++
     }
 
     fun hide() {
+        consumedDowns.clear()
         overlay = Overlay.NONE
         seekBarFocused = false
         focusToken++
@@ -170,6 +172,14 @@ internal fun PlayerOverlayHost(
                 c.refresh++
             }
             KeyAction.Back -> handleBack()
+            KeyAction.PlayAndShow -> {
+                vm.play()
+                showIfHidden(ControlsTarget.PLAY)
+            }
+            KeyAction.PauseAndShow -> {
+                vm.pause()
+                showIfHidden(ControlsTarget.PLAY)
+            }
             KeyAction.None -> Unit
         }
     }
@@ -181,6 +191,8 @@ internal fun PlayerOverlayHost(
             else -> return false
         }
         c.lastKeyAt = SystemClock.uptimeMillis()
+        // A fresh press starts clean: an entry left by a press whose KeyUp never came here is stale.
+        if (down && n.repeatCount == 0) c.consumedDowns.remove(n.keyCode)
         // The up-next card owns the arrows and OK like an open overlay (its buttons take them);
         // media keys and Back still go through.
         val overlayForKeys = if (upNextShownNow && c.overlay == Overlay.NONE) Overlay.CONTROLS else c.overlay
@@ -190,8 +202,9 @@ internal fun PlayerOverlayHost(
             scrubbing = c.scrubMs != null,
         )
         if (action == KeyAction.None) return !down && c.consumedDowns.remove(n.keyCode)
-        if (down) c.consumedDowns += n.keyCode else c.consumedDowns -= n.keyCode
         perform(action)
+        // After perform: an overlay change clears the set, but this press's own KeyUp must still be eaten.
+        if (down) c.consumedDowns += n.keyCode else c.consumedDowns -= n.keyCode
         return true
     }
 

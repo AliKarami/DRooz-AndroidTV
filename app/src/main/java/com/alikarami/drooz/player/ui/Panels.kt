@@ -43,6 +43,7 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.Border
@@ -209,7 +210,8 @@ private fun StepperRow(
                 StepButton("−", canDecrease, { onStep(-1) }, decreaseModifier)
                 Text(
                     value, Modifier.widthIn(min = 76.dp),
-                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                    // Persian copy inside the LTR stepper: lay it out RTL (the number itself is isolated).
+                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold, textDirection = TextDirection.Rtl),
                     color = Color.White, textAlign = TextAlign.Center,
                 )
                 StepButton("+", canIncrease, { onStep(1) })

@@ -18,8 +18,14 @@ object UiStrings {
     fun minutes(n: Int): String = "$n دقیقه".toPersianDigits()
 
     // ---- player ----
+    /**
+     * Left-to-right isolate (U+2066 … U+2069): a signed number or «۱×» inside RTL text keeps its sign /
+     * multiplier on the correct side.
+     */
+    private const val LRI = "\u2066"
+    private const val PDI = "\u2069"
     /** 0.5 → «۰٫۵×», 1 → «۱×». */
-    fun speed(x: Float): String = decimal(x.toString()) + "×"
+    fun speed(x: Float): String = "$LRI${decimal(x.toString())}×$PDI"
     fun speedButton(x: Float): String = "سرعت ${speed(x)}"
     /** Subtitle sync: 500 → «+۰٫۵ ثانیه», −1500 → «−۱٫۵ ثانیه», 0 → «۰ ثانیه». */
     fun syncOffset(ms: Long): String {
@@ -28,17 +34,19 @@ object UiStrings {
             ms < 0 -> "−"
             else -> ""
         }
-        return "$sign${decimal((kotlin.math.abs(ms) / 1000.0).toString())} ثانیه"
+        return "$LRI$sign${decimal((kotlin.math.abs(ms) / 1000.0).toString())}$PDI ثانیه"
     }
     /** Quality names stay Latin, as the site shows them («1080p»). */
     fun qualityAuto(playingHeight: Int?): String = if (playingHeight == null) "خودکار" else "خودکار (${playingHeight}p)"
-    fun qualityButton(label: String): String = "کیفیت: $label"
+    /** The controls' pill, kept short so the button row fits (the panel shows the full labels). */
+    fun qualityButton(selectedHeight: Int?): String =
+        if (selectedHeight == null) "کیفیت: خودکار" else "کیفیت: ${selectedHeight}p"
     fun percent(n: Int): String = "$n٪".toPersianDigits()
     fun autoPlayIn(seconds: Int): String = "پخش خودکار تا $seconds ثانیه دیگر".toPersianDigits()
     /** Audio rendition names from the stream, by label text; unknown labels verbatim. */
     fun audioLabel(label: String): String = when {
-        label.contains("6CH") -> "زبان اصلی ۵.۱"
         label.contains("dubbed") -> "دوبله فارسی"
+        label.contains("6CH") -> "زبان اصلی ۵.۱"
         label.contains("original") -> "زبان اصلی"
         else -> label
     }

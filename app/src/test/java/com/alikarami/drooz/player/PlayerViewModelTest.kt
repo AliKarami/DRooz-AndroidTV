@@ -443,6 +443,28 @@ class PlayerViewModelTest {
         assertEquals(2, engine.played)
     }
 
+    @Test fun explicitPlayAndPauseNeverInvert() = playerTest {
+        val v = Env().vm(scope = this)
+        runCurrent()
+        engine.emit(EngineEvent.Ready)
+        runCurrent()
+        engine.durationMs = 3_600_000
+        engine.positionMs = 50_000
+        assertEquals(1, engine.played)
+        v.play() // already playing: no-op
+        assertEquals(1, engine.played)
+        assertEquals(0, engine.paused)
+        v.pause()
+        runCurrent()
+        assertEquals(1, engine.paused)
+        assertEquals(50_000L, watch.map["s1e1"]!!.positionMs)
+        v.pause() // already paused: no-op
+        assertEquals(1, engine.paused)
+        assertEquals(1, engine.played)
+        v.play()
+        assertEquals(2, engine.played)
+    }
+
     @Test fun togglePlayPausesWhileBuffering() = playerTest {
         val v = Env().vm(scope = this)
         runCurrent()

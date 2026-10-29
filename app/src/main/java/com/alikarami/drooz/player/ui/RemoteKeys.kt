@@ -15,6 +15,10 @@ enum class Overlay { NONE, CONTROLS, SUBTITLE_AUDIO, QUALITY, SPEED, EPISODES }
 sealed interface KeyAction {
     data object ShowControls : KeyAction
     data object TogglePlayAndShow : KeyAction
+    /** Explicit MEDIA_PLAY: plays (never pauses), shows the controls. */
+    data object PlayAndShow : KeyAction
+    /** Explicit MEDIA_PAUSE: pauses (never resumes), shows the controls. */
+    data object PauseAndShow : KeyAction
     /** Tap or media FF/REW: immediate snapped seek. */
     data class Seek(val deltaMs: Long) : KeyAction
     /** Held key repeat: move the scrub head only. */
@@ -39,13 +43,15 @@ fun mapKey(
     seekBarFocused: Boolean,
     scrubbing: Boolean,
 ): KeyAction {
+    val firstDown = isDown && repeatCount == 0
     when (keyCode) {
-        KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_MEDIA_PLAY, KeyEvent.KEYCODE_MEDIA_PAUSE ->
-            return if (isDown && repeatCount == 0) KeyAction.TogglePlayAndShow else KeyAction.None
-        KeyEvent.KEYCODE_MEDIA_FAST_FORWARD ->
-            return if (isDown) KeyAction.Seek(SEEK_STEP_MS) else KeyAction.None
-        KeyEvent.KEYCODE_MEDIA_REWIND ->
-            return if (isDown) KeyAction.Seek(-SEEK_STEP_MS) else KeyAction.None
+        // Explicit PLAY / PAUSE never invert (a remote that sends PAUSE twice must not resume).
+        KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> return if (firstDown) KeyAction.TogglePlayAndShow else KeyAction.None
+        KeyEvent.KEYCODE_MEDIA_PLAY -> return if (firstDown) KeyAction.PlayAndShow else KeyAction.None
+        KeyEvent.KEYCODE_MEDIA_PAUSE -> return if (firstDown) KeyAction.PauseAndShow else KeyAction.None
+        // FF / REW work everywhere, like the arrows on the seek bar: tap seeks, hold scrubs, release commits.
+        KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> return seekKey(1, isDown, repeatCount, scrubbing)
+        KeyEvent.KEYCODE_MEDIA_REWIND -> return seekKey(-1, isDown, repeatCount, scrubbing)
         KeyEvent.KEYCODE_BACK ->
             return if (isDown) KeyAction.None else KeyAction.Back
     }
@@ -59,14 +65,7 @@ fun mapKey(
     if (direction != 0 && !isDown && scrubbing) return KeyAction.CommitScrub
 
     val seekKeys = overlay == Overlay.NONE || (overlay == Overlay.CONTROLS && seekBarFocused)
-    if (direction != 0 && seekKeys) {
-        if (!isDown) return KeyAction.None
-        return if (repeatCount == 0) {
-            KeyAction.Seek(direction * SEEK_STEP_MS)
-        } else {
-            KeyAction.Scrub(direction * scrubStepMs(repeatCount))
-        }
-    }
+    if (direction != 0 && seekKeys) return seekKey(direction, isDown, repeatCount, scrubbing)
 
     if (!isDown || !seekKeys) return KeyAction.None
     return when (keyCode) {
@@ -77,4 +76,11 @@ fun mapKey(
             if (overlay == Overlay.NONE) KeyAction.ShowControls else KeyAction.None
         else -> KeyAction.None
     }
+}
+
+/** A seeking key ([direction] ±1): first press seeks, repeats scrub with acceleration, release after a hold commits. */
+private fun seekKey(direction: Int, isDown: Boolean, repeatCount: Int, scrubbing: Boolean): KeyAction = when {
+    !isDown -> if (scrubbing) KeyAction.CommitScrub else KeyAction.None
+    repeatCount == 0 -> KeyAction.Seek(direction * SEEK_STEP_MS)
+    else -> KeyAction.Scrub(direction * scrubStepMs(repeatCount))
 }

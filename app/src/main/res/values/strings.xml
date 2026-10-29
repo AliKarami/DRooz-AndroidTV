@@ -68,7 +68,7 @@
     <string name="player_color">رنگ</string>
     <string name="player_background">پس‌زمینه</string>
     <string name="player_boost">تقویت صدا</string>
-    <string name="player_play_now">▶ پخش الان</string>
+    <string name="player_play_now">▶︎ پخش الان</string>
     <string name="player_watch_credits">تماشای تیتراژ</string>
     <string name="player_now_playing">در حال پخش</string>
 </resources>

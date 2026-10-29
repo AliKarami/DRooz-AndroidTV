@@ -525,7 +525,8 @@ private fun Tabs(
     Row(
         Modifier.padding(start = ContentStart - 12.dp)
             .focusRequester(requester)
-            .focusProperties { canFocus = focusable; enter = { selectedRequester } }
+            // canFocus stays on the chips: a focusable group takes focus itself instead of entering.
+            .focusProperties { enter = { selectedRequester } }
             .focusGroup(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,

@@ -124,6 +124,10 @@ class PlayerViewModel(
     private var session: StreamSession? = null
     private var openJob: Job? = null
     private var closed = false
+    /** The user's play/pause intent: engine.isPlaying is false while buffering and after Ended. */
+    private var wantsPlay = false
+    /** Last positive engine duration for this stream: the engine reports 0 again after each load. */
+    private var knownDurationMs = 0L
 
     /** A Ready was seen for the current stream (any load): progress is worth saving, errors may recover. */
     private var everReady = false
@@ -164,21 +168,14 @@ class PlayerViewModel(
             lastReopenAt = null
             upNextReached = false
             session = null
+            episode = null
+            knownDurationMs = 0L
         }
         if (!silent) _state.update { it.copy(phase = PlayerPhase.Loading, currentStreamId = id) }
         openJob = viewModelScope.launch {
             try {
-                val detail = titleInfo.get(ref)
-                val seasons = if (dub) detail.catalog.dub else detail.catalog.main
-                val ep = seasons.flatMap { it.episodes }.firstOrNull { it.streamId == id }
-                _state.update {
-                    it.copy(
-                        title = detail.card.title,
-                        episodeLabel = ep?.takeIf { ref.kind == TitleKind.SERIES }?.let { e -> episodeLabel(e.season, e.number) },
-                        backdropUrl = if (session == null) pageBackdrop(detail) ?: it.backdropUrl else it.backdropUrl,
-                    )
-                }
-                if (ep == null) {
+                // Same-stream reopen (recovery, retry): the episode is known; skip the title page round trip.
+                val ep = episode ?: resolveEpisode(id) ?: run {
                     fail(UiStrings.PLAY_FAILED)
                     return@launch
                 }
@@ -196,6 +193,7 @@ class PlayerViewModel(
                 throw e
             } catch (e: SiteException.NotLoggedIn) {
                 // SessionGuardedSiteApi already routes the app to Login.
+                closed = true
                 _exits.trySend(Unit)
             } catch (e: Throwable) {
                 if (BuildConfig.DEBUG) Log.w(TAG, "open failed: $e")
@@ -204,10 +202,26 @@ class PlayerViewModel(
         }
     }
 
+    /** Fetches the title page, fills the header and finds [id] in the chosen catalog. */
+    private suspend fun resolveEpisode(id: String): Episode? {
+        val detail = titleInfo.get(ref)
+        val seasons = if (dub) detail.catalog.dub else detail.catalog.main
+        val ep = seasons.flatMap { it.episodes }.firstOrNull { it.streamId == id }
+        _state.update {
+            it.copy(
+                title = detail.card.title,
+                episodeLabel = ep?.takeIf { ref.kind == TitleKind.SERIES }?.let { e -> episodeLabel(e.season, e.number) },
+                backdropUrl = if (session == null) pageBackdrop(detail) ?: it.backdropUrl else it.backdropUrl,
+            )
+        }
+        return ep
+    }
+
     /** Every engine load (start, retry, recovery, episode switch) goes through here. */
     private fun loadEngine(masterUrl: String, startMs: Long) {
         readySinceLoad = false
         engine.load(masterUrl, startMs)
+        wantsPlay = true
         engine.play()
     }
 
@@ -217,7 +231,9 @@ class PlayerViewModel(
         else -> UiStrings.PLAY_FAILED
     }
 
-    private fun fail(message: String) = _state.update { it.copy(phase = PlayerPhase.Failed(message)) }
+    private fun fail(message: String) {
+        if (!closed) _state.update { it.copy(phase = PlayerPhase.Failed(message)) }
+    }
 
     /** What the title page shows before the session's own image arrives. */
     private fun pageBackdrop(detail: TitleDetail?): String? =
@@ -236,7 +252,10 @@ class PlayerViewModel(
                 everReady = true
                 _state.update { it.copy(phase = PlayerPhase.Playing) }
             }
-            EngineEvent.Ended -> save()
+            EngineEvent.Ended -> {
+                wantsPlay = false
+                save()
+            }
             is EngineEvent.Error -> onError(e)
         }
     }
@@ -244,6 +263,8 @@ class PlayerViewModel(
     private fun onError(e: EngineEvent.Error) {
         report(e)
         if (BuildConfig.DEBUG) Log.w(TAG, "engine error ${e.codeName} http=${e.httpStatus}")
+        if (closed) return
+        durationMs()
         val recoverable = everReady && session != null &&
             (e.httpStatus in RECOVERABLE_HTTP || e.codeName.startsWith("ERROR_CODE_IO_"))
         val now = clock()
@@ -284,12 +305,19 @@ class PlayerViewModel(
         val ep = episode ?: return null
         if (!everReady) return null
         val pos = engine.positionMs
-        val dur = engine.durationMs
+        val dur = durationMs()
         return WatchEntry(
             streamId, ref.path, ep.season, ep.number, pos, dur, 0,
             finished = isFinished(pos, dur) || upNextReached,
             subtitleOffsetMs = _state.value.subtitleOffsetMs,
         )
+    }
+
+    /** The engine's duration, or the last positive one seen for this stream while it reports 0. */
+    private fun durationMs(): Long {
+        val d = engine.durationMs
+        if (d > 0) knownDurationMs = d
+        return knownDurationMs
     }
 
     private suspend fun persist(entry: WatchEntry) {
@@ -303,10 +331,12 @@ class PlayerViewModel(
     // ---- user actions ----
 
     fun togglePlay() {
-        if (engine.isPlaying.value) {
+        if (wantsPlay) {
+            wantsPlay = false
             engine.pause()
             save()
         } else {
+            wantsPlay = true
             engine.play()
         }
     }
@@ -337,6 +367,7 @@ class PlayerViewModel(
 
     fun onStop() {
         save()
+        wantsPlay = false
         engine.pause()
     }
 
@@ -353,6 +384,7 @@ class PlayerViewModel(
     }
 
     override fun onCleared() {
+        closed = true
         engine.release()
     }
 

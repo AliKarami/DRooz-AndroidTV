@@ -84,7 +84,8 @@ class PlayerViewModelTest {
         override suspend fun home() = error("unused")
         override suspend fun list(path: String, page: Int) = error("unused")
         override suspend fun search(query: String) = error("unused")
-        override suspend fun title(ref: TitleRef) = detail
+        var titleCalls = 0
+        override suspend fun title(ref: TitleRef): TitleDetail { titleCalls++; return detail }
         override suspend fun setWatchlist(postId: Long, state: String) = error("unused")
         override suspend fun subtitle(url: String) = ""
         override suspend fun reportStreamError(streamId: String, event: String, msg: String) {
@@ -415,6 +416,75 @@ class PlayerViewModelTest {
         assertEquals(50_000L, watch.map["s1e1"]!!.positionMs)
         v.togglePlay()
         assertEquals(2, engine.played)
+    }
+
+    @Test fun togglePlayPausesWhileBuffering() = playerTest {
+        val v = Env().vm(scope = this)
+        runCurrent()
+        engine.emit(EngineEvent.Ready)
+        runCurrent()
+        engine.durationMs = 3_600_000
+        engine.positionMs = 70_000
+        engine.isPlaying.value = false
+        engine.buffering.value = true
+        v.togglePlay()
+        runCurrent()
+        assertEquals(1, engine.paused)
+        assertEquals(1, engine.played)
+        assertEquals(70_000L, watch.map["s1e1"]!!.positionMs)
+        v.togglePlay()
+        assertEquals(2, engine.played)
+    }
+
+    @Test fun saveDuringSilentReopenKeepsLastKnownDuration() = playerTest {
+        val v = Env().vm(scope = this)
+        runCurrent()
+        engine.emit(EngineEvent.Ready)
+        runCurrent()
+        engine.durationMs = 3_600_000
+        engine.positionMs = 3_500_000
+        engine.emit(EngineEvent.Error(2004, "ERROR_CODE_IO_BAD_HTTP_STATUS", 403))
+        runCurrent()
+        assertEquals(2, engine.loads.size)
+        engine.durationMs = 0
+        v.onStop()
+        runCurrent()
+        val e = watch.map["s1e1"]!!
+        assertEquals(3_600_000L, e.durationMs)
+        assertTrue(e.finished)
+    }
+
+    @Test fun recoveryDoesNotRefetchTitlePage() = playerTest {
+        val env = Env()
+        env.vm(scope = this)
+        runCurrent()
+        engine.emit(EngineEvent.Ready)
+        runCurrent()
+        engine.emit(EngineEvent.Error(2004, "ERROR_CODE_IO_BAD_HTTP_STATUS", 403))
+        runCurrent()
+        assertEquals(2, env.api.opens.size)
+        assertEquals(1, env.api.titleCalls)
+    }
+
+    @Test fun retryAfterStreamFailureDoesNotRefetchTitlePage() = playerTest {
+        val env = Env()
+        env.api.failures += SiteException.NetworkError(IOException("down"))
+        val v = env.vm(scope = this)
+        runCurrent()
+        v.retry()
+        runCurrent()
+        assertEquals(1, engine.loads.size)
+        assertEquals(1, env.api.titleCalls)
+    }
+
+    @Test fun notLoggedInThenBackExitsOnce() = playerTest {
+        val env = Env()
+        env.api.failures += SiteException.NotLoggedIn()
+        val v = env.vm(scope = this)
+        runCurrent()
+        v.close()
+        runCurrent()
+        assertEquals(1, env.exits.size)
     }
 
     @Test fun clearingReleasesEngine() = playerTest {

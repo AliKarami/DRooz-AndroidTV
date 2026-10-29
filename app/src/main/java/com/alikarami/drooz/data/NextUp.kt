@@ -9,15 +9,17 @@ import kotlin.math.ceil
 /** Local and server state of one episode. progress is in 0..1, non-null only while resumable (not watched). */
 data class EpisodeState(val watched: Boolean, val progress: Float?, val resumeMs: Long, val remainingMin: Int?)
 
+/**
+ * A local entry that is resumable decides for its episode even when the server says played: the
+ * server's played threshold is unknown, and local state wins until the server catches up.
+ */
 fun episodeState(ep: Episode, entry: WatchEntry?): EpisodeState {
-    val watched = ep.played || entry?.finished == true ||
-        (entry != null && isFinished(entry.positionMs, entry.durationMs))
-    val resumeMs = if (entry != null && !watched) {
-        resumePositionMs(entry.positionMs, entry.durationMs, entry.finished)
-    } else {
-        0L
+    val resumeMs = entry?.let { resumePositionMs(it.positionMs, it.durationMs, it.finished) } ?: 0L
+    if (entry == null || resumeMs <= 0L) {
+        val watched = ep.played || entry?.finished == true ||
+            (entry != null && isFinished(entry.positionMs, entry.durationMs))
+        return EpisodeState(watched, null, 0L, null)
     }
-    if (entry == null || watched || resumeMs <= 0L) return EpisodeState(watched, null, 0L, null)
     val progress = (entry.positionMs.toDouble() / entry.durationMs).toFloat()
     val remainingMin = ceil((entry.durationMs - entry.positionMs) / 60_000.0).toInt()
     return EpisodeState(watched = false, progress = progress, resumeMs = resumeMs, remainingMin = remainingMin)

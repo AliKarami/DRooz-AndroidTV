@@ -3,6 +3,7 @@ package com.alikarami.drooz.data
 import com.alikarami.drooz.site.model.Episode
 import com.alikarami.drooz.site.model.Season
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -78,6 +79,34 @@ class NextUpTest {
         val en = entry("s1e1", 2_200_000, 2_400_000, 1)
         assertTrue(episodeState(e1, en).watched)
         assertEquals(NextUp.Next(e2), nextUp(season1(e1, e2), mapOf("s1e1" to en)))
+    }
+
+    // The server's played threshold is unknown: local in-progress state wins until it catches up.
+    @Test
+    fun serverPlayed_butLocallyInProgress_resumes() {
+        val e1 = ep(1, 1, true)
+        val e2 = ep(1, 2, true)
+        val en = entry("s1e2", 600_000, 2_400_000, 5)
+        val state = episodeState(e2, en)
+        assertFalse(state.watched)
+        assertEquals(0.25f, state.progress!!, 0.001f)
+        assertEquals(600_000L, state.resumeMs)
+        assertEquals(30, state.remainingMin)
+        val r = nextUp(season1(e1, e2, ep(1, 3)), mapOf("s1e2" to en)) as NextUp.Resume
+        assertEquals(e2, r.episode)
+    }
+
+    @Test
+    fun serverPlayed_withoutLocalEntry_isWatched() {
+        assertTrue(episodeState(ep(1, 1, true), null).watched)
+    }
+
+    @Test
+    fun serverPlayed_withFinishedOrTooShortLocalEntry_isWatched() {
+        val e1 = ep(1, 1, true)
+        assertTrue(episodeState(e1, entry("s1e1", 600_000, 2_400_000, 1, finished = true)).watched)
+        assertTrue(episodeState(e1, entry("s1e1", 2_300_000, 2_400_000, 1)).watched)
+        assertTrue(episodeState(e1, entry("s1e1", 10_000, 2_400_000, 1)).watched)
     }
 
     @Test

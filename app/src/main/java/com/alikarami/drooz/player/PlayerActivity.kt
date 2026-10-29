@@ -2,89 +2,69 @@ package com.alikarami.drooz.player
 
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
+import android.view.WindowManager
+import android.widget.Toast
 import androidx.activity.ComponentActivity
-import androidx.media3.common.C
-import androidx.media3.common.MediaItem
-import androidx.media3.common.MimeTypes
-import androidx.media3.common.PlaybackException
-import androidx.media3.common.Player
-import androidx.media3.common.Tracks
-import androidx.media3.common.text.CueGroup
-import android.util.Log
-import com.alikarami.drooz.BuildConfig
-import androidx.media3.datasource.okhttp.OkHttpDataSource
-import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
-import androidx.media3.ui.PlayerView
+import androidx.activity.compose.setContent
+import androidx.activity.viewModels
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
 import com.alikarami.drooz.DroozApp
+import com.alikarami.drooz.R
+import com.alikarami.drooz.player.engine.ExoPlaybackEngine
+import com.alikarami.drooz.player.ui.PlayerScreen
 import com.alikarami.drooz.site.model.StreamSession
+import com.alikarami.drooz.ui.theme.DroozTheme
+import kotlinx.coroutines.launch
 
 /**
- * Minimal Media3 player (Plan 3 replaces it). Logging is debug-only: stream URLs carry the user's token.
+ * Compose host for [PlayerScreen]. The engine is built inside the view-model factory so it shares the
+ * view model's lifetime (the view model releases it in onCleared), even across a recreation.
  */
 class PlayerActivity : ComponentActivity() {
-    private var player: ExoPlayer? = null
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val args = PlayerArgs.from(intent)
+        if (args == null) {
+            Toast.makeText(this, R.string.player_old_entry, Toast.LENGTH_SHORT).show()
+            finish()
+            return
+        }
         val graph = (application as DroozApp).graph
-        val url = requireNotNull(intent.getStringExtra(EXTRA_URL))
-        val subtitle = intent.getStringExtra(EXTRA_SUB_FA)
-
-        val exo = ExoPlayer.Builder(this)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(OkHttpDataSource.Factory(graph.mediaClient)))
-            .build()
-        val item = MediaItem.Builder()
-            .setUri(url)
-            .setMimeType(MimeTypes.APPLICATION_M3U8)
-            .apply {
-                if (subtitle != null) {
-                    setSubtitleConfigurations(listOf(
-                        MediaItem.SubtitleConfiguration.Builder(Uri.parse(subtitle))
-                            .setMimeType(MimeTypes.APPLICATION_SUBRIP)
-                            .setLanguage("fa")
-                            .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
-                            .build()))
+        val vm: PlayerViewModel by viewModels {
+            viewModelFactory {
+                initializer {
+                    PlayerViewModel(
+                        args,
+                        ExoPlaybackEngine(applicationContext, graph.mediaClient),
+                        graph.siteApi, graph.titleInfo, graph.titlePrefs, graph.watchStore, graph.playerPrefs,
+                    )
                 }
             }
-            .build()
-        if (BuildConfig.DEBUG) exo.addListener(object : Player.Listener {
-            override fun onTracksChanged(tracks: Tracks) {
-                tracks.groups.filter { it.type == C.TRACK_TYPE_TEXT || it.type == C.TRACK_TYPE_AUDIO }.forEach { g ->
-                    val f = g.getTrackFormat(0)
-                    Log.d("DroozPlayer", "track type=${g.type} lang=${f.language} mime=${f.sampleMimeType} " +
-                        "selected=${g.isSelected} supported=${g.isTrackSupported(0)}")
-                }
-            }
-            override fun onPlayerError(error: PlaybackException) {
-                Log.w("DroozPlayer", "error ${error.errorCodeName}", error)
-            }
-            override fun onCues(cueGroup: CueGroup) {
-                if (cueGroup.cues.isNotEmpty()) Log.d("DroozPlayer", "cue: ${cueGroup.cues.first().text}")
-            }
-        })
-        exo.setMediaItem(item)
-        exo.prepare()
-        exo.playWhenReady = true
-        player = exo
-        setContentView(PlayerView(this).apply { this.player = exo; keepScreenOn = true })
+        }
+        val engine = vm.engine as ExoPlaybackEngine
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        lifecycleScope.launch { vm.exits.collect { finish() } }
+        setContent { DroozTheme { PlayerScreen(vm, engine) } }
+        this.vm = vm
     }
 
-    override fun onDestroy() {
-        player?.release()
-        player = null
-        super.onDestroy()
+    private var vm: PlayerViewModel? = null
+
+    override fun onStop() {
+        vm?.onStop()
+        super.onStop()
     }
 
     companion object {
-        private const val EXTRA_URL = "url"
-        private const val EXTRA_SUB_FA = "sub_fa"
+        fun intent(context: Context, args: PlayerArgs): Intent =
+            args.toIntent(Intent(context, PlayerActivity::class.java))
 
-        fun intent(context: Context, session: StreamSession): Intent =
+        /** Temporary until Task 12 moves the title page to [PlayerArgs]: opens the player, which finishes at once. */
+        @Deprecated("A StreamSession carries no TitleRef; use intent(context, PlayerArgs)")
+        fun intent(context: Context, @Suppress("UNUSED_PARAMETER") session: StreamSession): Intent =
             Intent(context, PlayerActivity::class.java)
-                .putExtra(EXTRA_URL, session.masterUrl)
-                .putExtra(EXTRA_SUB_FA, session.subtitles.firstOrNull { it.label == "Farsi" }?.url)
     }
 }

@@ -115,7 +115,8 @@ data class PlayerUiState(
  */
 class PlayerViewModel(
     args: PlayerArgs,
-    private val engine: PlaybackEngine,
+    /** Public so the activity can attach the video surface (the engine lives and dies with this VM). */
+    val engine: PlaybackEngine,
     private val api: SiteApi,
     private val titleInfo: TitleInfoRepository,
     private val titlePrefs: TitlePrefs,

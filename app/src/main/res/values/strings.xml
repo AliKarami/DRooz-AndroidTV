@@ -44,4 +44,7 @@
     <string name="login_submit">ورود</string>
     <string name="login_tip">برای نوشتن در هر کادر، OK را بزنید</string>
     <string name="soon">به‌زودی</string>
+    <string name="player_subtitle_sample">این یک زیرنویس نمونه است</string>
+    <string name="player_subtitle_sample_en" translatable="false">This is a sample subtitle</string>
+    <string name="player_old_entry">پخش از این مسیر دیگر پشتیبانی نمی‌شود</string>
 </resources>

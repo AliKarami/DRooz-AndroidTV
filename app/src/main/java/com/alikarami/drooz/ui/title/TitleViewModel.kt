@@ -55,6 +55,8 @@ class TitleViewModel(
     private var watchlistInFlight = false
     private var dubRestored = false
     /** Set by a play: the page (played ✓, next episode) changed and is refetched on return. */
+    /** A player start was emitted and the page hasn't been resumed since. */
+    private var startPending = false
     private var playedSinceLoad = false
 
     private val _state = MutableStateFlow(build())
@@ -96,6 +98,7 @@ class TitleViewModel(
 
     /** The page is showing again (e.g. back from the player): after a play, revalidate it in place. */
     fun onResume() {
+        startPending = false
         if (!playedSinceLoad || detail == null) return
         playedSinceLoad = false
         load()
@@ -146,7 +149,10 @@ class TitleViewModel(
      * (and invalidates / remembers the backdrop then). Marks the page for revalidation on return.
      */
     fun play(episode: Episode? = null) {
+        // One start per visit to the page: a second press before it pauses must not stack a second player.
+        if (startPending) return
         val ep = episode ?: _state.value.primaryEpisode ?: return
+        startPending = true
         playedSinceLoad = true
         _play.trySend(PlayEvent.Start(PlayerArgs(ref, ep.streamId, dub)))
     }

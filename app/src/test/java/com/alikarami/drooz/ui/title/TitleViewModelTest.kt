@@ -185,6 +185,27 @@ class TitleViewModelTest {
         assertEquals(PlayEvent.Start(PlayerArgs(api.d.card.ref, "dub1", dub = true)), got.single())
     }
 
+    @Test fun doublePressEmitsOneStartUntilResumed() = runTest(dispatcher) {
+        val (v, _) = load(series(0))
+        val got = collect(v)
+        v.play(); v.play(); settle()
+        assertEquals(1, got.size)
+        v.onResume(); settle()
+        v.play(); settle()
+        assertEquals(2, got.size)
+    }
+
+    // The player was closed before the stream opened, so it never invalidated: the cached page stays valid.
+    @Test fun resumeWithoutInvalidationKeepsCachedPage() = runTest(dispatcher) {
+        val (v, _) = load(series(0))
+        collect(v)
+        val before = v.uiState.value.detail
+        v.play(); settle()
+        v.onResume(); settle()
+        assertNull(v.uiState.value.error)
+        assertEquals(before, v.uiState.value.detail)
+    }
+
     /** advanceUntilIdle does not run backgroundScope collectors; runCurrent does. */
     private fun TestScope.settle() { advanceUntilIdle(); runCurrent() }
 

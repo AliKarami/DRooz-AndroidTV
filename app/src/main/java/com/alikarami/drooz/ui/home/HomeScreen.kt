@@ -99,6 +99,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import androidx.compose.foundation.gestures.scrollBy
 import com.alikarami.drooz.data.HomeRows
 import com.alikarami.drooz.data.RowSource
+import com.alikarami.drooz.player.PlayerArgs
 import com.alikarami.drooz.site.model.TitleRef
 import com.alikarami.drooz.ui.common.ErrorState
 import com.alikarami.drooz.ui.common.PivotSpec
@@ -111,7 +112,10 @@ import com.alikarami.drooz.ui.theme.DroozColors
 
 class HomeViewModelFactory(private val graph: AppGraph) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
-    override fun <T : ViewModel> create(modelClass: Class<T>): T = HomeViewModel(graph.siteApi, graph.titleInfo, homeCache = graph.homeCache) as T
+    override fun <T : ViewModel> create(modelClass: Class<T>): T = HomeViewModel(
+        graph.siteApi, graph.titleInfo, homeCache = graph.homeCache,
+        watchStore = graph.watchStore, titlePrefs = graph.titlePrefs,
+    ) as T
 }
 
 /** Width of the collapsed rail; rows are clipped here so cards never slide under its icons. */
@@ -138,6 +142,8 @@ private val recentKeys = HomeRows.rows.filter { it.source is RowSource.Recent }.
 fun HomeScreen(
     vm: HomeViewModel,
     onOpen: (TitleRef) -> Unit,
+    /** OK on a resolved «ادامه تماشا» card. */
+    onPlay: (PlayerArgs) -> Unit,
     onExit: () -> Unit,
     onRailSelect: (RailItem) -> Unit = {},
 ) {
@@ -279,6 +285,13 @@ fun HomeScreen(
                                         rows.subList(rowIndex + 1, minOf(rowIndex + 3, rows.size))
                                             .forEach { vm.loadRowIfNeeded(it.key) }
                                     },
+                                    onActivate = { index ->
+                                        when (val action = vm.activate(row.key, index)) {
+                                            is HomeAction.Play -> onPlay(action.args)
+                                            is HomeAction.Open -> onOpen(action.ref)
+                                            null -> Unit // a double press while the player starts
+                                        }
+                                    },
                                     onOpen = onOpen,
                                     onRetry = { vm.retryRow(row.key) },
                                 )
@@ -322,6 +335,7 @@ private fun HomeRow(
     focusedIndex: () -> Int,
     drawerClosed: () -> Boolean,
     onFocus: (Int) -> Unit,
+    onActivate: (Int) -> Unit,
     onOpen: (TitleRef) -> Unit,
     onRetry: () -> Unit,
 ) {
@@ -373,7 +387,10 @@ private fun HomeRow(
             Slot.Cards -> {
                 // Focus was on a card a refresh removed if this row owned focus and the rail is closed.
                 val reclaim = { focusOwner.value == row.key && drawerClosed() }
-                CardsRow(row, landscape, initialIndex, entryIndex, entryRequester, slotRequester, nav, focusedIndex, reclaim, onOpen) { i ->
+                // Long-press on a «ادامه تماشا» card opens the title instead of playing.
+                val onLongOpen = onOpen.takeIf { row.key in recentKeys }
+                CardsRow(row, landscape, initialIndex, entryIndex, entryRequester, slotRequester, nav, focusedIndex, reclaim,
+                    onActivate, onLongOpen) { i ->
                     focusOwner.value = row.key
                     onFocus(i)
                 }
@@ -397,7 +414,8 @@ private fun CardsRow(
     nav: Modifier,
     focusedIndex: () -> Int,
     reclaim: () -> Boolean,
-    onOpen: (TitleRef) -> Unit,
+    onActivate: (Int) -> Unit,
+    onLongOpen: ((TitleRef) -> Unit)?,
     onFocus: (Int) -> Unit,
 ) {
     val start = initialIndex.coerceIn(0, row.items.lastIndex)
@@ -418,7 +436,9 @@ private fun CardsRow(
     }
     // Cards keep the same callbacks and modifiers across recompositions, so a row update skips them.
     val currentOnFocus by rememberUpdatedState(onFocus)
-    val currentOnOpen by rememberUpdatedState(onOpen)
+    val currentOnActivate by rememberUpdatedState(onActivate)
+    val currentOnLongOpen by rememberUpdatedState(onLongOpen)
+    val longPress = onLongOpen != null
     LazyRow(
         state = listState,
         // Entering the row by any route lands on [slot]. (focusRestorer mis-restored rows that had been
@@ -441,9 +461,13 @@ private fun CardsRow(
                     .then(if (isEntry) Modifier.focusRequester(entryRequester) else Modifier)
                     .bringIntoViewOnFocus { last = card.ref; currentOnFocus(index) }
             }
-            val open = remember(card.ref) { { currentOnOpen(card.ref) } }
+            val open = remember(card.ref) { { currentOnActivate(index) } }
+            val longOpen = remember(card.ref, longPress) {
+                if (longPress) { { currentOnLongOpen?.invoke(card.ref); Unit } } else null
+            }
             if (landscape) {
-                LandscapeCard(card.title, card.subtitle, card.posterUrl, progress = null, onClick = open, modifier = m)
+                LandscapeCard(card.title, card.subtitle, card.posterUrl, progress = card.progress, onClick = open,
+                    modifier = m, onLongClick = longOpen)
             } else {
                 PosterCard(card.title, card.posterUrl, onClick = open, modifier = m, width = PosterWidth)
             }

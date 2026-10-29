@@ -84,9 +84,12 @@ fun LandscapeCard(
     progress: Float?,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    /** Long-press OK; null leaves long-press to behave as a click. */
+    onLongClick: (() -> Unit)? = null,
 ) {
     Surface(
         onClick = onClick,
+        onLongClick = onLongClick,
         modifier = modifier.width(220.dp).droozFocus(FocusScale.CARD).height(124.dp),
         shape = ClickableSurfaceDefaults.shape(DroozCardShape),
         scale = droozSurfaceScale,

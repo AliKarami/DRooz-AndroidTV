@@ -4,8 +4,14 @@ import com.alikarami.drooz.data.Backdrop
 import com.alikarami.drooz.data.HomePageCache
 import com.alikarami.drooz.data.SiteApi
 import com.alikarami.drooz.data.TitleInfoRepository
+import com.alikarami.drooz.data.TitlePrefs
+import com.alikarami.drooz.data.WatchEntry
+import com.alikarami.drooz.data.WatchStore
+import com.alikarami.drooz.player.PlayerArgs
 import com.alikarami.drooz.site.model.*
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -369,5 +375,139 @@ class HomeViewModelTest {
         // Focus memory now follows the new card.
         vm.refresh(); advanceUntilIdle()
         assertEquals(1, vm.focusedIndex("featured"))
+    }
+
+    // ── «ادامه تماشا» (Continue Watching) ─────────────────────────────────────
+
+    private class FakeWatchStore(val entries: MutableList<WatchEntry> = mutableListOf(), var failure: Exception? = null) : WatchStore {
+        override suspend fun get(streamId: String) = entries.firstOrNull { it.streamId == streamId }
+        override suspend fun put(entry: WatchEntry) { entries.removeAll { it.streamId == entry.streamId }; entries += entry }
+        override suspend fun all(): List<WatchEntry> { failure?.let { throw it }; return entries.sortedByDescending { it.updatedAt } }
+    }
+
+    private class FakeTitlePrefs(val map: MutableMap<Long, Boolean> = mutableMapOf(), var defaultDub: Boolean = false) : TitlePrefs {
+        override suspend fun defaultDub() = defaultDub
+        override suspend fun setDefaultDub(on: Boolean) { defaultDub = on }
+        override suspend fun dubSelected(postId: Long) = map[postId]
+        override suspend fun setDubSelected(postId: Long, selected: Boolean) { map[postId] = selected }
+    }
+
+    private fun series(id: Long) = TitleRef(TitleKind.SERIES, id, "series-$id")
+    private fun ep(n: Int, played: Boolean = false) =
+        Episode(1, n, "s1e$n", listOf(VideoVariant("v", 1920, 1080, "1")), emptyList(), emptyList(), played)
+    /** A two-episode series; [playedEps] are watched on the server. */
+    private fun seriesDetail(r: TitleRef, vararg playedEps: Int) = TitleDetail(
+        card(r, "Series ${r.postId}"), null, emptyList(),
+        StreamCatalog(listOf(Season(1, (1..2).map { ep(it, it in playedEps) })), emptyList()),
+        emptyList(), null,
+    )
+    private fun recentHome(vararg refs: TitleRef) =
+        home().copy(recentlyStreamed = refs.map { PosterRef(it, "rp${it.postId}") })
+    private fun local(r: TitleRef, streamId: String, pos: Long, dur: Long = 3_000_000, at: Long = 1) =
+        WatchEntry(streamId, r.path, 1, 1, pos, dur, at, finished = false)
+
+    // Not backgroundScope: advanceUntilIdle must also run the repository's fetches.
+    private fun cwVm(api: FakeApi, store: FakeWatchStore = FakeWatchStore(), prefs: FakeTitlePrefs = FakeTitlePrefs()) =
+        HomeViewModel(api, TitleInfoRepository(api, fetchScope = CoroutineScope(dispatcher + SupervisorJob())),
+            watchStore = store, titlePrefs = prefs)
+
+    private fun HomeViewModel.recent() = uiState.value.rows.first { it.key == "recent" }
+
+    @Test fun recentRow_showsPendingThenResolvedLabel() = runTest(dispatcher) {
+        val a = series(1)
+        val gate = CompletableDeferred<Unit>()
+        val api = FakeApi(recentHome(a), onTitle = { gate.await(); seriesDetail(it, 1) })
+        val vm = cwVm(api); runCurrent()
+        assertEquals(listOf(a), vm.recent().items.map { it.ref })
+        assertNull(vm.recent().items.single().subtitle)
+        gate.complete(Unit); advanceUntilIdle()
+        assertEquals("فصل ۱ · قسمت ۲", vm.recent().items.single().subtitle)
+    }
+
+    @Test fun recentRow_dropsFullyWatchedSeries() = runTest(dispatcher) {
+        val a = series(1); val b = series(2)
+        val api = FakeApi(recentHome(a, b), onTitle = { if (it == a) seriesDetail(it, 1, 2) else seriesDetail(it) })
+        val vm = cwVm(api); advanceUntilIdle()
+        assertEquals(listOf(b), vm.recent().items.map { it.ref })
+    }
+
+    @Test fun recentRow_appendsLocalOnlyTitle() = runTest(dispatcher) {
+        val a = series(1); val c = series(3)
+        val store = FakeWatchStore(mutableListOf(local(c, "s1e1", pos = 600_000)))
+        val api = FakeApi(recentHome(a), onTitle = { seriesDetail(it) })
+        val vm = cwVm(api, store); advanceUntilIdle()
+        val items = vm.recent().items
+        assertEquals(listOf(a, c), items.map { it.ref })
+        assertEquals(0.2f, items[1].progress!!, 0.001f)
+    }
+
+    @Test fun recentRow_failedDetail_keepsPendingCard() = runTest(dispatcher) {
+        val a = series(1); val b = series(2)
+        val api = FakeApi(recentHome(a, b), onTitle = { if (it == a) error("net") else seriesDetail(it) })
+        val vm = cwVm(api); advanceUntilIdle()
+        val items = vm.recent().items
+        assertEquals(listOf(a, b), items.map { it.ref })
+        assertNull(items[0].subtitle)
+        assertEquals("فصل ۱ · قسمت ۱", items[1].subtitle)
+    }
+
+    @Test fun recentRow_failingStore_actsAsNoLocalState() = runTest(dispatcher) {
+        val a = series(1)
+        val api = FakeApi(recentHome(a), onTitle = { seriesDetail(it, 1) })
+        val vm = cwVm(api, FakeWatchStore(failure = java.io.IOException("disk"))); advanceUntilIdle()
+        assertEquals("فصل ۱ · قسمت ۲", vm.recent().items.single().subtitle)
+    }
+
+    @Test fun activate_resolvedRecentCard_playsNextEpisode() = runTest(dispatcher) {
+        val a = series(1)
+        val api = FakeApi(recentHome(a), onTitle = { seriesDetail(it, 1) })
+        val vm = cwVm(api); advanceUntilIdle()
+        assertEquals(HomeAction.Play(PlayerArgs(a, "s1e2", dub = false)), vm.activate("recent", 0))
+    }
+
+    @Test fun activate_usesSavedDubOnlyWhenTitleHasDub() = runTest(dispatcher) {
+        val a = series(1); val b = series(2)
+        val dubbed = { r: TitleRef -> seriesDetail(r).let { it.copy(catalog = it.catalog.copy(dub = it.catalog.main)) } }
+        val api = FakeApi(recentHome(a, b), onTitle = { if (it == a) dubbed(it) else seriesDetail(it) })
+        val vm = cwVm(api, prefs = FakeTitlePrefs(defaultDub = true)); advanceUntilIdle()
+        assertEquals(HomeAction.Play(PlayerArgs(a, "s1e1", dub = true)), vm.activate("recent", 0))
+        vm.onResume()
+        assertEquals(HomeAction.Play(PlayerArgs(b, "s1e1", dub = false)), vm.activate("recent", 1))
+    }
+
+    @Test fun activate_pendingCard_opensTitle() = runTest(dispatcher) {
+        val a = series(1)
+        val api = FakeApi(recentHome(a), onTitle = { CompletableDeferred<TitleDetail>().await() })
+        val vm = cwVm(api); runCurrent()
+        assertEquals(HomeAction.Open(a), vm.activate("recent", 0))
+    }
+
+    @Test fun activate_twiceWithoutResume_secondIsNull() = runTest(dispatcher) {
+        val a = series(1)
+        val api = FakeApi(recentHome(a), onTitle = { seriesDetail(it) })
+        val vm = cwVm(api); advanceUntilIdle()
+        assertTrue(vm.activate("recent", 0) is HomeAction.Play)
+        assertNull(vm.activate("recent", 0))
+        vm.onResume(); advanceUntilIdle()
+        assertTrue(vm.activate("recent", 0) is HomeAction.Play)
+    }
+
+    @Test fun onResume_refreshesProgressFromStore_withoutRefetch() = runTest(dispatcher) {
+        val a = series(1)
+        val store = FakeWatchStore()
+        val api = FakeApi(recentHome(a), onTitle = { seriesDetail(it) })
+        val vm = cwVm(api, store); advanceUntilIdle()
+        assertNull(vm.recent().items.single().progress)
+        val calls = api.titleCalls.size
+        store.entries += local(a, "s1e1", pos = 1_500_000)
+        vm.onResume(); advanceUntilIdle()
+        assertEquals(0.5f, vm.recent().items.single().progress!!, 0.001f)
+        assertEquals(calls, api.titleCalls.size)
+    }
+
+    @Test fun activate_otherRow_opensTitle() = runTest(dispatcher) {
+        val api = FakeApi(home(), onTitle = { seriesDetail(it) })
+        val vm = cwVm(api); advanceUntilIdle()
+        assertEquals(HomeAction.Open(ref(11)), vm.activate("featured", 1))
     }
 }

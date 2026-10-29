@@ -109,7 +109,10 @@ fun DroozNavHost(
             val vm: HomeViewModel = viewModel(factory = HomeViewModelFactory(graph))
             // Debug play: once Home is reached (straight away, or after the debug login).
             LaunchedEffect(Unit) { appVm.takeDebugPlay()?.let { openTitle(null, it, autoPlay = true) } }
-            HomeScreen(vm, onOpen = { openTitle(entry, it) }, onExit = onExit, onRailSelect = { item ->
+            HomeScreen(vm, onOpen = { openTitle(entry, it) }, onPlay = { args ->
+                // The view model already drops a second Play before home resumes.
+                if (entry.isResumed()) context.startActivity(PlayerActivity.intent(context, args))
+            }, onExit = onExit, onRailSelect = { item ->
                 when (item) {
                     RailItem.Search -> go(entry, Search)
                     RailItem.Home -> Unit // HomeScreen closes the rail

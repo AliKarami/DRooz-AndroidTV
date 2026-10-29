@@ -71,9 +71,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
-import androidx.compose.runtime.DisposableEffect
-import com.alikarami.drooz.site.model.StreamSession
-import com.alikarami.drooz.ui.common.BusySpinner
+import com.alikarami.drooz.player.PlayerArgs
 import androidx.tv.material3.Border
 import androidx.tv.material3.ClickableSurfaceDefaults
 import androidx.tv.material3.MaterialTheme
@@ -139,7 +137,7 @@ private sealed interface Tab {
 fun TitleScreen(
     ref: TitleRef,
     vm: TitleViewModel,
-    onStartPlayer: (StreamSession) -> Unit,
+    onStartPlayer: (PlayerArgs) -> Unit,
     onOpenTitle: (TitleRef) -> Unit,
     featuredBackdropHash: String? = null,
     playedBackdrops: Map<TitleRef, String> = emptyMap(),
@@ -153,17 +151,13 @@ fun TitleScreen(
         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             vm.playEvents.collect { e ->
                 when (e) {
-                    is PlayEvent.Start -> startPlayer(e.session)
-                    is PlayEvent.Failed -> Toast.makeText(context, e.message, Toast.LENGTH_SHORT).show()
+                    is PlayEvent.Start -> startPlayer(e.args)
                 }
             }
         }
     }
-    // Leaving the page (Back, a suggestion) or the app cancels a pending play.
-    LifecycleEventEffect(Lifecycle.Event.ON_STOP) { vm.cancelPlay() }
     // Back from the player: the page (played ✓, next episode) is revalidated in place.
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.onResume() }
-    DisposableEffect(vm) { onDispose { vm.cancelPlay() } }
 
     val detail = state.detail
     LaunchedEffect(state.error) {
@@ -433,7 +427,6 @@ private fun Buttons(
         if (hasPrimary) {
             PillButton(
                 "▶  ${state.primaryLabel}", { vm.play() }, down.focusRequester(primaryRequester),
-                busy = state.playBusy?.primary == true,
             )
         }
         // Unknown state (the page didn't say): a plain label that claims neither.
@@ -455,7 +448,7 @@ private val PillShape = RoundedCornerShape(8.dp)
 
 /** Mockup `.btn`: translucent pill, white with black text when focused. */
 @Composable
-private fun PillButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, busy: Boolean = false) {
+private fun PillButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
     Surface(
         onClick = onClick,
         modifier = modifier,
@@ -471,13 +464,11 @@ private fun PillButton(text: String, onClick: () -> Unit, modifier: Modifier = M
         ),
     ) {
         Box(contentAlignment = Alignment.Center) {
-            // The label keeps the button's width while the spinner shows (no layout jump).
             Text(
-                text, Modifier.padding(horizontal = 20.dp, vertical = 9.dp).alpha(if (busy) 0f else 1f),
+                text, Modifier.padding(horizontal = 20.dp, vertical = 9.dp),
                 style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
                 maxLines = 1, softWrap = false,
             )
-            if (busy) BusySpinner()
         }
     }
 }
@@ -607,7 +598,6 @@ private fun Episodes(state: TitleUiState, vm: TitleViewModel, requester: FocusRe
                 watched = e.watched,
                 progress = null,
                 onClick = { vm.play(e.episode) },
-                busy = state.playBusy?.let { !it.primary && it.streamId == e.episode.streamId } == true,
                 modifier = Modifier
                     .then(if (i == last.coerceIn(0, eps.lastIndex)) Modifier.focusRequester(slot) else Modifier)
                     .onFocusChanged { if (it.isFocused) last = i },

@@ -4,7 +4,6 @@ import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.view.WindowManager
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
@@ -12,10 +11,8 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.alikarami.drooz.DroozApp
-import com.alikarami.drooz.R
 import com.alikarami.drooz.player.engine.ExoPlaybackEngine
 import com.alikarami.drooz.player.ui.PlayerScreen
-import com.alikarami.drooz.site.model.StreamSession
 import com.alikarami.drooz.ui.theme.DroozTheme
 import kotlinx.coroutines.launch
 
@@ -28,7 +25,6 @@ class PlayerActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val args = PlayerArgs.from(intent)
         if (args == null) {
-            Toast.makeText(this, R.string.player_old_entry, Toast.LENGTH_SHORT).show()
             finish()
             return
         }
@@ -61,10 +57,5 @@ class PlayerActivity : ComponentActivity() {
     companion object {
         fun intent(context: Context, args: PlayerArgs): Intent =
             args.toIntent(Intent(context, PlayerActivity::class.java))
-
-        /** Temporary until Task 12 moves the title page to [PlayerArgs]: opens the player, which finishes at once. */
-        @Deprecated("A StreamSession carries no TitleRef; use intent(context, PlayerArgs)")
-        fun intent(context: Context, @Suppress("UNUSED_PARAMETER") session: StreamSession): Intent =
-            Intent(context, PlayerActivity::class.java)
     }
 }

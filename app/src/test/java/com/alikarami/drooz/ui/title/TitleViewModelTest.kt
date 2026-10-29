@@ -1,6 +1,7 @@
 package com.alikarami.drooz.ui.title
 
 import com.alikarami.drooz.data.SiteApi
+import com.alikarami.drooz.player.PlayerArgs
 import com.alikarami.drooz.data.TitleInfoRepository
 import com.alikarami.drooz.data.TitlePrefs
 import kotlinx.coroutines.CompletableDeferred
@@ -95,6 +96,10 @@ class TitleViewModelTest {
         val api = FakeApi(d); val v = vm(api); advanceUntilIdle(); return v to api
     }
 
+    private suspend fun TestScope.loadWithRepo(d: TitleDetail): Triple<TitleViewModel, FakeApi, TitleInfoRepository> {
+        val api = FakeApi(d); val r = repo(api); val v = vm(api, r); advanceUntilIdle(); return Triple(v, api, r)
+    }
+
     @Test fun primaryLabelNotStarted() = runTest(dispatcher) {
         val (v, _) = load(series(0))
         assertEquals("پخش قسمت ۱", v.uiState.value.primaryLabel)
@@ -152,63 +157,32 @@ class TitleViewModelTest {
         assertFalse(v.uiState.value.dubSelected)
     }
 
+    @Test fun playEmitsArgsForPrimaryEpisode() = runTest(dispatcher) {
+        val (v, api) = load(series(0).let { d -> d.copy(catalog = d.catalog.copy(main = listOf(
+            Season(1, listOf(ep(1, 1, played = true), ep(1, 2))), Season(2, listOf(ep(2, 1)))))) })
+        val got = collect(v)
+        v.play(); settle()
+        assertEquals(listOf<PlayEvent>(PlayEvent.Start(PlayerArgs(api.d.card.ref, "s1e2", dub = false))), got)
+        assertTrue(api.streams.isEmpty())
+    }
+
+    @Test fun playTileEmitsThatEpisode() = runTest(dispatcher) {
+        val (v, api) = load(series(0))
+        val got = collect(v)
+        v.selectSeason(2)
+        v.play(v.uiState.value.episodes[0].episode); settle()
+        assertEquals(listOf<PlayEvent>(PlayEvent.Start(PlayerArgs(api.d.card.ref, "s2e1", dub = false))), got)
+        assertTrue(api.streams.isEmpty())
+    }
+
     @Test fun dubSelectionPlaysDubStream() = runTest(dispatcher) {
         val dub = listOf(Season(1, listOf(ep(1, 1, id = "dub1"))))
         val (v, api) = load(series(0, dub = dub))
         assertTrue(v.uiState.value.dubAvailable)
         val got = collect(v)
-        v.play(); settle()
-        assertEquals(Triple("s1e1", "original", 1080), api.streams.last())
         v.toggleDub()
-        assertTrue(v.uiState.value.dubSelected)
         v.play(); settle()
-        assertEquals(Triple("dub1", "dubbed-fa", 1080), api.streams.last())
-        assertEquals(2, got.count { it is PlayEvent.Start })
-    }
-
-    @Test fun playShowsBusyAndIgnoresRepeats() = runTest(dispatcher) {
-        val (v, api) = load(series(2))
-        val got = collect(v)
-        api.streamGate = CompletableDeferred()
-        v.play(); runCurrent()
-        assertEquals(PlayBusy("s1e3", primary = true), v.uiState.value.playBusy)
-        v.play(); v.play(v.uiState.value.episodes[0].episode); runCurrent()
-        assertEquals(1, api.streams.size)
-        api.streamGate!!.complete(Unit); settle()
-        assertNull(v.uiState.value.playBusy)
-        assertEquals(1, got.size)
-        assertTrue(got.single() is PlayEvent.Start)
-    }
-
-    @Test fun cancelledPlayNeverStarts() = runTest(dispatcher) {
-        val (v, api) = load(series(0))
-        val got = collect(v)
-        api.streamGate = CompletableDeferred()
-        v.play(v.uiState.value.episodes[1].episode); runCurrent()
-        assertEquals(PlayBusy("s1e2", primary = false), v.uiState.value.playBusy)
-        v.cancelPlay()
-        assertNull(v.uiState.value.playBusy)
-        api.streamGate!!.complete(Unit); settle()
-        assertTrue(got.isEmpty())
-        // A new press works again.
-        v.play(); settle()
-        assertEquals(1, got.size)
-    }
-
-    @Test fun playFailureMessages() = runTest(dispatcher) {
-        val (v, api) = load(series(0))
-        val got = collect(v)
-        api.streamFailure = com.alikarami.drooz.site.SiteException.NetworkError(RuntimeException("x"))
-        v.play(); settle()
-        assertEquals(PlayEvent.Failed("اتصال به سایت برقرار نشد؛ دوباره تلاش کنید"), got.last())
-        api.streamFailure = com.alikarami.drooz.site.SiteException.ParseError("stream")
-        v.play(); settle()
-        assertEquals(PlayEvent.Failed("پخش شروع نشد"), got.last())
-        // A lost session is routed to Login by the app; no toast.
-        api.streamFailure = com.alikarami.drooz.site.SiteException.NotLoggedIn()
-        v.play(); settle()
-        assertEquals(2, got.size)
-        assertNull(v.uiState.value.playBusy)
+        assertEquals(PlayEvent.Start(PlayerArgs(api.d.card.ref, "dub1", dub = true)), got.single())
     }
 
     /** advanceUntilIdle does not run backgroundScope collectors; runCurrent does. */
@@ -325,9 +299,10 @@ class TitleViewModelTest {
 
     // #1: after a play, coming back revalidates the page in place (no skeleton) and shows the new progress.
     @Test fun resumeAfterPlayRevalidatesInPlace() = runTest(dispatcher) {
-        val (v, api) = load(series(0))
+        val (v, api, repo) = loadWithRepo(series(0))
         collect(v)
         v.play(); settle()
+        repo.invalidate(api.d.card.ref)       // the player does this when the stream opens
         api.d = series(1)
         api.titleGate = CompletableDeferred()
         v.onResume(); runCurrent()
@@ -347,10 +322,11 @@ class TitleViewModelTest {
 
     // The focused tile stays put: revalidation never switches the season under the user.
     @Test fun revalidationKeepsSelectedSeason() = runTest(dispatcher) {
-        val (v, api) = load(series(4))
+        val (v, api, repo) = loadWithRepo(series(4))
         collect(v)
         assertEquals(1, v.uiState.value.selectedSeason)
         v.play(); settle()
+        repo.invalidate(api.d.card.ref)
         api.d = series(5)
         v.onResume(); advanceUntilIdle()
         assertEquals("ادامه فصل ۲ قسمت ۱", v.uiState.value.primaryLabel)
@@ -375,6 +351,7 @@ class TitleViewModelTest {
         val v = vm(api, repo); advanceUntilIdle()
         collect(v)
         v.play(); settle()
+        repo.invalidate(api.d.card.ref)
         api.d = series(1)
         api.titleGate = CompletableDeferred()
         val again = vm(api, repo); runCurrent()

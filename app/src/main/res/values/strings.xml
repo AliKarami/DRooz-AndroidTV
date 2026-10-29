@@ -46,7 +46,6 @@
     <string name="soon">به‌زودی</string>
     <string name="player_subtitle_sample">این یک زیرنویس نمونه است</string>
     <string name="player_subtitle_sample_en" translatable="false">This is a sample subtitle</string>
-    <string name="player_old_entry">پخش از این مسیر دیگر پشتیبانی نمی‌شود</string>
     <string name="player_seek_back">−۱۰</string>
     <string name="player_seek_forward">+۱۰</string>
     <string name="player_subtitle_audio">زیرنویس و صدا</string>

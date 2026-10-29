@@ -8,6 +8,7 @@ object UiStrings {
     const val SUBTITLE = "زیرنویس"
     const val PLAY_FAILED = "پخش شروع نشد"
     const val PLAY_FAILED_NETWORK = "اتصال به سایت برقرار نشد؛ دوباره تلاش کنید"
+    const val PLAYBACK_FAILED = "پخش با مشکل روبه‌رو شد"
 
     fun continueWatching(season: Int, episode: Int): String = "ادامه فصل $season قسمت $episode".toPersianDigits()
     /** Not-started series: names the episode that will play; the season only when it isn't the first. */

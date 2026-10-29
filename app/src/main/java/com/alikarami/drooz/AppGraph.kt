@@ -3,7 +3,9 @@ package com.alikarami.drooz
 import android.content.Context
 import coil3.ImageLoader
 import com.alikarami.drooz.data.AuthApi
+import com.alikarami.drooz.data.AppCacheCleaner
 import com.alikarami.drooz.data.AuthApiAdapter
+import com.alikarami.drooz.data.CacheCleaner
 import com.alikarami.drooz.data.SiteApi
 import com.alikarami.drooz.data.SiteApiAdapter
 import com.alikarami.drooz.data.SessionEvents
@@ -70,4 +72,5 @@ class AppGraph(context: Context) {
         .build()
 
     val imageLoader: ImageLoader = buildImageLoader(appContext, mediaClient)
+    val cacheCleaner: CacheCleaner = AppCacheCleaner(imageLoader, homeCache, titleInfo)
 }

@@ -37,7 +37,9 @@ class AppViewModelTest {
     @After fun tearDown() = Dispatchers.resetMain()
 
     private class FakeAuth(override val isLoggedIn: Boolean) : AuthApi {
+        override val username: String? = null
         override suspend fun login(username: String, password: String, mobile: String?) = LoginResult.Success
+        override suspend fun logout() {}
     }
 
     private fun TestScope.collect(vm: AppViewModel): MutableList<AppNav> {
@@ -102,6 +104,22 @@ class AppViewModelTest {
         vm.onLoggedIn()
         assertNull(repo.lastKnown(r))
         assertTrue(repo.playedBackdrops.value.isEmpty())
+    }
+
+    @Test fun onLoggedOut_clearsCaches() = runTest(dispatcher) {
+        val cache = HomePageCache(ttlMs = 600_000) { 0L }
+        val repo = TitleInfoRepository(NoApi(), fetchScope = backgroundScope)
+        val r = TitleRef(TitleKind.FILM, 1, "a")
+        val vm = AppViewModel(FakeAuth(true), SessionEvents(), homeCache = cache, titleInfo = repo)
+        runCurrent()
+        cache.put(HomePage(emptyList(), emptyList(), emptyList()))
+        repo.get(r); repo.remember(r, "/bd.jpg")
+        vm.onLoggedOut()
+        assertNull(cache.fresh())
+        assertNull(repo.lastKnown(r))
+        assertTrue(repo.playedBackdrops.value.isEmpty())
+        // A debug play never waits on a login that will not come from this launch.
+        assertEquals(null, vm.takeDebugPlay())
     }
 
     @Test fun notLoggedInRoutesToLogin() = runTest(dispatcher) {

@@ -33,6 +33,8 @@ class LoginViewModelTest {
         val calls = mutableListOf<Triple<String, String, String?>>()
         var gate: CompletableDeferred<Unit>? = null
         override val isLoggedIn = false
+        override val username: String? = null
+        override suspend fun logout() {}
         override suspend fun login(username: String, password: String, mobile: String?): LoginResult {
             calls += Triple(username, password, mobile)
             gate?.await()

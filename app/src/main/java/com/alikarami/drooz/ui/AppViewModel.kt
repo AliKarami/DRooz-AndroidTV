@@ -70,6 +70,17 @@ class AppViewModel(
         titleInfo?.clear()
     }
 
+    /**
+     * The user signed out from Settings: drop the session's caches. The sign-out itself brings the app to
+     * Login, so [routedToLogin] is set (a stale failure from a screen being torn down must not route a
+     * second time); the next [onLoggedIn] clears it, so a later lost session routes again.
+     */
+    fun onLoggedOut() {
+        forgetSession()
+        routedToLogin = true
+        loginPending = false
+    }
+
     fun onLoggedIn() {
         // The next home must come from the new session, never from a page cached before it.
         forgetSession()

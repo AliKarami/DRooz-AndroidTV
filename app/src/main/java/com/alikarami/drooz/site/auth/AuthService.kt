@@ -28,6 +28,9 @@ class AuthService(
 ) {
     val isLoggedIn: Boolean get() = jar.cookie(SESSION_COOKIE) != null
 
+    /** The signed-in account's username from the stored credentials; null if none. */
+    val username: String? get() = creds.load()?.username
+
     /** The current session cookie value; changes whenever a login succeeds. */
     val sessionToken: String? get() = jar.cookie(SESSION_COOKIE)
 

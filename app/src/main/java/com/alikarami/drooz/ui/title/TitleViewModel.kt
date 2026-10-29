@@ -90,10 +90,10 @@ class TitleViewModel(
         }
     }
 
-    /** A failing store just means no local state. */
+    /** A failing store just means no local state. Matched by postId: links to one title may differ in slug. */
     private suspend fun readLocal() {
         local = runCatching { watchStore.all() }.getOrNull().orEmpty()
-            .filter { it.refPath == ref.path }.associateBy { it.streamId }
+            .filter { TitleRef.fromPath(it.refPath)?.postId == ref.postId }.associateBy { it.streamId }
     }
 
     private suspend fun show(d: TitleDetail) {

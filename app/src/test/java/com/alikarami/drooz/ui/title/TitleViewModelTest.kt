@@ -444,6 +444,14 @@ class TitleViewModelTest {
         assertFalse(v.uiState.value.episodes[0].watched)
     }
 
+    // Home keys local state by streamId; a link with other slug text must not hide it here.
+    @Test fun entriesFromALinkWithAnotherSlug_stillApply() = runTest(dispatcher) {
+        store.entries += entry("s1e1", 2_900_000, 3_000_000, finished = true, path = "/post/series/7/other-slug/")
+        val (v, _) = load(series(0))
+        assertTrue(v.uiState.value.episodes[0].watched)
+        assertEquals(UiStrings.continueWatching(1, 2), v.uiState.value.primaryLabel)
+    }
+
     @Test fun defaultDub_appliesOnlyWithoutSavedChoice() = runTest(dispatcher) {
         val dub = listOf(Season(1, listOf(ep(1, 1, id = "dub1"))))
         prefs = FakePrefs(defaultDub = true)

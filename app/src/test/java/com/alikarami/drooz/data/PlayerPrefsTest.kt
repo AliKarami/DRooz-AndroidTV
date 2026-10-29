@@ -33,6 +33,10 @@ class PlayerPrefsTest {
         prefs.update { it.copy(subtitle = SubtitleChoice.EN) }
         prefs.update { it.copy(subtitle = SubtitleChoice.FA_DUB) }
         assertEquals(SubtitleChoice.EN, prefs.settings.first().subtitle)
+        prefs.update { it.copy(subtitle = SubtitleChoice.FA_DUB, audioBoost = false) }
+        val after = prefs.settings.first()
+        assertEquals(SubtitleChoice.EN, after.subtitle)
+        assertEquals(false, after.audioBoost)
     }
 
     @Test fun outOfRangeAndUnknownValuesFallBackToDefaults() = runTest {

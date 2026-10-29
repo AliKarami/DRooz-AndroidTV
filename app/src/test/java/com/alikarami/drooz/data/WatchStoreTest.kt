@@ -55,4 +55,13 @@ class WatchStoreTest {
         assertNull(store.get("s1"))
         assertEquals("s501", store.all().first().streamId)
     }
+
+    @Test fun ioFailureOnPersistDoesNotThrowAndKeepsEntryInMemory() = runTest {
+        val target = tmp.newFolder("w.json")      // a non-empty directory where the file should be
+        java.io.File(target, "x").writeText("x")
+        val store = FileWatchStore(target) { now }
+        now = 7; store.put(entry("a", 5))
+        assertEquals(5L, store.get("a")!!.positionMs)
+        assertEquals(false, java.io.File(target.parentFile, "w.json.tmp").exists())
+    }
 }

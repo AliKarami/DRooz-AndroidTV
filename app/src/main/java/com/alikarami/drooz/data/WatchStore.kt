@@ -1,5 +1,7 @@
 package com.alikarami.drooz.data
 
+import android.util.Log
+import com.alikarami.drooz.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -8,6 +10,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import java.io.File
+import java.io.IOException
 
 @Serializable
 data class WatchEntry(
@@ -50,7 +53,12 @@ class FileWatchStore(
         if (map.size > WATCH_STORE_CAP) {
             map.values.sortedBy { it.updatedAt }.take(map.size - WATCH_STORE_CAP).forEach { map.remove(it.streamId) }
         }
-        persist(map.values.toList())
+        try {
+            persist(map.values.toList())
+        } catch (e: IOException) {
+            // Playback must never crash on a disk error; the entry stays in memory.
+            if (BuildConfig.DEBUG) Log.w("WatchStore", "persist failed: $e")
+        }
     }
 
     override suspend fun all(): List<WatchEntry> = mutex.withLock { loaded().values.sortedByDescending { it.updatedAt } }
@@ -63,9 +71,14 @@ class FileWatchStore(
 
     private suspend fun persist(list: List<WatchEntry>) = withContext(Dispatchers.IO) {
         val tmp = File(file.parentFile, file.name + ".tmp")
-        tmp.writeText(json.encodeToString(serializer, list))
-        if (!tmp.renameTo(file)) {
-            java.nio.file.Files.move(tmp.toPath(), file.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        try {
+            tmp.writeText(json.encodeToString(serializer, list))
+            if (!tmp.renameTo(file)) {
+                java.nio.file.Files.move(tmp.toPath(), file.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+            }
+        } catch (e: IOException) {
+            tmp.delete()
+            throw e
         }
     }
 }

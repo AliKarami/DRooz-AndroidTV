@@ -5,8 +5,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,6 +16,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -41,17 +41,23 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.tv.material3.ClickableSurfaceDefaults
+import androidx.tv.material3.Icon
 import androidx.tv.material3.LocalContentColor
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Surface
@@ -75,6 +81,10 @@ private const val SEEK_POLL_MS = 250L
 
 private val PillShape = RoundedCornerShape(50)
 private val PillHeight = 44.dp
+private val IconSize = 52.dp
+private val PlaySize = 64.dp
+/** Room under the icons for the focused one's label. */
+private val LabelSlot = 30.dp
 
 /**
  * Top: title + episode. Bottom: the LTR seek bar, then the buttons (LTR −10 / ⏯ / +10 cluster first,
@@ -151,48 +161,118 @@ private fun ButtonsRow(
     onOpen: (Overlay) -> Unit,
     onNext: () -> Unit,
 ) {
-    // Centred when it fits; scrolls (the focused pill brings itself into view) if a long row would not,
-    // so no button is ever clipped out of reach.
-    Box(Modifier.fillMaxWidth().padding(top = 16.dp), contentAlignment = Alignment.Center) {
-    Row(
-        Modifier
-            .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 8.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        // Physical right = forward, as on every TV app (designer's call against the RTL layout).
-        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                PlayerPill(stringResource(R.string.player_seek_back), { onSeekBy(-SEEK_STEP_MS) })
-                PlayerPill(onTogglePlay, Modifier.focusRequester(requesters.getValue(ControlsTarget.PLAY))) {
-                    PlayPauseIcon(playing, Modifier.padding(horizontal = 20.dp).size(18.dp))
+    // Transport on the physical left, under the elapsed clock; physical right = forward, as on every TV
+    // app (designer's call against the RTL layout). The menu icons sit on the right, in RTL order.
+    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+        Row(
+            Modifier.fillMaxWidth().padding(top = 18.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Top,
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                ControlIcon(stringResource(R.string.player_seek_back), { onSeekBy(-SEEK_STEP_MS) }, showLabel = false) {
+                    SeekGlyph(forward = false)
                 }
-                PlayerPill(stringResource(R.string.player_seek_forward), { onSeekBy(SEEK_STEP_MS) })
+                ControlIcon(
+                    "", onTogglePlay, Modifier.focusRequester(requesters.getValue(ControlsTarget.PLAY)),
+                    size = PlaySize, showLabel = false,
+                ) { PlayPauseIcon(playing, Modifier.size(22.dp)) }
+                ControlIcon(stringResource(R.string.player_seek_forward), { onSeekBy(SEEK_STEP_MS) }, showLabel = false) {
+                    SeekGlyph(forward = true)
+                }
+            }
+            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+                Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    ControlIcon(
+                        stringResource(R.string.player_subtitle_audio), { onOpen(Overlay.SUBTITLE_AUDIO) },
+                        Modifier.focusRequester(requesters.getValue(ControlsTarget.SUBTITLE_AUDIO)),
+                    ) { GlyphIcon(PlayerIcons.Subtitles) }
+                    ControlIcon(
+                        UiStrings.qualityButton(state.selectedQuality), { onOpen(Overlay.QUALITY) },
+                        Modifier.focusRequester(requesters.getValue(ControlsTarget.QUALITY)),
+                    ) { GlyphIcon(PlayerIcons.Quality) }
+                    ControlIcon(
+                        UiStrings.speedButton(state.speed), { onOpen(Overlay.SPEED) },
+                        Modifier.focusRequester(requesters.getValue(ControlsTarget.SPEED)),
+                    ) { GlyphIcon(PlayerIcons.Speed) }
+                    if (state.seasonEpisodes.isNotEmpty()) {
+                        ControlIcon(
+                            stringResource(R.string.player_episodes), { onOpen(Overlay.EPISODES) },
+                            Modifier.focusRequester(requesters.getValue(ControlsTarget.EPISODES)),
+                        ) { GlyphIcon(PlayerIcons.Episodes) }
+                    }
+                    if (state.hasNext) {
+                        ControlIcon(stringResource(R.string.player_next_episode), onNext) { GlyphIcon(PlayerIcons.Next) }
+                    }
+                }
             }
         }
-        PlayerPill(
-            stringResource(R.string.player_subtitle_audio), { onOpen(Overlay.SUBTITLE_AUDIO) },
-            Modifier.focusRequester(requesters.getValue(ControlsTarget.SUBTITLE_AUDIO)),
-        )
-        PlayerPill(
-            UiStrings.qualityButton(state.selectedQuality), { onOpen(Overlay.QUALITY) },
-            Modifier.focusRequester(requesters.getValue(ControlsTarget.QUALITY)),
-        )
-        PlayerPill(
-            UiStrings.speedButton(state.speed), { onOpen(Overlay.SPEED) },
-            Modifier.focusRequester(requesters.getValue(ControlsTarget.SPEED)),
-        )
-        if (state.seasonEpisodes.isNotEmpty()) {
-            PlayerPill(
-                stringResource(R.string.player_episodes), { onOpen(Overlay.EPISODES) },
-                Modifier.focusRequester(requesters.getValue(ControlsTarget.EPISODES)),
-            )
+    }
+}
+
+/**
+ * Round icon button: translucent idle, white with a black glyph when focused. Its [label] fades in under
+ * it while focused (a fixed-height slot, so the row never jumps); the label may be wider than the icon.
+ */
+@Composable
+private fun ControlIcon(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    size: Dp = IconSize,
+    showLabel: Boolean = true,
+    glyph: @Composable () -> Unit,
+) {
+    var focused by remember { mutableStateOf(false) }
+    val labelAlpha by animateFloatAsState(if (focused && showLabel) 1f else 0f, tween(150), label = "iconLabel")
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Surface(
+            onClick = onClick,
+            modifier = modifier.size(size).onFocusChanged { focused = it.isFocused }
+                .semantics { if (label.isNotEmpty()) contentDescription = label },
+            shape = ClickableSurfaceDefaults.shape(CircleShape),
+            scale = ClickableSurfaceDefaults.scale(focusedScale = 1.12f),
+            colors = ClickableSurfaceDefaults.colors(
+                containerColor = Color.White.copy(alpha = 0.14f),
+                contentColor = Color.White,
+                focusedContainerColor = Color.White,
+                focusedContentColor = Color.Black,
+                pressedContainerColor = Color.White.copy(alpha = 0.85f),
+                pressedContentColor = Color.Black,
+            ),
+        ) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { glyph() }
         }
-        if (state.hasNext) {
-            PlayerPill(stringResource(R.string.player_next_episode), onNext)
+        Box(Modifier.height(LabelSlot), contentAlignment = Alignment.BottomCenter) {
+            if (showLabel) {
+                Text(
+                    label,
+                    Modifier.wrapContentWidth(unbounded = true).graphicsLayer { alpha = labelAlpha },
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                    color = Color.White, maxLines = 1, softWrap = false,
+                )
+            }
         }
     }
+}
+
+@Composable
+private fun GlyphIcon(icon: ImageVector) {
+    Icon(icon, contentDescription = null, modifier = Modifier.size(26.dp), tint = LocalContentColor.current)
+}
+
+/** Circular arrow with «۱۰» inside; mirrored for forward. */
+@Composable
+private fun SeekGlyph(forward: Boolean) {
+    Box(contentAlignment = Alignment.Center) {
+        Icon(
+            PlayerIcons.Replay, contentDescription = null, tint = LocalContentColor.current,
+            modifier = Modifier.size(30.dp).graphicsLayer { if (forward) scaleX = -1f },
+        )
+        Text(
+            "۱۰", Modifier.padding(top = 3.dp),
+            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 9.sp),
+        )
     }
 }
 

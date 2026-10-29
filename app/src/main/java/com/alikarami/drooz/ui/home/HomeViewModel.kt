@@ -71,6 +71,8 @@ class HomeViewModel(
     private val entries = HashMap<String, List<Entry>>()
     /** Last focused title per row, by identity: a refresh may reorder the row. */
     private val focus = HashMap<String, TitleRef>()
+    /** Position of that title when last focused: if a refresh removes it, focus goes to the card now there. */
+    private val focusPos = HashMap<String, Int>()
     private val started = HashSet<String>()
     private var featured: Map<TitleRef, String> = emptyMap()
 
@@ -89,25 +91,39 @@ class HomeViewModel(
             requested = it.source !is RowSource.ListPath)
     }
 
+    /** Plays seen so far ([TitleInfoRepository.invalidations]); a new one makes «ادامه تماشا» stale. */
+    private var seenPlays = titleInfo.invalidations.value
+
+    /** Home is showing again (e.g. Back from a title): after a play, revalidate in place (no skeleton). */
+    fun onResume() {
+        val plays = titleInfo.invalidations.value
+        if (plays == seenPlays) return
+        seenPlays = plays
+        val showing = _state.value.rows.any { isHomeRow(it.key) && it.items.isNotEmpty() }
+        loadHome(useCache = false, quiet = showing)
+    }
+
     /** Reloads the home() sources only; lazily loaded list rows keep their state. */
     fun refresh() = loadHome(useCache = false)
 
     /**
      * [useCache]: a fresh cached page (warm start) is shown at once, with no skeleton, and then revalidated
-     * in the background; a failed revalidation keeps the cached rows quietly.
+     * in the background; a failed revalidation keeps the cached rows quietly. [quiet]: the rows showing
+     * stay as they are (no skeleton) until the new page replaces them; a failure keeps them.
      */
-    private fun loadHome(useCache: Boolean) {
+    private fun loadHome(useCache: Boolean, quiet: Boolean = false) {
         refreshJob?.cancel()
         val cached = homeCache?.takeIf { useCache }?.fresh()
+        val keep = cached != null || quiet
         if (cached != null) applyHome(cached)
-        else _state.update { s ->
+        else if (!quiet) _state.update { s ->
             s.copy(
                 rows = s.rows.map { if (isHomeRow(it.key)) it.copy(loading = true, error = false) else it },
                 error = null,
             )
         }
         refreshJob = viewModelScope.safeLaunch(onError = { e ->
-            if (cached == null) _state.update { s ->
+            if (!keep) _state.update { s ->
                 s.copy(rows = s.rows.map { if (isHomeRow(it.key)) it.copy(loading = false) else it },
                     error = e.message ?: "error")
             }
@@ -159,6 +175,15 @@ class HomeViewModel(
     private fun setItems(key: String, all: List<Entry>) {
         val list = all.distinctBy { it.ref }
         entries[key] = list
+        focus[key]?.let { ref ->
+            val at = list.indexOfFirst { it.ref == ref }
+            if (at >= 0) focusPos[key] = at
+            else if (list.isNotEmpty()) {
+                val nearest = (focusPos[key] ?: 0).coerceIn(0, list.lastIndex)
+                focus[key] = list[nearest].ref
+                focusPos[key] = nearest
+            }
+        }
         val landscape = configs[key]?.source is RowSource.Recent
         val items = list.map { e -> cardUi(e, landscape) }
         // An unchanged revalidation leaves the row (and so the screen) untouched.
@@ -189,6 +214,7 @@ class HomeViewModel(
     fun onFocus(rowKey: String, index: Int) {
         val entry = entries[rowKey]?.getOrNull(index) ?: return
         focus[rowKey] = entry.ref
+        focusPos[rowKey] = index
         heroes.focus(entry.ref, entry.card, entry.posterHash)
     }
 }

@@ -161,12 +161,15 @@ fun TitleScreen(
     }
     // Leaving the page (Back, a suggestion) or the app cancels a pending play.
     LifecycleEventEffect(Lifecycle.Event.ON_STOP) { vm.cancelPlay() }
+    // Back from the player: the page (played ✓, next episode) is revalidated in place.
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.onResume() }
     DisposableEffect(vm) { onDispose { vm.cancelPlay() } }
 
     val detail = state.detail
     LaunchedEffect(state.error) {
         if (detail != null && state.error != null) {
             Toast.makeText(context, R.string.title_watchlist_failed, Toast.LENGTH_SHORT).show()
+            vm.onErrorShown() // once: not again when the page comes back
         }
     }
 
@@ -433,9 +436,15 @@ private fun Buttons(
                 busy = state.playBusy?.primary == true,
             )
         }
-        val heart = if (state.inWatchlist == true) "♥" else "♡"
+        // Unknown state (the page didn't say): a plain label that claims neither.
+        val myList = stringResource(R.string.title_my_list)
+        val watchlistLabel = when (state.inWatchlist) {
+            true -> "♥  $myList"
+            false -> "♡  $myList"
+            null -> myList
+        }
         PillButton(
-            "$heart  ${stringResource(R.string.title_my_list)}", vm::toggleWatchlist,
+            watchlistLabel, vm::toggleWatchlist,
             if (hasPrimary) down else down.focusRequester(primaryRequester),
         )
         if (state.dubAvailable) LanguageSwitch(state.dubSelected, vm::toggleDub, down)

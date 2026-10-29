@@ -7,6 +7,12 @@ import com.alikarami.drooz.data.SessionEvents
 import com.alikarami.drooz.site.SiteException
 import com.alikarami.drooz.site.auth.LoginResult
 import com.alikarami.drooz.site.model.TitleRef
+import com.alikarami.drooz.site.model.TitleCard
+import com.alikarami.drooz.site.model.TitleDetail
+import com.alikarami.drooz.site.model.TitleKind
+import com.alikarami.drooz.site.model.StreamCatalog
+import com.alikarami.drooz.site.model.Episode
+import com.alikarami.drooz.data.TitleInfoRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
@@ -19,6 +25,7 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -62,6 +69,37 @@ class AppViewModelTest {
         cache.put(HomePage(emptyList(), emptyList(), emptyList()))
         vm.onLoggedIn()
         assertNull(cache.fresh())
+    }
+
+    private class NoApi : com.alikarami.drooz.data.SiteApi {
+        override suspend fun home() = error("unused")
+        override suspend fun list(path: String, page: Int) = error("unused")
+        override suspend fun search(query: String) = error("unused")
+        override suspend fun title(ref: TitleRef) = TitleDetail(
+            TitleCard(ref, "t", null, null, null, null, null, emptyList(), emptyList(), null, emptyList(), null, null, null),
+            null, emptyList(), StreamCatalog(emptyList(), emptyList()), emptyList(), null,
+        )
+        override suspend fun openStream(episode: Episode, ref: TitleRef, lang: String, height: Int) = error("unused")
+        override suspend fun setWatchlist(postId: Long, state: String) = error("unused")
+    }
+
+    // Played ✓ marks and backdrops of the previous account must not survive a session change.
+    @Test fun titleInfoFromPreviousSessionIsCleared() = runTest(dispatcher) {
+        val events = SessionEvents()
+        val repo = TitleInfoRepository(NoApi(), fetchScope = backgroundScope)
+        val r = TitleRef(TitleKind.FILM, 1, "a")
+        val vm = AppViewModel(FakeAuth(true), events, titleInfo = repo)
+        runCurrent()
+        repo.get(r); repo.remember(r, "/bd.jpg")
+        events.report(SiteException.NotLoggedIn())
+        runCurrent()
+        assertNull(repo.lastKnown(r))
+        assertTrue(repo.playedBackdrops.value.isEmpty())
+
+        repo.get(r); repo.remember(r, "/bd.jpg")
+        vm.onLoggedIn()
+        assertNull(repo.lastKnown(r))
+        assertTrue(repo.playedBackdrops.value.isEmpty())
     }
 
     @Test fun notLoggedInRoutesToLogin() = runTest(dispatcher) {

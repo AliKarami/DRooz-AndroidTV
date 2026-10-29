@@ -83,6 +83,8 @@ data class TitleDetail(
     val trailerThumbHash: String?,
     /** Poster image hash per suggestion, when the page carries one. */
     val suggestionPosters: Map<TitleRef, String> = emptyMap(),
+    /** Whether the title is on the user's watchlist, as the page renders it; null when the page doesn't say. */
+    val inWatchlist: Boolean? = null,
 )
 
 /** Labels as on the site: Farsi, English, English + Farsi, Farsi for Dub. */

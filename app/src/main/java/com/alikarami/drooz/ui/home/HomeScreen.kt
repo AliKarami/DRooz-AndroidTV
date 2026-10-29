@@ -85,6 +85,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
+import androidx.lifecycle.Lifecycle
 import androidx.tv.material3.Button
 import androidx.tv.material3.DrawerValue
 import androidx.tv.material3.MaterialTheme
@@ -151,6 +153,8 @@ fun HomeScreen(
     val drawerState = remember { DrawerState(DrawerValue.Closed) }
     var focusedRowKey by rememberSaveable { mutableStateOf<String?>(null) }
     var lastBack by remember { mutableLongStateOf(0L) }
+    // Back on home after a play: «ادامه تماشا» is revalidated in place (focus stays on the same title).
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.onResume() }
 
     BackHandler {
         if (drawerState.currentValue == DrawerValue.Open) {
@@ -266,6 +270,8 @@ fun HomeScreen(
                                     downKey = rows.getOrNull(rowIndex + 1)?.key,
                                     focusRow = focusRow,
                                     focusOwner = focusOwner,
+                                    focusedIndex = { vm.focusedIndex(row.key) },
+                                    drawerClosed = { drawerState.currentValue == DrawerValue.Closed },
                                     onFocus = { index ->
                                         focusedRowKey = row.key
                                         vm.onFocus(row.key, index)
@@ -313,6 +319,8 @@ private fun HomeRow(
     downKey: String?,
     focusRow: (String) -> Unit,
     focusOwner: MutableState<String?>,
+    focusedIndex: () -> Int,
+    drawerClosed: () -> Boolean,
     onFocus: (Int) -> Unit,
     onOpen: (TitleRef) -> Unit,
     onRetry: () -> Unit,
@@ -362,11 +370,14 @@ private fun HomeRow(
             Text(row.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = Color.White)
         }
         when (slot) {
-            Slot.Cards ->
-                CardsRow(row, landscape, initialIndex, entryIndex, entryRequester, slotRequester, nav, onOpen) { i ->
+            Slot.Cards -> {
+                // Focus was on a card a refresh removed if this row owned focus and the rail is closed.
+                val reclaim = { focusOwner.value == row.key && drawerClosed() }
+                CardsRow(row, landscape, initialIndex, entryIndex, entryRequester, slotRequester, nav, focusedIndex, reclaim, onOpen) { i ->
                     focusOwner.value = row.key
                     onFocus(i)
                 }
+            }
             Slot.Error -> RowError(onRetry, slotRequester, nav) { placeholderFocus(Slot.Error, it) }
             Slot.Skeleton ->
                 SkeletonRow(landscape, slotRequester, placeholderRequester, nav) { placeholderFocus(Slot.Skeleton, it) }
@@ -384,6 +395,8 @@ private fun CardsRow(
     entryRequester: FocusRequester,
     slot: FocusRequester,
     nav: Modifier,
+    focusedIndex: () -> Int,
+    reclaim: () -> Boolean,
     onOpen: (TitleRef) -> Unit,
     onFocus: (Int) -> Unit,
 ) {
@@ -394,6 +407,15 @@ private fun CardsRow(
     // Tracked by title, not position: a background refresh may reorder the row under the user.
     var last by remember { mutableStateOf(row.items.getOrNull(start)?.ref) }
     val slotRef = last?.takeIf { ref -> row.items.any { it.ref == ref } } ?: row.items.firstOrNull()?.ref
+    val currentReclaim by rememberUpdatedState(reclaim)
+    // A refresh removed the last focused card: the slot moves to the card now in its place (HomeViewModel
+    // keeps that position), and if focus was on the removed card it follows, so the D-pad keeps working.
+    LaunchedEffect(row.items) {
+        val gone = last ?: return@LaunchedEffect
+        if (row.items.any { it.ref == gone }) return@LaunchedEffect
+        last = row.items.getOrNull(focusedIndex())?.ref ?: row.items.firstOrNull()?.ref
+        if (currentReclaim()) slot.requestFocusSoon()
+    }
     // Cards keep the same callbacks and modifiers across recompositions, so a row update skips them.
     val currentOnFocus by rememberUpdatedState(onFocus)
     val currentOnOpen by rememberUpdatedState(onOpen)

@@ -307,4 +307,65 @@ class HomeViewModelTest {
         gate.complete(ListPage(listOf(card(ref(30))), 1, 1)); advanceUntilIdle()
         assertEquals(1, vm.uiState.value.rows.first { it.key == "popular" }.items.size)
     }
+
+    // #1: back on home after a play, «ادامه تماشا» is revalidated in place: no skeleton, focus kept by title.
+    @Test fun resumeAfterPlayRevalidatesQuietly() = runTest(dispatcher) {
+        val api = FakeApi(home())
+        val repo = TitleInfoRepository(api, fetchScope = backgroundScope)
+        val vm = HomeViewModel(api, repo); advanceUntilIdle()
+        vm.onFocus("recent", 1); runCurrent()
+        var calls = 0
+        val gate = CompletableDeferred<Unit>()
+        val played = home().copy(recentlyStreamed = listOf(
+            PosterRef(ref(9, "just-played"), "rp9"), PosterRef(ref(1, "shaun-the-sheep"), "rp1"),
+            PosterRef(ref(2, "other-one"), "rp2"),
+        ))
+        api.onHome = { calls++; gate.await(); played }
+        vm.onResume(); runCurrent()
+        assertEquals(0, calls)                              // nothing played: no refetch
+
+        repo.invalidate(ref(9))
+        vm.onResume(); runCurrent()
+        assertEquals(1, calls)
+        val during = vm.uiState.value.rows[0]
+        assertFalse(during.loading)
+        assertEquals(2, during.items.size)
+        gate.complete(Unit); advanceUntilIdle()
+        assertEquals(listOf("Just Played", "Shaun The Sheep", "Other One"), vm.uiState.value.rows[0].items.map { it.title })
+        assertEquals(2, vm.focusedIndex("recent"))
+        vm.onResume(); advanceUntilIdle()
+        assertEquals(1, calls)                              // seen once
+    }
+
+    @Test fun failedResumeRevalidationKeepsRows() = runTest(dispatcher) {
+        val api = FakeApi(home())
+        val repo = TitleInfoRepository(api, fetchScope = backgroundScope)
+        val vm = HomeViewModel(api, repo); advanceUntilIdle()
+        api.onHome = { throw com.alikarami.drooz.site.SiteException.NetworkError(RuntimeException("x")) }
+        repo.invalidate(ref(1))
+        vm.onResume(); advanceUntilIdle()
+        assertEquals(2, vm.uiState.value.rows[0].items.size)
+        assertNull(vm.uiState.value.error)
+    }
+
+    // #6: a refresh that removes the focused card hands the row's focus to the card now in its place.
+    @Test fun removedFocusedCardMovesFocusToNearest() = runTest(dispatcher) {
+        val api = FakeApi(home())
+        val vm = vm(api); advanceUntilIdle()
+        vm.onFocus("featured", 3); runCurrent()             // ref 13
+        api.homePage = home().copy(sections = listOf(
+            HomeSection("فیلم های برگزیده", null, listOf(10L, 11L, 12L, 14L).map { card(ref(it)) }),
+        ))
+        vm.refresh(); advanceUntilIdle()
+        assertEquals(3, vm.focusedIndex("featured"))        // ref 14 slid into its place
+
+        api.homePage = home().copy(sections = listOf(
+            HomeSection("فیلم های برگزیده", null, listOf(10L, 11L).map { card(ref(it)) }),
+        ))
+        vm.refresh(); advanceUntilIdle()
+        assertEquals(1, vm.focusedIndex("featured"))        // the row got shorter: its last card
+        // Focus memory now follows the new card.
+        vm.refresh(); advanceUntilIdle()
+        assertEquals(1, vm.focusedIndex("featured"))
+    }
 }

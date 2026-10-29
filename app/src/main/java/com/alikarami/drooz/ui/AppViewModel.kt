@@ -7,6 +7,7 @@ import com.alikarami.drooz.AppGraph
 import com.alikarami.drooz.data.AuthApi
 import com.alikarami.drooz.data.HomePageCache
 import com.alikarami.drooz.data.SessionEvents
+import com.alikarami.drooz.data.TitleInfoRepository
 import com.alikarami.drooz.site.model.TitleRef
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
@@ -30,6 +31,7 @@ class AppViewModel(
     events: SessionEvents,
     debug: DebugLaunch? = null,
     private val homeCache: HomePageCache? = null,
+    private val titleInfo: TitleInfoRepository? = null,
 ) : ViewModel() {
     val startDestination: Any = if (auth.isLoggedIn && debug?.login == null) Home else Login
 
@@ -53,7 +55,7 @@ class AppViewModel(
     init {
         viewModelScope.launch {
             events.lost.collect {
-                homeCache?.clear()
+                forgetSession()
                 if (!routedToLogin) {
                     routedToLogin = true
                     _navigation.send(AppNav.ToLogin)
@@ -62,9 +64,15 @@ class AppViewModel(
         }
     }
 
+    /** Nothing cached for one account (home page, title pages with their played marks, backdrops) outlives its session. */
+    private fun forgetSession() {
+        homeCache?.clear()
+        titleInfo?.clear()
+    }
+
     fun onLoggedIn() {
         // The next home must come from the new session, never from a page cached before it.
-        homeCache?.clear()
+        forgetSession()
         routedToLogin = false
         loginPending = false
     }
@@ -73,5 +81,5 @@ class AppViewModel(
 class AppViewModelFactory(private val graph: AppGraph, private val debug: DebugLaunch?) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T =
-        AppViewModel(graph.authApi, graph.sessionEvents, debug, graph.homeCache) as T
+        AppViewModel(graph.authApi, graph.sessionEvents, debug, graph.homeCache, graph.titleInfo) as T
 }

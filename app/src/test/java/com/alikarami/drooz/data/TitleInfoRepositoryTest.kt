@@ -13,8 +13,8 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class TitleInfoRepositoryTest {
     private fun ref(id: Long) = TitleRef(TitleKind.FILM, id, "s$id")
-    private fun detail(r: TitleRef) = TitleDetail(
-        card = TitleCard(r, "t", null, null, null, null, null, emptyList(), emptyList(), null, emptyList(), null, null, null),
+    private fun detail(r: TitleRef, title: String = "t") = TitleDetail(
+        card = TitleCard(r, title, null, null, null, null, null, emptyList(), emptyList(), null, emptyList(), null, null, null),
         channel = null, awards = emptyList(), catalog = StreamCatalog(emptyList(), emptyList()),
         suggestions = emptyList(), trailerThumbHash = null,
     )
@@ -106,5 +106,68 @@ class TitleInfoRepositoryTest {
         scope.coroutineContext[kotlinx.coroutines.Job]!!.cancel()
         assertTrue(errors.toString(), errors.isEmpty())
         assertNotNull(repo.peek(ref(1999)))
+    }
+
+    // After a play the page changes (played ✓, next episode): the next get() must refetch, while the
+    // old detail stays available for an instant display.
+    @Test fun invalidateForcesRefetchButKeepsLastKnown() = runTest {
+        var n = 0
+        val api = FakeApi { detail(it, "v${++n}") }
+        val repo = TitleInfoRepository(api, { 0 }, 1000, backgroundScope)
+        repo.get(ref(1))
+        repo.invalidate(ref(1))
+        assertNull(repo.peek(ref(1)))
+        assertEquals("v1", repo.lastKnown(ref(1))?.card?.title)
+        assertEquals(1, repo.invalidations.value)
+        assertEquals("v2", repo.get(ref(1)).card.title)
+        assertEquals(2, api.calls)
+        assertEquals("v2", repo.peek(ref(1))?.card?.title)
+    }
+
+    // A fetch that started before the play may carry the pre-play page: it is neither shared nor cached.
+    @Test fun invalidateDropsInFlightFetch() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        var n = 0
+        val api = FakeApi { val v = ++n; gate.await(); detail(it, "v$v") }
+        val repo = TitleInfoRepository(api, { 0 }, 1000, backgroundScope)
+        val a = async { repo.get(ref(1)) }
+        runCurrent()
+        repo.invalidate(ref(1))
+        val b = async { repo.get(ref(1)) }
+        runCurrent()
+        gate.complete(Unit)
+        assertEquals("v1", a.await().card.title)
+        assertEquals("v2", b.await().card.title)
+        assertEquals(2, api.calls)
+        assertEquals("v2", repo.peek(ref(1))?.card?.title)
+    }
+
+    // A session change (logout / other account) must not leak titles, played marks or backdrops.
+    @Test fun clearForgetsEverything() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val api = FakeApi { if (it == ref(2)) gate.await(); detail(it) }
+        val repo = TitleInfoRepository(api, { 0 }, 1000, backgroundScope)
+        repo.get(ref(1))
+        repo.remember(ref(1), "/img/1920-1080/h.jpg.webp")
+        val late = async { repo.get(ref(2)) }
+        runCurrent()
+        repo.clear()
+        assertNull(repo.peek(ref(1)))
+        assertNull(repo.lastKnown(ref(1)))
+        assertTrue(repo.playedBackdrops.value.isEmpty())
+        gate.complete(Unit)
+        late.await()
+        assertNull(repo.lastKnown(ref(2)))
+        repo.get(ref(1))
+        assertEquals(3, api.calls)
+    }
+
+    @Test fun patchUpdatesCachedDetail() = runTest {
+        val repo = TitleInfoRepository(FakeApi { detail(it) }, { 0 }, 1000, backgroundScope)
+        repo.get(ref(1))
+        repo.patch(ref(1)) { it.copy(inWatchlist = true) }
+        assertEquals(true, repo.peek(ref(1))?.inWatchlist)
+        repo.patch(ref(2)) { it.copy(inWatchlist = true) } // nothing cached: no-op
+        assertNull(repo.lastKnown(ref(2)))
     }
 }

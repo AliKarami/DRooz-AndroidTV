@@ -37,7 +37,9 @@ import com.alikarami.drooz.ui.common.UiStrings
 import com.alikarami.drooz.ui.common.episodeLabel
 import com.alikarami.drooz.ui.common.safeLaunch
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.Channel
@@ -61,6 +63,8 @@ const val STREAM_HEIGHT = 1080
 const val REOPEN_MIN_INTERVAL_MS = 60_000L
 const val ERROR_REPORT_MIN_INTERVAL_MS = 60_000L
 const val SUBTITLE_STEP_MS = 500L
+/** A failed subtitle download is retried once automatically after this delay (the site drops requests). */
+const val SUBTITLE_RETRY_MS = 5_000L
 val SPEEDS = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f)
 
 /** HTTP statuses that mean the stream key expired / the CDN URL went stale: reopen the stream page. */
@@ -117,6 +121,8 @@ class PlayerViewModel(
     private val watch: WatchStore,
     private val prefs: PlayerPrefs,
     private val clock: () -> Long = System::currentTimeMillis,
+    /** SRT parsing runs off the main thread; tests pass their dispatcher. */
+    private val parseDispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) : ViewModel() {
     private val ref: TitleRef = args.ref
     private val dub: Boolean = args.dub
@@ -165,7 +171,10 @@ class PlayerViewModel(
     private var subtitlesResolvedFor: String? = null
     /** Downloaded files by (stream id, kind); a failed download stays absent (that side is blank). */
     private val timelines = mutableMapOf<Pair<String, SubtitleKind>, SubtitleTimeline>()
+    /** Downloads in flight or done; a failure removes its key so the next request retries. */
     private val requestedSubtitles = mutableSetOf<Pair<String, SubtitleKind>>()
+    /** Keys already given their one automatic retry. */
+    private val autoRetriedSubtitles = mutableSetOf<Pair<String, SubtitleKind>>()
 
     // ---- tracks (engine.load clears the overrides: reapply after every load) ----
     private var qualityPending = false
@@ -453,7 +462,10 @@ class PlayerViewModel(
         SubtitleChoice.OFF -> emptyList()
     }
 
-    /** Starts the downloads [choice] needs, once per stream id and kind; failures leave that side blank. */
+    /**
+     * Starts the downloads [choice] needs, once per stream id and kind. A failure leaves that side blank,
+     * retries once by itself after [SUBTITLE_RETRY_MS] and again on the next request (choice change, reopen).
+     */
     private fun ensureSubtitles(choice: SubtitleChoice) {
         val s = session ?: return
         val id = streamId
@@ -463,13 +475,21 @@ class PlayerViewModel(
             if (!requestedSubtitles.add(key)) continue
             viewModelScope.launch {
                 try {
-                    val timeline = SubtitleTimeline(SrtParser.parse(api.subtitle(url)))
+                    val body = api.subtitle(url)
+                    val timeline = withContext(parseDispatcher) { SubtitleTimeline(SrtParser.parse(body)) }
                     timelines[key] = timeline
                     if (id == streamId) updateCues()
                 } catch (e: CancellationException) {
+                    requestedSubtitles.remove(key)
                     throw e
                 } catch (e: Throwable) {
                     if (BuildConfig.DEBUG) Log.w(TAG, "subtitle $kind download failed: $e")
+                    requestedSubtitles.remove(key)
+                    if (autoRetriedSubtitles.add(key)) {
+                        delay(SUBTITLE_RETRY_MS)
+                        // Only while the same stream is current and its choice still needs this file.
+                        if (id == streamId && kind in kindsFor(_state.value.subtitle)) ensureSubtitles(_state.value.subtitle)
+                    }
                 }
             }
         }

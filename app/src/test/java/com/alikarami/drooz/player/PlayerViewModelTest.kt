@@ -101,9 +101,12 @@ class PlayerViewModelTest {
         var maxGain: Double? = null
         val subtitleBodies = mutableMapOf<String, String>()
         var subtitleFailure: Exception? = null
+        /** One-shot failures, consumed before [subtitleFailure]. */
+        val subtitleFailures = ArrayDeque<Exception>()
         val subtitleCalls = mutableListOf<String>()
         override suspend fun subtitle(url: String): String {
             subtitleCalls += url
+            subtitleFailures.removeFirstOrNull()?.let { throw it }
             subtitleFailure?.let { throw it }
             return subtitleBodies[url].orEmpty()
         }
@@ -150,7 +153,7 @@ class PlayerViewModelTest {
 
         fun vm(streamId: String = "s1e1", dub: Boolean = false, scope: TestScope): PlayerViewModel {
             val args = PlayerArgs(api.detail.card.ref, streamId, dub)
-            val v = PlayerViewModel(args, engine, api, titleInfo, titlePrefs, watch, prefs, clock = { now })
+            val v = PlayerViewModel(args, engine, api, titleInfo, titlePrefs, watch, prefs, clock = { now }, parseDispatcher = dispatcher)
             val store = ViewModelStore().also { stores += it }
             @Suppress("UNCHECKED_CAST")
             ViewModelProvider(store, object : ViewModelProvider.Factory {
@@ -681,6 +684,7 @@ class PlayerViewModelTest {
         val v = started(env)
         engine.tracks.value = EngineTracks(audio = threeAudio)
         runCurrent()
+        v.setSubtitle(SubtitleChoice.EN)
         v.setAudio(2)
         runCurrent()
         assertEquals(listOf(0, 2), engine.audioSelections)
@@ -689,9 +693,9 @@ class PlayerViewModelTest {
         assertEquals(true, env.titlePrefs.map[seriesRef.postId])
         v.setAudio(0)
         runCurrent()
-        assertEquals(SubtitleChoice.FA, v.state.value.subtitle)
+        assertEquals(SubtitleChoice.EN, v.state.value.subtitle)
         assertEquals(false, env.titlePrefs.map[seriesRef.postId])
-        assertEquals(SubtitleChoice.FA, env.prefs.settings.first().subtitle)
+        assertEquals(SubtitleChoice.EN, env.prefs.settings.first().subtitle)
     }
 
     @Test fun qualityMenuUsesSiteLabels() = playerTest {
@@ -786,5 +790,32 @@ class PlayerViewModelTest {
         assertEquals(listOf(1.5f), engine.speeds)
         assertEquals(1.5f, v.state.value.speed)
         assertEquals(listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f), SPEEDS)
+    }
+
+    @Test fun failedSubtitleRetriesAutomaticallyAfterDelay() = playerTest {
+        val env = Env().withSubtitles()
+        env.api.subtitleFailures += SiteException.NetworkError(IOException("drop"))
+        val v = started(env)
+        engine.positionMs = 2_000
+        advanceTimeBy(TICK_MS); runCurrent()
+        assertEquals(SubtitleCues(), v.cues.value)
+        assertEquals(listOf(FA_URL), env.api.subtitleCalls)
+        advanceTimeBy(SUBTITLE_RETRY_MS); runCurrent()
+        assertEquals(listOf(FA_URL, FA_URL), env.api.subtitleCalls)
+        assertEquals(SubtitleCues("سلام", null), v.cues.value)
+    }
+
+    @Test fun failedSubtitleRetriedOnceThenOnNextChoice() = playerTest {
+        val env = Env().withSubtitles()
+        env.api.subtitleFailure = SiteException.NetworkError(IOException("down"))
+        val v = started(env)
+        advanceTimeBy(SUBTITLE_RETRY_MS * 4); runCurrent()
+        assertEquals(listOf(FA_URL, FA_URL), env.api.subtitleCalls)
+        env.api.subtitleFailure = null
+        engine.positionMs = 2_000
+        v.setSubtitle(SubtitleChoice.FA)
+        runCurrent()
+        assertEquals(3, env.api.subtitleCalls.size)
+        assertEquals(SubtitleCues("سلام", null), v.cues.value)
     }
 }

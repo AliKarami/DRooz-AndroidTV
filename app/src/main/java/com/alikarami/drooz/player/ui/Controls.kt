@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.CircleShape
@@ -243,7 +244,8 @@ private fun ControlIcon(
         ) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { glyph() }
         }
-        Box(Modifier.height(LabelSlot), contentAlignment = Alignment.BottomCenter) {
+        // As wide as the icon, so a long label (shown only on focus) never spreads the row.
+        Box(Modifier.width(size).height(LabelSlot), contentAlignment = Alignment.BottomCenter) {
             if (showLabel) {
                 Text(
                     label,

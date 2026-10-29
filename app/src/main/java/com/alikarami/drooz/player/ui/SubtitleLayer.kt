@@ -16,12 +16,14 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.Text
 import com.alikarami.drooz.R
+import com.alikarami.drooz.data.SubtitleChoice
 import com.alikarami.drooz.data.SubtitleStyle
 import com.alikarami.drooz.player.SubtitleCues
 import com.alikarami.drooz.player.engine.VideoSize
@@ -101,14 +103,30 @@ fun subtitlePlacement(
 /**
  * The app's own subtitle renderer (ExoPlayer's text track is off). Fills its parent, which must be the
  * full screen: sizes and [placement] are relative to it. [preview] shows a sample line when no cue is
- * on screen (the style panel's live preview).
+ * on screen (the style panel's live preview), following [choice]: EN → the English sample, DUAL → Persian
+ * plus English, FA / FA_DUB → Persian, OFF → nothing.
  */
 @Composable
-fun SubtitleLayer(cues: SubtitleCues, style: SubtitleStyle, placement: SubtitlePlacement, preview: Boolean) {
+fun SubtitleLayer(
+    cues: SubtitleCues,
+    style: SubtitleStyle,
+    placement: SubtitlePlacement,
+    preview: Boolean,
+    choice: SubtitleChoice = SubtitleChoice.FA,
+) {
     val sampleFa = stringResource(R.string.player_subtitle_sample)
     val sampleEn = stringResource(R.string.player_subtitle_sample_en)
-    val primary = cues.primary ?: if (preview && cues.secondary == null) sampleFa else null
-    val secondary = cues.secondary ?: if (preview && cues.primary == null && placement.secondaryBottomPx != null) sampleEn else null
+    val showSample = preview && cues.primary == null && cues.secondary == null
+    val primary = cues.primary ?: if (showSample) {
+        when (choice) {
+            SubtitleChoice.EN -> sampleEn
+            SubtitleChoice.OFF -> null
+            else -> sampleFa
+        }
+    } else {
+        null
+    }
+    val secondary = cues.secondary ?: if (showSample && choice == SubtitleChoice.DUAL) sampleEn else null
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val density = LocalDensity.current
@@ -124,6 +142,8 @@ fun SubtitleLayer(cues: SubtitleCues, style: SubtitleStyle, placement: SubtitleP
                 shadow = Shadow(Color.Black, blurRadius = 6f),
                 textAlign = TextAlign.Center,
                 textDirection = TextDirection.Content,
+                // The rendered line box must match the lineHeightPx subtitlePlacement was given.
+                lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.None),
             )
         }
         val box = Color.Black.copy(alpha = style.backgroundOpacity / 100f)

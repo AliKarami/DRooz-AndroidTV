@@ -22,7 +22,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -35,7 +34,6 @@ import androidx.tv.material3.Button
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.alikarami.drooz.R
-import com.alikarami.drooz.data.SubtitleChoice
 import com.alikarami.drooz.player.PlayerPhase
 import com.alikarami.drooz.player.PlayerViewModel
 import com.alikarami.drooz.player.engine.ExoPlaybackEngine
@@ -45,7 +43,6 @@ import com.alikarami.drooz.ui.common.ImageSizes
 import com.alikarami.drooz.ui.common.TitleText
 import com.alikarami.drooz.ui.common.requestFocusSoon
 import com.alikarami.drooz.ui.theme.DroozColors
-import kotlin.math.roundToInt
 
 /**
  * The player: video (Media3 surface only, no controller, no ExoPlayer subtitles), the app's own
@@ -54,47 +51,23 @@ import kotlin.math.roundToInt
 @Composable
 fun PlayerScreen(vm: PlayerViewModel, engine: ExoPlaybackEngine) {
     val state by vm.state.collectAsStateWithLifecycle()
-    val cues by vm.cues.collectAsStateWithLifecycle()
     val videoSize by engine.videoSize.collectAsStateWithLifecycle()
     val buffering by engine.buffering.collectAsStateWithLifecycle()
 
-    // Back saves and exits from every phase. Task 11's controls register their own (later, so
-    // higher-priority) BackHandler that hides the controls / panels first.
+    // Back saves and exits while loading / failed. PlayerOverlayHost registers its own (later, so
+    // higher-priority) BackHandler that closes panels / controls / the up-next card first.
     BackHandler { vm.close() }
 
     BoxWithConstraints(Modifier.fillMaxSize().background(Color.Black)) {
         val containerW = constraints.maxWidth
         val containerH = constraints.maxHeight
-        val density = LocalDensity.current
 
         VideoSurface(engine, Modifier.fillMaxSize())
 
         when (val phase = state.phase) {
             PlayerPhase.Loading -> LoadingScreen(state.title, state.episodeLabel, state.backdropUrl)
             is PlayerPhase.Failed -> FailedScreen(phase.message, vm::retry)
-            PlayerPhase.Playing -> {
-                // ---- Task 11 hooks in here ----
-                // controlsHeightPx: height (px, from the screen's bottom edge) of the visible controls
-                // bar, null while hidden; subtitlePreview: the style panel is open.
-                val controlsHeightPx: Int? = null
-                val subtitlePreview = false
-
-                val lineHeightPx = with(density) {
-                    (subtitleFontPx(containerH, state.style.sizePercent) * SUBTITLE_LINE_HEIGHT_EM +
-                        2 * SUBTITLE_BOX_PADDING_V.toPx()).roundToInt()
-                }
-                val placement = subtitlePlacement(
-                    containerW, containerH, videoSize, lineHeightPx,
-                    dual = state.subtitle == SubtitleChoice.DUAL,
-                    controlsHeightPx = controlsHeightPx,
-                )
-                SubtitleLayer(cues, state.style, placement, preview = subtitlePreview)
-
-                if (buffering) {
-                    BusySpinner(Modifier.align(Alignment.Center), size = 48.dp, stroke = 4.dp, color = Color.White)
-                }
-                // Task 11: controls overlay, panels, up-next card and remote keys go here.
-            }
+            PlayerPhase.Playing -> PlayerOverlayHost(vm, engine, state, videoSize, buffering, containerW, containerH)
         }
     }
 }

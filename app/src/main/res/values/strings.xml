@@ -47,4 +47,28 @@
     <string name="player_subtitle_sample">این یک زیرنویس نمونه است</string>
     <string name="player_subtitle_sample_en" translatable="false">This is a sample subtitle</string>
     <string name="player_old_entry">پخش از این مسیر دیگر پشتیبانی نمی‌شود</string>
+    <string name="player_seek_back">−۱۰</string>
+    <string name="player_seek_forward">+۱۰</string>
+    <string name="player_subtitle_audio">زیرنویس و صدا</string>
+    <string name="player_quality">کیفیت</string>
+    <string name="player_speed">سرعت</string>
+    <string name="player_episodes">قسمت‌ها</string>
+    <string name="player_next_episode">قسمت بعد</string>
+    <string name="player_group_subtitle">زیرنویس</string>
+    <string name="player_group_appearance">ظاهر زیرنویس</string>
+    <string name="player_group_sync">هماهنگی</string>
+    <string name="player_group_audio">صدا</string>
+    <string name="player_sub_fa">فارسی</string>
+    <string name="player_sub_en" translatable="false">English</string>
+    <string name="player_sub_dual">فارسی + English</string>
+    <string name="player_sub_fa_dub">فارسی (دوبله)</string>
+    <string name="player_off">خاموش</string>
+    <string name="player_on">روشن</string>
+    <string name="player_size">اندازه</string>
+    <string name="player_color">رنگ</string>
+    <string name="player_background">پس‌زمینه</string>
+    <string name="player_boost">تقویت صدا</string>
+    <string name="player_play_now">▶ پخش الان</string>
+    <string name="player_watch_credits">تماشای تیتراژ</string>
+    <string name="player_now_playing">در حال پخش</string>
 </resources>

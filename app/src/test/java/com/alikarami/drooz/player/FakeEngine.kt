@@ -38,6 +38,7 @@ class FakeEngine : PlaybackEngine {
     override fun load(masterUrl: String, startMs: Long) {
         loads += masterUrl to startMs
         positionMs = startMs
+        tracks.value = EngineTracks() // like the real engine: tracks reset, overrides cleared
     }
     override fun play() { played++; isPlaying.value = true }
     override fun pause() { paused++; isPlaying.value = false }

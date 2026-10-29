@@ -5,12 +5,18 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelStore
 import com.alikarami.drooz.data.PlayerPrefs
 import com.alikarami.drooz.data.PlayerSettings
+import com.alikarami.drooz.data.SubtitleChoice
+import com.alikarami.drooz.data.SubtitleColor
+import com.alikarami.drooz.data.SubtitleStyle
 import com.alikarami.drooz.data.SiteApi
 import com.alikarami.drooz.data.TitleInfoRepository
 import com.alikarami.drooz.data.TitlePrefs
 import com.alikarami.drooz.data.WatchEntry
 import com.alikarami.drooz.data.WatchStore
+import com.alikarami.drooz.player.audio.AudioOption
+import com.alikarami.drooz.player.audio.GAIN_TICK_MS
 import com.alikarami.drooz.player.engine.EngineEvent
+import com.alikarami.drooz.player.engine.EngineTracks
 import com.alikarami.drooz.site.SiteConfig
 import com.alikarami.drooz.site.SiteException
 import com.alikarami.drooz.site.model.*
@@ -21,6 +27,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
@@ -87,7 +94,19 @@ class PlayerViewModelTest {
         var titleCalls = 0
         override suspend fun title(ref: TitleRef): TitleDetail { titleCalls++; return detail }
         override suspend fun setWatchlist(postId: Long, state: String) = error("unused")
-        override suspend fun subtitle(url: String) = ""
+        var subtitles: List<SubtitleTrack> = emptyList()
+        var qualityLabels: Map<Int, String> = emptyMap()
+        var gains: List<Pair<Double, Double>> = emptyList()
+        var minGain: Double? = null
+        var maxGain: Double? = null
+        val subtitleBodies = mutableMapOf<String, String>()
+        var subtitleFailure: Exception? = null
+        val subtitleCalls = mutableListOf<String>()
+        override suspend fun subtitle(url: String): String {
+            subtitleCalls += url
+            subtitleFailure?.let { throw it }
+            return subtitleBodies[url].orEmpty()
+        }
         override suspend fun reportStreamError(streamId: String, event: String, msg: String) {
             reports += Triple(streamId, event, msg)
         }
@@ -96,7 +115,7 @@ class PlayerViewModelTest {
             gate?.await()
             failures.removeFirstOrNull()?.let { throw it }
             return StreamSession("T", "https://cdn/master-${opens.size}.m3u8", "/bd/${episode.streamId}.jpg",
-                emptyList(), emptyMap(), emptyList(), null, null, iframes, episode.streamId)
+                subtitles, qualityLabels, gains, minGain, maxGain, iframes, episode.streamId)
         }
     }
 
@@ -107,9 +126,10 @@ class PlayerViewModelTest {
         override suspend fun all() = map.values.toList()
     }
 
-    private class NoTitlePrefs : TitlePrefs {
-        override suspend fun dubSelected(postId: Long): Boolean? = null
-        override suspend fun setDubSelected(postId: Long, selected: Boolean) {}
+    private class MemTitlePrefs : TitlePrefs {
+        val map = mutableMapOf<Long, Boolean>()
+        override suspend fun dubSelected(postId: Long): Boolean? = map[postId]
+        override suspend fun setDubSelected(postId: Long, selected: Boolean) { map[postId] = selected }
     }
 
     private class MemPrefs : PlayerPrefs {
@@ -125,10 +145,12 @@ class PlayerViewModelTest {
         val api = FakeApi(detail, listOf(K))
         val titleInfo = TitleInfoRepository(api, now = { now }, fetchScope = CoroutineScope(dispatcher + SupervisorJob()))
         val exits = mutableListOf<Unit>()
+        val prefs = MemPrefs()
+        val titlePrefs = MemTitlePrefs()
 
         fun vm(streamId: String = "s1e1", dub: Boolean = false, scope: TestScope): PlayerViewModel {
             val args = PlayerArgs(api.detail.card.ref, streamId, dub)
-            val v = PlayerViewModel(args, engine, api, titleInfo, NoTitlePrefs(), watch, MemPrefs(), clock = { now })
+            val v = PlayerViewModel(args, engine, api, titleInfo, titlePrefs, watch, prefs, clock = { now })
             val store = ViewModelStore().also { stores += it }
             @Suppress("UNCHECKED_CAST")
             ViewModelProvider(store, object : ViewModelProvider.Factory {
@@ -492,5 +514,277 @@ class PlayerViewModelTest {
         runCurrent()
         stores.forEach { it.clear() }
         assertTrue(engine.released)
+    }
+
+    // ---- Task 8: subtitles, audio, quality, speed, boost ----
+
+    private val FA_URL = "https://cdn/sub/fa.srt"
+    private val EN_URL = "https://cdn/sub/en.srt"
+    private val DUAL_URL = "https://cdn/sub/sub.srt?stream=1&second=2"
+    private val FA_DUB_URL = "https://cdn/sub/fadub.srt"
+    private val FA_SRT = "1\n00:00:01,000 --> 00:00:03,000\nسلام\n"
+    private val EN_SRT = "1\n00:00:01,000 --> 00:00:03,000\nHello\n"
+    private val DUB_SRT = "1\n00:00:01,000 --> 00:00:03,000\nدوبله\n"
+    private val fixtureGains = listOf(10.0078 to 7.81, 10.0078 to 9.71, 9.98458 to 4.02, 10.0078 to 1.93)
+    private val threeAudio = listOf(AudioOption("original", 2), AudioOption("original-6CH", 6), AudioOption("dubbed-fa", 2))
+
+    private fun Env.withSubtitles(fa: Boolean = true, en: Boolean = true, faDub: Boolean = false): Env {
+        api.subtitles = buildList {
+            if (fa) add(SubtitleTrack("Farsi", FA_URL))
+            if (en) add(SubtitleTrack("English", EN_URL))
+            if (fa && en) add(SubtitleTrack("English + Farsi", DUAL_URL))
+            if (faDub) add(SubtitleTrack("Farsi for Dub", FA_DUB_URL))
+        }
+        api.subtitleBodies += mapOf(FA_URL to FA_SRT, EN_URL to EN_SRT, DUAL_URL to "x", FA_DUB_URL to DUB_SRT)
+        return this
+    }
+
+    /** Opens, emits Ready and runs the loops once. */
+    private fun TestScope.started(env: Env, streamId: String = "s1e1", dub: Boolean = false): PlayerViewModel {
+        val v = env.vm(streamId, dub, scope = this)
+        runCurrent()
+        engine.emit(EngineEvent.Ready)
+        runCurrent()
+        return v
+    }
+
+    @Test fun defaultFarsiSubtitleShownAtPosition() = playerTest {
+        val env = Env().withSubtitles()
+        val v = started(env)
+        assertEquals(SubtitleChoice.FA, v.state.value.subtitle)
+        assertEquals(
+            listOf(SubtitleChoice.FA, SubtitleChoice.EN, SubtitleChoice.DUAL, SubtitleChoice.OFF),
+            v.state.value.availableSubtitles,
+        )
+        assertEquals(listOf(FA_URL), env.api.subtitleCalls)
+        engine.positionMs = 2_000
+        advanceTimeBy(TICK_MS); runCurrent()
+        assertEquals(SubtitleCues("سلام", null), v.cues.value)
+        engine.positionMs = 3_000
+        advanceTimeBy(TICK_MS); runCurrent()
+        assertEquals(SubtitleCues(), v.cues.value)
+    }
+
+    @Test fun dualShowsFarsiAndEnglishFromSeparateFiles() = playerTest {
+        val env = Env().withSubtitles()
+        val v = started(env)
+        v.setSubtitle(SubtitleChoice.DUAL)
+        runCurrent()
+        assertEquals(listOf(FA_URL, EN_URL), env.api.subtitleCalls)
+        engine.positionMs = 2_000
+        advanceTimeBy(TICK_MS); runCurrent()
+        assertEquals(SubtitleCues("سلام", "Hello"), v.cues.value)
+        v.setSubtitle(SubtitleChoice.EN)
+        v.setSubtitle(SubtitleChoice.FA)
+        runCurrent()
+        assertEquals(SubtitleCues("سلام", null), v.cues.value)
+        assertEquals(2, env.api.subtitleCalls.size)
+    }
+
+    @Test fun offSubtitleDownloadsNothingAndShowsNothing() = playerTest {
+        val env = Env().withSubtitles()
+        env.prefs.settings.value = PlayerSettings(subtitle = SubtitleChoice.OFF)
+        val v = started(env)
+        assertEquals(SubtitleChoice.OFF, v.state.value.subtitle)
+        engine.positionMs = 2_000
+        advanceTimeBy(TICK_MS); runCurrent()
+        assertTrue(env.api.subtitleCalls.isEmpty())
+        assertEquals(SubtitleCues(), v.cues.value)
+    }
+
+    @Test fun storedChoiceFallsBackWhenTrackMissing() = playerTest {
+        val env = Env().withSubtitles(fa = false, en = true)
+        env.prefs.settings.value = PlayerSettings(subtitle = SubtitleChoice.DUAL)
+        val v = started(env)
+        assertEquals(SubtitleChoice.EN, v.state.value.subtitle)
+        assertEquals(listOf(SubtitleChoice.EN, SubtitleChoice.OFF), v.state.value.availableSubtitles)
+    }
+
+    @Test fun syncOffsetShiftsAndPersistsPerEpisode() = playerTest {
+        val env = Env().withSubtitles()
+        val v = started(env)
+        engine.durationMs = 3_600_000
+        v.shiftSubtitles(SUBTITLE_STEP_MS)
+        v.shiftSubtitles(SUBTITLE_STEP_MS)
+        assertEquals(1_000L, v.state.value.subtitleOffsetMs)
+        engine.positionMs = 3_500
+        advanceTimeBy(TICK_MS); runCurrent()
+        assertEquals("سلام", v.cues.value.primary)
+        v.onStop()
+        runCurrent()
+        assertEquals(1_000L, watch.map["s1e1"]!!.subtitleOffsetMs)
+        stores.forEach { it.clear() }
+        val v2 = env.vm(scope = this)
+        runCurrent()
+        assertEquals(1_000L, v2.state.value.subtitleOffsetMs)
+    }
+
+    @Test fun subtitleFailureDoesNotBlockPlayback() = playerTest {
+        val env = Env().withSubtitles()
+        env.api.subtitleFailure = SiteException.NetworkError(IOException("down"))
+        val v = started(env)
+        assertEquals(1, engine.loads.size)
+        assertEquals(PlayerPhase.Playing, v.state.value.phase)
+        engine.positionMs = 2_000
+        advanceTimeBy(TICK_MS); runCurrent()
+        assertEquals(SubtitleCues(), v.cues.value)
+        assertFalse(v.state.value.phase is PlayerPhase.Failed)
+    }
+
+    @Test fun subtitleDownloadDoesNotDelayEngineLoad() = playerTest {
+        val env = Env().withSubtitles()
+        val v = env.vm(scope = this)
+        runCurrent()
+        assertEquals(1, engine.loads.size)
+        assertEquals(PlayerPhase.Loading, v.state.value.phase)
+    }
+
+    @Test fun choiceRememberedGloballyButNotFaDub() = playerTest {
+        val env = Env().withSubtitles(faDub = true)
+        val v = started(env)
+        v.setSubtitle(SubtitleChoice.EN)
+        runCurrent()
+        assertEquals(SubtitleChoice.EN, env.prefs.settings.first().subtitle)
+        v.setSubtitle(SubtitleChoice.FA_DUB)
+        runCurrent()
+        assertEquals(SubtitleChoice.FA_DUB, v.state.value.subtitle)
+        assertEquals(SubtitleChoice.EN, env.prefs.settings.first().subtitle)
+    }
+
+    @Test fun dubPlaybackSelectsFarsiForDubOrOff() = playerTest {
+        val env = Env().withSubtitles(faDub = true)
+        val v = started(env, "d1e1", dub = true)
+        assertEquals(SubtitleChoice.FA_DUB, v.state.value.subtitle)
+        assertEquals(listOf(FA_DUB_URL), env.api.subtitleCalls)
+        stores.forEach { it.clear() }
+        val env2 = Env().withSubtitles(faDub = false)
+        val v2 = started(env2, "d1e1", dub = true)
+        assertEquals(SubtitleChoice.OFF, v2.state.value.subtitle)
+    }
+
+    @Test fun autoPicksSixChannelWhenOutputSupportsIt() = playerTest {
+        val env = Env()
+        val v = started(env)
+        engine.multichannelOutput = true
+        engine.tracks.value = EngineTracks(heights = listOf(1080, 720), audio = threeAudio)
+        runCurrent()
+        assertEquals(listOf(1), engine.audioSelections)
+        assertEquals(threeAudio, v.state.value.audio)
+        assertEquals(1, v.state.value.selectedAudio)
+        engine.tracks.value = EngineTracks(heights = listOf(1080, 720), audio = threeAudio, playingHeight = 720)
+        runCurrent()
+        assertEquals(listOf(1), engine.audioSelections)
+    }
+
+    @Test fun switchingToDubbedAudioPicksDubSubtitleAndPersistsDub() = playerTest {
+        val env = Env().withSubtitles(faDub = true)
+        val v = started(env)
+        engine.tracks.value = EngineTracks(audio = threeAudio)
+        runCurrent()
+        v.setAudio(2)
+        runCurrent()
+        assertEquals(listOf(0, 2), engine.audioSelections)
+        assertEquals(2, v.state.value.selectedAudio)
+        assertEquals(SubtitleChoice.FA_DUB, v.state.value.subtitle)
+        assertEquals(true, env.titlePrefs.map[seriesRef.postId])
+        v.setAudio(0)
+        runCurrent()
+        assertEquals(SubtitleChoice.FA, v.state.value.subtitle)
+        assertEquals(false, env.titlePrefs.map[seriesRef.postId])
+        assertEquals(SubtitleChoice.FA, env.prefs.settings.first().subtitle)
+    }
+
+    @Test fun qualityMenuUsesSiteLabels() = playerTest {
+        val env = Env()
+        env.api.qualityLabels = mapOf(2475 to "1080 [ 2.48 GB ]", 1100 to "720 [ 1.14 GB ]", 488 to "480 [ 553 MB ]")
+        val v = started(env)
+        engine.tracks.value = EngineTracks(heights = listOf(1080, 720, 480), playingHeight = 1080)
+        runCurrent()
+        assertEquals(listOf("1080 [ 2.48 GB ]", "720 [ 1.14 GB ]", "480 [ 553 MB ]"), v.state.value.qualities.map { it.label })
+        assertEquals(1080, v.state.value.playingHeight)
+        assertTrue(engine.qualitySelections.isEmpty())
+        v.setQuality(720)
+        assertEquals(listOf<Int?>(720), engine.qualitySelections)
+        assertEquals(720, v.state.value.selectedQuality)
+        v.setQuality(null)
+        assertEquals(listOf(720, null), engine.qualitySelections)
+        assertNull(v.state.value.selectedQuality)
+    }
+
+    @Test fun qualityAndAudioReappliedAfterSilentRecovery() = playerTest {
+        val env = Env()
+        val v = started(env)
+        engine.tracks.value = EngineTracks(heights = listOf(1080, 720), audio = threeAudio)
+        runCurrent()
+        v.setQuality(720)
+        v.setAudio(1)
+        runCurrent()
+        engine.emit(EngineEvent.Error(2004, "ERROR_CODE_IO_BAD_HTTP_STATUS", 403))
+        runCurrent()
+        assertEquals(2, engine.loads.size)
+        engine.tracks.value = EngineTracks(heights = listOf(1080, 720), audio = threeAudio)
+        runCurrent()
+        assertEquals(listOf<Int?>(720, 720), engine.qualitySelections)
+        assertEquals(listOf(0, 1, 1), engine.audioSelections)
+        assertEquals(720, v.state.value.selectedQuality)
+    }
+
+    @Test fun boostFollowsGainMapWhilePlaying() = playerTest {
+        val env = Env()
+        env.api.gains = fixtureGains
+        env.api.minGain = 0.64
+        env.api.maxGain = 1.93
+        val v = started(env)
+        assertTrue(v.state.value.boost)
+        engine.positionMs = 0
+        advanceTimeBy(GAIN_TICK_MS); runCurrent()
+        assertEquals(1.05f, engine.gains.last(), 1e-6f)
+        advanceTimeBy(GAIN_TICK_MS); runCurrent()
+        assertEquals(1.10f, engine.gains.last(), 1e-6f)
+    }
+
+    @Test fun boostOffSetsUnityGainAndPersists() = playerTest {
+        val env = Env()
+        env.api.gains = fixtureGains
+        env.api.minGain = 0.64
+        env.api.maxGain = 1.93
+        val v = started(env)
+        advanceTimeBy(GAIN_TICK_MS); runCurrent()
+        v.setBoost(false)
+        runCurrent()
+        assertEquals(1f, engine.gains.last())
+        assertFalse(v.state.value.boost)
+        assertEquals(false, env.prefs.settings.first().audioBoost)
+        val n = engine.gains.size
+        advanceTimeBy(GAIN_TICK_MS * 4); runCurrent()
+        assertEquals(n, engine.gains.size)
+    }
+
+    @Test fun boostOffFromSettingsNeverBoosts() = playerTest {
+        val env = Env()
+        env.api.gains = fixtureGains
+        env.prefs.settings.value = PlayerSettings(audioBoost = false)
+        val v = started(env)
+        advanceTimeBy(GAIN_TICK_MS * 4); runCurrent()
+        assertFalse(v.state.value.boost)
+        assertTrue(engine.gains.all { it == 1f })
+    }
+
+    @Test fun styleAppliesAndPersists() = playerTest {
+        val env = Env()
+        val v = started(env)
+        val style = SubtitleStyle(140, SubtitleColor.WHITE, 50)
+        v.setStyle(style)
+        runCurrent()
+        assertEquals(style, v.state.value.style)
+        assertEquals(style, env.prefs.settings.first().style)
+    }
+
+    @Test fun speedAppliesToEngine() = playerTest {
+        val v = started(Env())
+        v.setSpeed(1.5f)
+        assertEquals(listOf(1.5f), engine.speeds)
+        assertEquals(1.5f, v.state.value.speed)
+        assertEquals(listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f), SPEEDS)
     }
 }

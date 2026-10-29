@@ -15,12 +15,21 @@ import com.alikarami.drooz.data.TitlePrefs
 import com.alikarami.drooz.data.WatchEntry
 import com.alikarami.drooz.data.WatchStore
 import com.alikarami.drooz.player.audio.AudioOption
+import com.alikarami.drooz.player.audio.GAIN_TICK_MS
+import com.alikarami.drooz.player.audio.GainSchedule
+import com.alikarami.drooz.player.audio.GainSmoother
+import com.alikarami.drooz.player.audio.pickAudioTrack
+import com.alikarami.drooz.player.engine.EngineTracks
+import com.alikarami.drooz.player.subtitle.SrtParser
+import com.alikarami.drooz.player.subtitle.SubtitleTimeline
+import com.alikarami.drooz.data.PlayerSettings
 import com.alikarami.drooz.player.engine.EngineEvent
 import com.alikarami.drooz.player.engine.PlaybackEngine
 import com.alikarami.drooz.site.SiteConfig
 import com.alikarami.drooz.site.SiteException
 import com.alikarami.drooz.site.model.Episode
 import com.alikarami.drooz.site.model.StreamSession
+import com.alikarami.drooz.site.model.SubtitleKind
 import com.alikarami.drooz.site.model.TitleDetail
 import com.alikarami.drooz.site.model.TitleKind
 import com.alikarami.drooz.site.model.TitleRef
@@ -38,6 +47,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -50,6 +60,8 @@ const val SAVE_EVERY_MS = 10_000L
 const val STREAM_HEIGHT = 1080
 const val REOPEN_MIN_INTERVAL_MS = 60_000L
 const val ERROR_REPORT_MIN_INTERVAL_MS = 60_000L
+const val SUBTITLE_STEP_MS = 500L
+val SPEEDS = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f)
 
 /** HTTP statuses that mean the stream key expired / the CDN URL went stale: reopen the stream page. */
 private val RECOVERABLE_HTTP = setOf(403, 404, 410)
@@ -60,6 +72,9 @@ sealed interface PlayerPhase {
     data object Playing : PlayerPhase
     data class Failed(val message: String) : PlayerPhase
 }
+
+/** The cue text on screen. DUAL: [primary] = Farsi, [secondary] = English. */
+data class SubtitleCues(val primary: String? = null, val secondary: String? = null)
 
 data class UpNext(val label: String, val secondsLeft: Int)
 
@@ -139,8 +154,43 @@ class PlayerViewModel(
     /** Set by the up-next countdown (Task 9): the episode counts as finished. */
     private var upNextReached = false
 
+    // ---- subtitles ----
+    private val _cues = MutableStateFlow(SubtitleCues())
+    /** Changes only when the text on screen changes. */
+    val cues: StateFlow<SubtitleCues> = _cues.asStateFlow()
+    private var settingsApplied = false
+    /** The stored global choice (never FA_DUB). */
+    private var globalChoice = SubtitleChoice.FA
+    /** Stream whose initial subtitle choice / saved offset were applied (not redone on a same-stream reopen). */
+    private var subtitlesResolvedFor: String? = null
+    /** Downloaded files by (stream id, kind); a failed download stays absent (that side is blank). */
+    private val timelines = mutableMapOf<Pair<String, SubtitleKind>, SubtitleTimeline>()
+    private val requestedSubtitles = mutableSetOf<Pair<String, SubtitleKind>>()
+
+    // ---- tracks (engine.load clears the overrides: reapply after every load) ----
+    private var qualityPending = false
+    private var audioPending = false
+    /** The user's audio pick this playback, by label (survives reloads and episode switches). */
+    private var manualAudioLabel: String? = null
+    private var audioDubbed = false
+
+    // ---- Audio Boost ----
+    private var gainSchedule: GainSchedule? = null
+    private var smoother = GainSmoother()
+
     init {
         viewModelScope.launch { engine.events.collect(::onEvent) }
+        viewModelScope.launch { engine.tracks.collect(::onTracks) }
+        viewModelScope.launch { ensureSettings() }
+        viewModelScope.launch {
+            engine.isPlaying.collectLatest { playing ->
+                if (!playing) return@collectLatest
+                while (true) {
+                    delay(GAIN_TICK_MS)
+                    boostTick()
+                }
+            }
+        }
         viewModelScope.launch {
             engine.isPlaying.collectLatest { playing ->
                 if (!playing) return@collectLatest
@@ -170,6 +220,10 @@ class PlayerViewModel(
             session = null
             episode = null
             knownDurationMs = 0L
+            gainSchedule = null
+            smoother = GainSmoother()
+            _state.update { it.copy(subtitleOffsetMs = 0, availableSubtitles = emptyList()) }
+            _cues.value = SubtitleCues()
         }
         if (!silent) _state.update { it.copy(phase = PlayerPhase.Loading, currentStreamId = id) }
         openJob = viewModelScope.launch {
@@ -185,9 +239,25 @@ class PlayerViewModel(
                 titleInfo.invalidate(ref)
                 s.backdropPath?.let { titleInfo.remember(ref, it) }
                 session = s
+                gainSchedule = GainSchedule(s.gains, s.minGain, s.maxGain)
                 s.backdropPath?.let { p -> _state.update { it.copy(backdropUrl = SiteConfig.BASE_URL + p) } }
-                val start = startAt ?: watch.get(id)?.let { resumePositionMs(it.positionMs, it.durationMs, it.finished) } ?: 0L
+                ensureSettings()
+                val saved = watch.get(id)
+                val available = availableSubtitles(s)
+                _state.update { it.copy(availableSubtitles = available) }
+                if (subtitlesResolvedFor != id) {
+                    subtitlesResolvedFor = id
+                    val choice = if (dub || audioDubbed) {
+                        if (SubtitleChoice.FA_DUB in available) SubtitleChoice.FA_DUB else SubtitleChoice.OFF
+                    } else {
+                        originalChoice(available)
+                    }
+                    _state.update { it.copy(subtitle = choice, subtitleOffsetMs = saved?.subtitleOffsetMs ?: 0L) }
+                }
+                val start = startAt ?: saved?.let { resumePositionMs(it.positionMs, it.durationMs, it.finished) } ?: 0L
                 if (closed) return@launch
+                // Downloads run beside the engine load and never block or fail playback.
+                ensureSubtitles(_state.value.subtitle)
                 loadEngine(s.masterUrl, start)
             } catch (e: CancellationException) {
                 throw e
@@ -220,6 +290,8 @@ class PlayerViewModel(
     /** Every engine load (start, retry, recovery, episode switch) goes through here. */
     private fun loadEngine(masterUrl: String, startMs: Long) {
         readySinceLoad = false
+        qualityPending = true
+        audioPending = true
         engine.load(masterUrl, startMs)
         wantsPlay = true
         engine.play()
@@ -290,6 +362,7 @@ class PlayerViewModel(
     // ---- tick / progress ----
 
     private fun tick() {
+        updateCues()
         playedSinceSaveMs += TICK_MS
         if (playedSinceSaveMs >= SAVE_EVERY_MS) save()
     }
@@ -328,6 +401,196 @@ class PlayerViewModel(
         }
     }
 
+    // ---- settings ----
+
+    /** Applies the stored settings once (style, boost, global subtitle choice); defaults if the store fails. */
+    private suspend fun ensureSettings() {
+        if (settingsApplied) return
+        val s = try {
+            prefs.settings.first()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            if (BuildConfig.DEBUG) Log.w(TAG, "settings read failed: $e")
+            PlayerSettings()
+        }
+        if (settingsApplied) return
+        settingsApplied = true
+        globalChoice = s.subtitle.takeIf { it != SubtitleChoice.FA_DUB } ?: SubtitleChoice.FA
+        _state.update { it.copy(style = s.style, boost = s.audioBoost) }
+    }
+
+    private fun persistSettings(transform: (PlayerSettings) -> PlayerSettings) {
+        viewModelScope.safeLaunch(onError = { if (BuildConfig.DEBUG) Log.w(TAG, "settings write failed: $it") }) {
+            prefs.update(transform)
+        }
+    }
+
+    // ---- subtitles ----
+
+    /** FA, EN, DUAL (both FA and EN), FA_DUB, then OFF always. */
+    private fun availableSubtitles(s: StreamSession): List<SubtitleChoice> {
+        val kinds = s.subtitles.map { it.kind }.toSet()
+        return buildList {
+            if (SubtitleKind.FA in kinds) add(SubtitleChoice.FA)
+            if (SubtitleKind.EN in kinds) add(SubtitleChoice.EN)
+            if (SubtitleKind.FA in kinds && SubtitleKind.EN in kinds) add(SubtitleChoice.DUAL)
+            if (SubtitleKind.FA_DUB in kinds) add(SubtitleChoice.FA_DUB)
+            add(SubtitleChoice.OFF)
+        }
+    }
+
+    /** Original-audio choice: the stored global one if offered, else FA, else EN, else OFF. */
+    private fun originalChoice(available: List<SubtitleChoice>): SubtitleChoice =
+        listOf(globalChoice, SubtitleChoice.FA, SubtitleChoice.EN).firstOrNull { it in available } ?: SubtitleChoice.OFF
+
+    /** The files a choice needs; DUAL uses the separate FA and EN files, never the merged track. */
+    private fun kindsFor(choice: SubtitleChoice): List<SubtitleKind> = when (choice) {
+        SubtitleChoice.FA -> listOf(SubtitleKind.FA)
+        SubtitleChoice.EN -> listOf(SubtitleKind.EN)
+        SubtitleChoice.DUAL -> listOf(SubtitleKind.FA, SubtitleKind.EN)
+        SubtitleChoice.FA_DUB -> listOf(SubtitleKind.FA_DUB)
+        SubtitleChoice.OFF -> emptyList()
+    }
+
+    /** Starts the downloads [choice] needs, once per stream id and kind; failures leave that side blank. */
+    private fun ensureSubtitles(choice: SubtitleChoice) {
+        val s = session ?: return
+        val id = streamId
+        for (kind in kindsFor(choice)) {
+            val url = s.subtitles.firstOrNull { it.kind == kind }?.url ?: continue
+            val key = id to kind
+            if (!requestedSubtitles.add(key)) continue
+            viewModelScope.launch {
+                try {
+                    val timeline = SubtitleTimeline(SrtParser.parse(api.subtitle(url)))
+                    timelines[key] = timeline
+                    if (id == streamId) updateCues()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Throwable) {
+                    if (BuildConfig.DEBUG) Log.w(TAG, "subtitle $kind download failed: $e")
+                }
+            }
+        }
+    }
+
+    /** Cue text at position − offset; the StateFlow only emits when the text changes. */
+    private fun updateCues() {
+        val st = _state.value
+        val pos = engine.positionMs - st.subtitleOffsetMs
+        fun text(kind: SubtitleKind): String? =
+            timelines[streamId to kind]?.at(pos)?.joinToString("\n") { it.text }?.takeIf { it.isNotEmpty() }
+        _cues.value = when (st.subtitle) {
+            SubtitleChoice.FA -> SubtitleCues(text(SubtitleKind.FA))
+            SubtitleChoice.EN -> SubtitleCues(text(SubtitleKind.EN))
+            SubtitleChoice.DUAL -> SubtitleCues(text(SubtitleKind.FA), text(SubtitleKind.EN))
+            SubtitleChoice.FA_DUB -> SubtitleCues(text(SubtitleKind.FA_DUB))
+            SubtitleChoice.OFF -> SubtitleCues()
+        }
+    }
+
+    private fun applySubtitle(choice: SubtitleChoice) {
+        _state.update { it.copy(subtitle = choice) }
+        ensureSubtitles(choice)
+        updateCues()
+    }
+
+    fun setSubtitle(choice: SubtitleChoice) {
+        applySubtitle(choice)
+        // FA_DUB is per playback only.
+        if (choice != SubtitleChoice.FA_DUB) {
+            globalChoice = choice
+            persistSettings { it.copy(subtitle = choice) }
+        }
+    }
+
+    /** ±[SUBTITLE_STEP_MS] per press; saved with this stream's progress entry. */
+    fun shiftSubtitles(deltaMs: Long) {
+        _state.update { it.copy(subtitleOffsetMs = it.subtitleOffsetMs + deltaMs) }
+        updateCues()
+    }
+
+    fun setStyle(style: SubtitleStyle) {
+        _state.update { it.copy(style = style) }
+        persistSettings { it.copy(style = style) }
+    }
+
+    // ---- tracks ----
+
+    private fun onTracks(t: EngineTracks) {
+        _state.update {
+            it.copy(
+                qualities = qualityOptions(t.heights, session?.qualityLabels.orEmpty()),
+                playingHeight = t.playingHeight,
+                audio = t.audio,
+                selectedAudio = if (t.audio.isEmpty()) null else t.selectedAudio ?: it.selectedAudio,
+            )
+        }
+        if (qualityPending && t.heights.isNotEmpty()) {
+            qualityPending = false
+            _state.value.selectedQuality?.let { engine.selectQuality(it) }
+        }
+        if (audioPending && t.audio.isNotEmpty()) {
+            audioPending = false
+            val manual = manualAudioLabel?.let { l -> t.audio.indexOfFirst { it.label == l }.takeIf { it >= 0 } }
+            val index = manual ?: pickAudioTrack(t.audio, dub, engine.multichannelOutput) ?: return
+            engine.selectAudio(index)
+            audioDubbed = isDubbed(t.audio[index].label)
+            _state.update { it.copy(selectedAudio = index) }
+        }
+    }
+
+    /** null = Automatic (the default, not persisted). */
+    fun setQuality(height: Int?) {
+        _state.update { it.copy(selectedQuality = height) }
+        engine.selectQuality(height)
+    }
+
+    fun setAudio(index: Int) {
+        val option = _state.value.audio.getOrNull(index) ?: return
+        engine.selectAudio(index)
+        audioPending = false
+        manualAudioLabel = option.label
+        val wasDubbed = audioDubbed
+        val nowDubbed = isDubbed(option.label)
+        audioDubbed = nowDubbed
+        _state.update { it.copy(selectedAudio = index) }
+        val available = _state.value.availableSubtitles
+        if (nowDubbed && SubtitleChoice.FA_DUB in available) {
+            applySubtitle(SubtitleChoice.FA_DUB)
+        } else if (wasDubbed && !nowDubbed) {
+            applySubtitle(originalChoice(available))
+        }
+        val postId = ref.postId
+        viewModelScope.safeLaunch(onError = { if (BuildConfig.DEBUG) Log.w(TAG, "dub pref write failed: $it") }) {
+            titlePrefs.setDubSelected(postId, nowDubbed)
+        }
+    }
+
+    private fun isDubbed(label: String) = label.contains("dubbed")
+
+    // ---- speed / boost ----
+
+    /** Per playback (not persisted); kept across episode switches. */
+    fun setSpeed(speed: Float) {
+        engine.setSpeed(speed)
+        _state.update { it.copy(speed = speed) }
+    }
+
+    fun setBoost(on: Boolean) {
+        _state.update { it.copy(boost = on) }
+        if (on) smoother = GainSmoother() else engine.setGain(1f)
+        persistSettings { it.copy(audioBoost = on) }
+    }
+
+    /** Every [GAIN_TICK_MS] while playing: follow the session's loudness map. A seek resets nothing. */
+    private fun boostTick() {
+        if (!_state.value.boost) return
+        val schedule = gainSchedule ?: return
+        engine.setGain(smoother.step(schedule.targetAt(engine.positionMs / 1000.0)).toFloat())
+    }
+
     // ---- user actions ----
 
     fun togglePlay() {
@@ -345,11 +608,13 @@ class PlayerViewModel(
     fun seekBy(deltaMs: Long) {
         val current = engine.positionMs
         engine.seekTo(snapped(current + deltaMs, current))
+        updateCues()
     }
 
     /** Scrub commit; snapped like [seekBy]. */
     fun seekTo(ms: Long) {
         engine.seekTo(snapped(ms, engine.positionMs))
+        updateCues()
     }
 
     private fun snapped(targetMs: Long, currentMs: Long): Long {

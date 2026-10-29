@@ -1111,4 +1111,148 @@ class PlayerViewModelTest {
         runCurrent()
         assertEquals(listOf("s1e1", "s1e2", "s2e1"), env.api.opens.map { it.first })
     }
+
+    // ---- final review fixes ----
+
+    @Test fun openFinishingAfterOnStopLoadsPausedUntilUserPlays() = playerTest {
+        val env = Env()
+        env.api.gate = CompletableDeferred()
+        val v = env.vm(scope = this)
+        runCurrent()
+        v.onStop()
+        env.api.gate!!.complete(Unit)
+        runCurrent()
+        assertEquals(1, engine.loads.size)
+        assertEquals(0, engine.played)
+        assertFalse(engine.isPlaying.value)
+        v.onStart()
+        assertEquals(0, engine.played) // coming back does not start by itself
+        v.togglePlay()
+        assertEquals(1, engine.played)
+    }
+
+    @Test fun switchFinishingAfterOnStopLoadsPaused() = playerTest {
+        val env = Env()
+        val v = started(env)
+        env.api.gate = CompletableDeferred()
+        v.playEpisode("s1e2")
+        runCurrent()
+        v.onStop()
+        env.api.gate!!.complete(Unit)
+        runCurrent()
+        assertEquals(2, engine.loads.size)
+        assertEquals(1, engine.played)
+        assertFalse(engine.isPlaying.value)
+    }
+
+    @Test fun oldEpisodePausedDuringSwitchAndNewOnePlays() = playerTest {
+        val env = Env()
+        val v = started(env)
+        env.api.gate = CompletableDeferred()
+        v.playEpisode("s1e2")
+        runCurrent()
+        assertFalse(engine.isPlaying.value)
+        assertEquals(1, engine.paused)
+        env.api.gate!!.complete(Unit)
+        runCurrent()
+        assertEquals(2, engine.loads.size)
+        assertTrue(engine.isPlaying.value)
+        assertEquals(2, engine.played)
+    }
+
+    @Test fun oldStreamErrorDuringSwitchIsIgnoredAndSwitchCompletes() = playerTest {
+        val env = Env()
+        val v = started(env)
+        env.api.gate = CompletableDeferred()
+        v.playEpisode("s1e2")
+        runCurrent()
+        engine.emit(EngineEvent.Error(2004, "ERROR_CODE_IO_BAD_HTTP_STATUS", 500))
+        runCurrent()
+        assertEquals(PlayerPhase.Loading, v.state.value.phase)
+        assertEquals(listOf("s1e1"), env.api.reports.map { it.first }) // still reported, for the old stream
+        env.api.gate!!.complete(Unit)
+        runCurrent()
+        assertEquals(PlayerPhase.Loading, v.state.value.phase)
+        assertEquals(listOf("s1e1", "s1e2"), env.api.opens.map { it.first })
+        // A late Ended of the old stream still cannot close the player.
+        engine.emit(EngineEvent.Ended)
+        runCurrent()
+        assertTrue(env.exits.isEmpty())
+        engine.emit(EngineEvent.Ready)
+        runCurrent()
+        assertEquals(PlayerPhase.Playing, v.state.value.phase)
+        assertEquals("s1e2", v.state.value.currentStreamId)
+    }
+
+    @Test fun newStreamErrorAfterSwitchLoadStillFails() = playerTest {
+        val env = Env()
+        val v = started(env)
+        v.playEpisode("s1e2")
+        runCurrent()
+        engine.emit(EngineEvent.Error(4001, "ERROR_CODE_DECODING_FAILED", null))
+        runCurrent()
+        assertEquals(PlayerPhase.Failed(UiStrings.PLAYBACK_FAILED), v.state.value.phase)
+    }
+
+    @Test fun switchResolvesEpisodeFromLoadedSeasons() = playerTest {
+        val env = Env()
+        val v = started(env)
+        v.playEpisode("s2e1")
+        runCurrent()
+        assertEquals(1, env.api.titleCalls)
+        assertEquals("فصل ۲ · قسمت ۱", v.state.value.episodeLabel)
+    }
+
+    @Test fun recoveryKeepsAPausedPlayerPaused() = playerTest {
+        val env = Env()
+        val v = started(env)
+        v.togglePlay()
+        runCurrent()
+        assertEquals(1, engine.played)
+        engine.emit(EngineEvent.Error(2004, "ERROR_CODE_IO_BAD_HTTP_STATUS", 403))
+        runCurrent()
+        assertEquals(2, engine.loads.size)
+        assertEquals(1, engine.played)
+        assertFalse(engine.isPlaying.value)
+        v.togglePlay()
+        assertEquals(2, engine.played)
+    }
+
+    @Test fun recoveryKeepsAPlayingPlayerPlaying() = playerTest {
+        val env = Env()
+        started(env)
+        engine.emit(EngineEvent.Error(2004, "ERROR_CODE_IO_BAD_HTTP_STATUS", 403))
+        runCurrent()
+        assertEquals(2, engine.loads.size)
+        assertTrue(engine.isPlaying.value)
+    }
+
+    @Test fun selectedQualityMissingAfterReloadFallsBackToAutomatic() = playerTest {
+        val env = Env()
+        val v = started(env)
+        engine.tracks.value = EngineTracks(heights = listOf(1080, 720))
+        runCurrent()
+        v.setQuality(1080)
+        v.playNext()
+        runCurrent()
+        engine.tracks.value = EngineTracks(heights = listOf(720, 480))
+        runCurrent()
+        assertNull(v.state.value.selectedQuality)
+        assertEquals(listOf<Int?>(1080), engine.qualitySelections)
+    }
+
+    @Test fun oldStreamReadyDuringSwitchIsIgnored() = playerTest {
+        val env = Env()
+        val v = started(env)
+        env.api.gate = CompletableDeferred()
+        v.playEpisode("s1e2")
+        runCurrent()
+        engine.emit(EngineEvent.Ready)
+        runCurrent()
+        assertEquals(PlayerPhase.Loading, v.state.value.phase)
+        v.playEpisode("s2e1") // still switching: ignored
+        env.api.gate!!.complete(Unit)
+        runCurrent()
+        assertEquals(listOf("s1e1", "s1e2"), env.api.opens.map { it.first })
+    }
 }

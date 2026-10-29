@@ -149,6 +149,8 @@ class PlayerViewModel(
     private var closed = false
     /** The user's play/pause intent: engine.isPlaying is false while buffering and after Ended. */
     private var wantsPlay = false
+    /** Between onStart and onStop: a load that finishes in the background stays paused. */
+    private var foreground = true
     /** Last positive engine duration for this stream: the engine reports 0 again after each load. */
     private var knownDurationMs = 0L
 
@@ -174,6 +176,9 @@ class PlayerViewModel(
      * the old stream's late Ended are ignored, so a double press never skips an episode.
      */
     private var switching = false
+    /** The engine still holds the stream [switchingFrom] (the switch's load hasn't happened yet). */
+    private var oldStreamOnEngine = false
+    private var switchingFrom: String? = null
 
     // ---- subtitles ----
     private val _cues = MutableStateFlow(SubtitleCues())
@@ -286,7 +291,8 @@ class PlayerViewModel(
                 if (closed) return@launch
                 // Downloads run beside the engine load and never block or fail playback.
                 ensureSubtitles(_state.value.subtitle)
-                loadEngine(s.masterUrl, start)
+                // A silent reload (same stream) keeps the user's play/pause; any other open plays.
+                loadEngine(s.masterUrl, start, play = if (silent) wantsPlay else true)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: SiteException.NotLoggedIn) {
@@ -300,19 +306,23 @@ class PlayerViewModel(
         }
     }
 
-    /** Fetches the title page, fills the header and finds [id] in the chosen catalog. */
+    /**
+     * Finds [id] in the chosen catalog and fills the header. An episode switch finds it in the catalog
+     * already loaded; otherwise the title page is fetched.
+     */
     private suspend fun resolveEpisode(id: String): Episode? {
-        val detail = titleInfo.get(ref)
-        val catalog = if (dub) detail.catalog.dub else detail.catalog.main
+        val known = seasons.flatMap { it.episodes }.firstOrNull { it.streamId == id }
+        val detail = if (known == null) titleInfo.get(ref) else null
+        val catalog = detail?.let { if (dub) it.catalog.dub else it.catalog.main } ?: seasons
         seasons = catalog
-        val ep = catalog.flatMap { it.episodes }.firstOrNull { it.streamId == id }
+        val ep = known ?: catalog.flatMap { it.episodes }.firstOrNull { it.streamId == id }
         val isSeries = ref.kind == TitleKind.SERIES
         val episodes = if (isSeries && ep != null) seasonEpisodes(catalog, ep.season) else emptyList()
         _state.update {
             it.copy(
-                title = detail.card.title,
+                title = detail?.card?.title ?: it.title,
                 episodeLabel = ep?.takeIf { isSeries }?.let { e -> episodeLabel(e.season, e.number) },
-                backdropUrl = if (session == null) pageBackdrop(detail) ?: it.backdropUrl else it.backdropUrl,
+                backdropUrl = if (session == null && detail != null) pageBackdrop(detail) ?: it.backdropUrl else it.backdropUrl,
                 seasonEpisodes = episodes,
                 hasNext = nextEpisode(catalog, id) != null,
             )
@@ -333,14 +343,18 @@ class PlayerViewModel(
             PlayerEpisode(e.streamId, episodeLabel(e.season, e.number), e.played || local)
         }
 
-    /** Every engine load (start, retry, recovery, episode switch) goes through here. */
-    private fun loadEngine(masterUrl: String, startMs: Long) {
+    /**
+     * Every engine load (start, retry, recovery, episode switch) goes through here. Plays when [play]
+     * and the screen is in the foreground; otherwise loads paused (the user presses play on return).
+     */
+    private fun loadEngine(masterUrl: String, startMs: Long, play: Boolean) {
         readySinceLoad = false
         qualityPending = true
         audioPending = true
+        oldStreamOnEngine = false
         engine.load(masterUrl, startMs)
-        wantsPlay = true
-        engine.play()
+        wantsPlay = play && foreground
+        if (wantsPlay) engine.play() else engine.pause()
     }
 
     private fun openFailureMessage(e: Throwable): String = when (e) {
@@ -367,6 +381,8 @@ class PlayerViewModel(
     private fun onEvent(e: EngineEvent) {
         when (e) {
             EngineEvent.Ready -> {
+                // The previous episode (re)buffering under the switch's loading screen.
+                if (switching && oldStreamOnEngine) return
                 readySinceLoad = true
                 everReady = true
                 switching = false
@@ -380,12 +396,20 @@ class PlayerViewModel(
                 upNextReached = true
                 if (everReady && episode != null && nextEpisode(seasons, streamId) != null) playNext() else close()
             }
-            is EngineEvent.Error -> onError(e)
+            is EngineEvent.Error -> {
+                // The previous episode failing under the switch's loading screen: reported, nothing else.
+                if (switching && oldStreamOnEngine) {
+                    report(e, switchingFrom ?: streamId)
+                    if (BuildConfig.DEBUG) Log.w(TAG, "old stream error during switch ${e.codeName}")
+                    return
+                }
+                onError(e)
+            }
         }
     }
 
     private fun onError(e: EngineEvent.Error) {
-        report(e)
+        report(e, streamId)
         if (BuildConfig.DEBUG) Log.w(TAG, "engine error ${e.codeName} http=${e.httpStatus}")
         if (closed) return
         durationMs()
@@ -402,12 +426,11 @@ class PlayerViewModel(
     }
 
     /** Fire-and-forget, at most once per [ERROR_REPORT_MIN_INTERVAL_MS]; never affects the phase. */
-    private fun report(e: EngineEvent.Error) {
+    private fun report(e: EngineEvent.Error, id: String) {
         val now = clock()
         if (lastReportAt?.let { now - it < ERROR_REPORT_MIN_INTERVAL_MS } == true) return
         lastReportAt = now
         val event = if (readySinceLoad) "error" else "setupError"
-        val id = streamId
         viewModelScope.safeLaunch(onError = {}) { api.reportStreamError(id, event, e.code.toString()) }
     }
 
@@ -620,7 +643,13 @@ class PlayerViewModel(
         }
         if (qualityPending && t.heights.isNotEmpty()) {
             qualityPending = false
-            _state.value.selectedQuality?.let { engine.selectQuality(it) }
+            val selected = _state.value.selectedQuality
+            if (selected != null && selected in t.heights) {
+                engine.selectQuality(selected)
+            } else if (selected != null) {
+                // This stream lacks that height: the engine is on Automatic, so the button says so.
+                _state.update { it.copy(selectedQuality = null) }
+            }
         }
         if (audioPending && t.audio.isNotEmpty()) {
             audioPending = false
@@ -709,7 +738,11 @@ class PlayerViewModel(
     fun playEpisode(streamId: String) {
         if (closed || switching || streamId == this.streamId) return
         save()
+        // Silence the old episode under the loading screen; wantsPlay stays (loadEngine resumes).
+        engine.pause()
         switching = true
+        oldStreamOnEngine = true
+        switchingFrom = this.streamId
         open(streamId, startAt = null)
     }
 
@@ -766,7 +799,14 @@ class PlayerViewModel(
         open(streamId, startAt = if (everReady) engine.positionMs else null)
     }
 
+    /** Back in the foreground: later loads may play again (nothing resumes by itself). */
+    fun onStart() {
+        foreground = true
+    }
+
+    /** Pauses and saves; a load still in flight (open, recovery, switch) will finish paused. */
     fun onStop() {
+        foreground = false
         save()
         wantsPlay = false
         engine.pause()

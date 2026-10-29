@@ -49,6 +49,11 @@ class PlayerActivity : ComponentActivity() {
 
     private var vm: PlayerViewModel? = null
 
+    override fun onStart() {
+        super.onStart()
+        vm?.onStart()
+    }
+
     override fun onStop() {
         vm?.onStop()
         super.onStop()

@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -13,13 +15,28 @@ android {
         minSdk = 31
         targetSdk = 37
         versionCode = 1
-        versionName = "0.1.0"
+        versionName = "1.0.0"
+    }
+
+    // The release key lives outside the repo (default ~/.drooz-release/keystore.properties, or the path in
+    // the DROOZ_SIGNING env var). Without it, release builds fall back to the debug key (local testing only;
+    // such an APK can't update one installed from GitHub Releases).
+    val signingProps = (System.getenv("DROOZ_SIGNING") ?: "${System.getProperty("user.home")}/.drooz-release/keystore.properties")
+        .let(::file).takeIf { it.isFile }
+        ?.let { f -> Properties().apply { f.inputStream().use { load(it) } } }
+    signingConfigs {
+        if (signingProps != null) create("release") {
+            storeFile = file(signingProps.getProperty("storeFile"))
+            storePassword = signingProps.getProperty("storePassword")
+            keyAlias = signingProps.getProperty("keyAlias")
+            keyPassword = signingProps.getProperty("keyPassword")
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
 

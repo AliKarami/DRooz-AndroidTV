@@ -7,6 +7,7 @@ import com.alikarami.drooz.site.SiteConfig
 import com.alikarami.drooz.site.SiteException
 import com.alikarami.drooz.site.http.PersistentCookieJar
 import com.alikarami.drooz.site.http.SiteHttp
+import java.util.concurrent.atomic.AtomicInteger
 
 sealed interface LoginResult {
     data object Success : LoginResult
@@ -34,7 +35,15 @@ class AuthService(
     /** The current session cookie value; changes whenever a login succeeds. */
     val sessionToken: String? get() = jar.cookie(SESSION_COOKIE)
 
+    /** Bumped by every logout; a login that spans one is void (see [login]). */
+    private val logoutGeneration = AtomicInteger()
+
+    /**
+     * A login that was in flight when [logout] ran (e.g. a background relogin) saves nothing,
+     * drops the session cookie it may have received, and returns [LoginResult.Failed].
+     */
     suspend fun login(username: String, password: String, mobile: String?): LoginResult {
+        val generation = logoutGeneration.get()
         // Like a browser, load the form first: the site pairs its `sf` session cookie with the
         // `recaptchaPass` token, and posting without one makes the mobile step fail (HTTP 502).
         val form = http.get(SiteConfig.LOGIN_PATH, requiresAuth = false)
@@ -53,6 +62,10 @@ class AuthService(
             }
             else -> toResult(first)
         }
+        if (logoutGeneration.get() != generation) {
+            jar.clear(keep = setOf(DEVICE_COOKIE))
+            return LoginResult.Failed("ورود انجام نشد")
+        }
         if (result == LoginResult.Success) {
             creds.save(Credentials(username, password, mobile))
             reportDevice()
@@ -69,10 +82,12 @@ class AuthService(
         return login(c.username, c.password, c.mobile) == LoginResult.Success
     }
 
+    /** Credentials go first so an in-flight relogin cannot reuse them; the `sf` device cookie is kept. */
     suspend fun logout() {
+        logoutGeneration.incrementAndGet()
+        creds.clear()
         runCatching { http.get(LOGOUT_PATH, requiresAuth = false, retry = false) }
         jar.clear(keep = setOf(DEVICE_COOKIE))
-        creds.clear()
     }
 
     private suspend fun post(fields: List<Pair<String, String>>): LoginPage =

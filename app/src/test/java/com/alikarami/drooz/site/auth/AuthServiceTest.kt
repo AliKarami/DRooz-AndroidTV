@@ -3,7 +3,13 @@ package com.alikarami.drooz.site.auth
 import com.alikarami.drooz.site.http.PersistentCookieJar
 import com.alikarami.drooz.site.http.SiteHttp
 import com.alikarami.drooz.testutil.fixture
+import kotlinx.coroutines.async
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
+import mockwebserver3.Dispatcher
+import mockwebserver3.RecordedRequest
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import kotlinx.coroutines.CoroutineDispatcher
@@ -186,5 +192,34 @@ class AuthServiceTest {
         assertEquals("dev1", jar.cookie("sf"))
         assertFalse(auth.isLoggedIn)
         assertNull(creds.load())
+    }
+
+    // Home's view model can hit an expired session and relogin while Settings logs out: the
+    // relogin must not bring the stored credentials or a session cookie back.
+    @Test fun reloginInFlightAcrossLogoutLeavesNoCredentialsOrSession() = runBlocking {
+        creds.save(Credentials("testuser", "secret", null))
+        val postArrived = CountDownLatch(1)
+        val logoutDone = CountDownLatch(1)
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse = when {
+                request.method == "POST" -> {
+                    postArrived.countDown()
+                    logoutDone.await(5, TimeUnit.SECONDS)
+                    page("login_success.html", "cf=sess2")
+                }
+                request.url.encodedPath == "/user/login/" -> page("login_form.html", "sf=dev1")
+                else -> MockResponse.Builder().body("ok").build()
+            }
+        }
+        val relogin = async(Dispatchers.IO) { auth.relogin() }
+        assertTrue(postArrived.await(5, TimeUnit.SECONDS))
+        auth.logout()
+        logoutDone.countDown()
+
+        assertFalse(relogin.await())
+        assertNull(creds.load())
+        assertNull(jar.cookie("cf"))
+        assertFalse(auth.isLoggedIn)
+        assertEquals("dev1", jar.cookie("sf"))
     }
 }

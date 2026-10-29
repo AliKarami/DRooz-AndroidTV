@@ -54,9 +54,9 @@ class TitleViewModel(
     private var error: String? = null
     private var watchlistInFlight = false
     private var dubRestored = false
-    /** Set by a play: the page (played ✓, next episode) changed and is refetched on return. */
     /** A player start was emitted and the page hasn't been resumed since. */
     private var startPending = false
+    /** Set by a play: the page (played ✓, next episode) changed and is refetched on return. */
     private var playedSinceLoad = false
 
     private val _state = MutableStateFlow(build())

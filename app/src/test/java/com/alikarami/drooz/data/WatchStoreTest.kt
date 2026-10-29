@@ -57,11 +57,46 @@ class WatchStoreTest {
     }
 
     @Test fun ioFailureOnPersistDoesNotThrowAndKeepsEntryInMemory() = runTest {
-        val target = tmp.newFolder("w.json")      // a non-empty directory where the file should be
-        java.io.File(target, "x").writeText("x")
+        val dir = tmp.newFolder("ro")
+        val target = java.io.File(dir, "w.json")
+        dir.setWritable(false)                    // the temp file cannot be created
+        try {
+            val store = FileWatchStore(target) { now }
+            now = 7; store.put(entry("a", 5))
+            assertEquals(5L, store.get("a")!!.positionMs)
+            assertEquals(false, java.io.File(dir, "w.json.tmp").exists())
+            assertEquals(false, target.exists())
+        } finally {
+            dir.setWritable(true)
+        }
+    }
+
+    @Test fun corruptFileIsKeptAsideNotOverwritten() = runTest {
+        val file = tmp.newFile("w.json").apply { writeText("{not json") }
+        val store = FileWatchStore(file) { now }
+        now = 1; store.put(entry("a"))
+        val aside = java.io.File(file.parentFile, "w.json.corrupt")
+        assertEquals("{not json", aside.readText())
+        assertEquals(listOf("a"), FileWatchStore(file) { now }.all().map { it.streamId })
+    }
+
+    @Test fun emptyOrMissingFileIsNotCorrupt() = runTest {
+        val empty = tmp.newFile("w.json")
+        FileWatchStore(empty) { now }.put(entry("a"))
+        assertEquals(false, java.io.File(empty.parentFile, "w.json.corrupt").exists())
+        val missing = java.io.File(tmp.newFolder("m"), "w.json")
+        FileWatchStore(missing) { now }.put(entry("b"))
+        assertEquals(false, java.io.File(missing.parentFile, "w.json.corrupt").exists())
+        assertEquals(listOf("b"), FileWatchStore(missing) { now }.all().map { it.streamId })
+    }
+
+    @Test fun unreadableFileIsKeptAsideBeforeStartingEmpty() = runTest {
+        val target = tmp.newFolder("w.json")      // reading a directory fails with an IOException every time
+        java.io.File(target, "x").writeText("kept")
         val store = FileWatchStore(target) { now }
-        now = 7; store.put(entry("a", 5))
-        assertEquals(5L, store.get("a")!!.positionMs)
-        assertEquals(false, java.io.File(target.parentFile, "w.json.tmp").exists())
+        assertEquals(emptyList<WatchEntry>(), store.all())
+        now = 1; store.put(entry("a"))
+        assertEquals("kept", java.io.File(target.parentFile, "w.json.corrupt/x").readText())
+        assertEquals(listOf("a"), FileWatchStore(target) { now }.all().map { it.streamId })
     }
 }

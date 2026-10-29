@@ -10,7 +10,10 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import java.io.File
+import java.io.FileOutputStream
 import java.io.IOException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 
 @Serializable
 data class WatchEntry(
@@ -57,7 +60,7 @@ class FileWatchStore(
             persist(map.values.toList())
         } catch (e: IOException) {
             // Playback must never crash on a disk error; the entry stays in memory.
-            if (BuildConfig.DEBUG) Log.w("WatchStore", "persist failed: $e")
+            if (BuildConfig.DEBUG) Log.w(TAG, "persist failed: $e")
         }
     }
 
@@ -65,20 +68,66 @@ class FileWatchStore(
 
     /** Caller holds the mutex. */
     private suspend fun loaded(): MutableMap<String, WatchEntry> = entries ?: withContext(Dispatchers.IO) {
-        val list = runCatching { json.decodeFromString(serializer, file.readText()) }.getOrDefault(emptyList())
+        val list = read()
         LinkedHashMap<String, WatchEntry>().also { m -> list.forEach { m[it.streamId] = it } }
     }.also { entries = it }
 
+    /**
+     * The stored entries; none when the file is missing or empty. A file that can't be decoded, or still
+     * can't be read on a second try, is moved aside to `<name>.corrupt` so the next put never overwrites it.
+     */
+    private fun read(): List<WatchEntry> {
+        if (!file.exists()) return emptyList()
+        val text = try {
+            file.readText()
+        } catch (e: IOException) {
+            try {
+                file.readText()
+            } catch (e2: IOException) {
+                if (BuildConfig.DEBUG) Log.w(TAG, "read failed twice: $e2")
+                moveAside()
+                return emptyList()
+            }
+        }
+        if (text.isBlank()) return emptyList()
+        return try {
+            json.decodeFromString(serializer, text)
+        } catch (e: IllegalArgumentException) {
+            // SerializationException included.
+            if (BuildConfig.DEBUG) Log.w(TAG, "decode failed: $e")
+            moveAside()
+            emptyList()
+        }
+    }
+
+    private fun moveAside() {
+        val aside = File(file.parentFile, file.name + ".corrupt")
+        try {
+            if (aside.exists()) aside.deleteRecursively()
+            Files.move(file.toPath(), aside.toPath(), StandardCopyOption.REPLACE_EXISTING)
+        } catch (e: IOException) {
+            if (BuildConfig.DEBUG) Log.w(TAG, "could not keep the unreadable file: $e")
+        }
+    }
+
+    /** Writes a synced temp file, then renames it over the real one (never a half-written store). */
     private suspend fun persist(list: List<WatchEntry>) = withContext(Dispatchers.IO) {
         val tmp = File(file.parentFile, file.name + ".tmp")
         try {
-            tmp.writeText(json.encodeToString(serializer, list))
+            FileOutputStream(tmp).use { out ->
+                out.write(json.encodeToString(serializer, list).toByteArray(Charsets.UTF_8))
+                out.fd.sync()
+            }
             if (!tmp.renameTo(file)) {
-                java.nio.file.Files.move(tmp.toPath(), file.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+                Files.move(tmp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING)
             }
         } catch (e: IOException) {
             tmp.delete()
             throw e
         }
+    }
+
+    private companion object {
+        const val TAG = "WatchStore"
     }
 }

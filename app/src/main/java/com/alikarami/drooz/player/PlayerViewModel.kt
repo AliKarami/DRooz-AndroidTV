@@ -103,7 +103,12 @@ data class PlayerUiState(
     val boost: Boolean = true,
     val speed: Float = 1f,
     val upNext: UpNext? = null,
+    /** The episodes strip's season ([stripSeason]); browsing another season doesn't switch playback. */
     val seasonEpisodes: List<PlayerEpisode> = emptyList(),
+    val seasons: List<Int> = emptyList(),
+    val stripSeason: Int = 0,
+    /** Season of the episode playing. */
+    val currentSeason: Int = 0,
     val currentStreamId: String = "",
     val hasNext: Boolean = false,
 )
@@ -329,6 +334,9 @@ class PlayerViewModel(
                 episodeLabel = ep?.takeIf { isSeries }?.let { e -> episodeLabel(e.season, e.number) },
                 backdropUrl = if (session == null && detail != null) pageBackdrop(detail) ?: it.backdropUrl else it.backdropUrl,
                 seasonEpisodes = episodes,
+                seasons = if (isSeries) catalog.map { s -> s.number }.sorted() else emptyList(),
+                stripSeason = ep?.season ?: 0,
+                currentSeason = ep?.season ?: 0,
                 hasNext = nextEpisode(catalog, id) != null,
             )
         }
@@ -751,6 +759,16 @@ class PlayerViewModel(
         oldStreamOnEngine = true
         switchingFrom = this.streamId
         open(streamId, startAt = null)
+    }
+
+    /** Shows [season]'s episodes in the strip (from the catalog already loaded); playback is untouched. */
+    fun showSeason(season: Int) {
+        val st = _state.value
+        if (season == st.stripSeason || season !in st.seasons) return
+        viewModelScope.launch {
+            val eps = seasonEpisodes(seasons, season)
+            _state.update { it.copy(seasonEpisodes = eps, stripSeason = season) }
+        }
     }
 
     /** The overlay reports a side panel / the episodes strip: a due up-next card waits until it closes. */

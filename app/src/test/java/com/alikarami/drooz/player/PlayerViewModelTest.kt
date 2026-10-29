@@ -1036,6 +1036,41 @@ class PlayerViewModelTest {
         )
     }
 
+    @Test fun episodesStripListsSeasonsAndBrowsesAnotherWithoutSwitching() = playerTest {
+        val env = Env()
+        val v = started(env)
+        assertEquals(listOf(1, 2), v.state.value.seasons)
+        assertEquals(1, v.state.value.stripSeason)
+        assertEquals(1, v.state.value.currentSeason)
+        v.showSeason(2)
+        runCurrent()
+        assertEquals(2, v.state.value.stripSeason)
+        assertEquals(listOf("s2e1"), v.state.value.seasonEpisodes.map { it.streamId })
+        assertEquals("s1e1", v.state.value.currentStreamId)
+        assertEquals(1, engine.loads.size)
+        assertEquals(1, env.api.opens.size)
+    }
+
+    @Test fun showSeasonIgnoresUnknownSeason() = playerTest {
+        val v = started(Env())
+        v.showSeason(7)
+        runCurrent()
+        assertEquals(1, v.state.value.stripSeason)
+        assertEquals(listOf("s1e1", "s1e2"), v.state.value.seasonEpisodes.map { it.streamId })
+    }
+
+    @Test fun switchingEpisodeMovesStripToItsSeason() = playerTest {
+        val v = started(Env())
+        v.showSeason(2)
+        runCurrent()
+        v.showSeason(1)
+        runCurrent()
+        v.playEpisode("s2e1")
+        runCurrent()
+        assertEquals(2, v.state.value.stripSeason)
+        assertEquals(2, v.state.value.currentSeason)
+    }
+
     // ---- Task 9 fix round 1: switches in flight ----
 
     @Test fun lateEndedDuringSwitchDoesNotExit() = playerTest {

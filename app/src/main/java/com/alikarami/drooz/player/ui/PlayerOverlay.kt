@@ -330,6 +330,7 @@ internal fun PlayerOverlayHost(
                 onPick = { id ->
                     if (id == state.currentStreamId) c.show(Overlay.CONTROLS, ControlsTarget.EPISODES) else vm.playEpisode(id)
                 },
+                onSeason = vm::showSeason,
             )
         }
 

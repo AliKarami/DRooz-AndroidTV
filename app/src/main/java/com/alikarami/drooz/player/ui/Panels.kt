@@ -1,8 +1,8 @@
 package com.alikarami.drooz.player.ui
 
-import android.view.KeyEvent as NativeKeyEvent
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,10 +30,13 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.onPreviewKeyEvent
@@ -51,6 +54,7 @@ import androidx.tv.material3.ClickableSurfaceDefaults
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Surface
 import androidx.tv.material3.Text
+import android.view.KeyEvent as NativeKeyEvent
 import com.alikarami.drooz.R
 import com.alikarami.drooz.data.BACKGROUND_OPACITIES
 import com.alikarami.drooz.data.SUBTITLE_SIZES
@@ -373,9 +377,12 @@ internal fun SpeedPanel(speed: Float, focusToken: Int?, onPick: (Float) -> Unit,
 }
 
 /**
- * «قسمت‌ها»: this season's episodes in a row over the bottom; opens on the one playing. Reports its
- * height above the screen edge (subtitles lift above it).
+ * «قسمت‌ها»: season tabs (series with more than one season) over that season's episodes; opens on the
+ * season and episode playing. Focusing a tab shows its season (TV tab behaviour); only picking an
+ * episode switches playback. Reports its height above the screen edge (subtitles lift above it).
  */
+@Suppress("DEPRECATION")
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 internal fun EpisodesStrip(
     state: PlayerUiState,
@@ -383,13 +390,21 @@ internal fun EpisodesStrip(
     containerH: Int,
     onCoverPx: (Int) -> Unit,
     onPick: (String) -> Unit,
+    onSeason: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val episodes = state.seasonEpisodes
     val currentIndex = episodes.indexOfFirst { it.streamId == state.currentStreamId }.coerceAtLeast(0)
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = (currentIndex - 1).coerceAtLeast(0))
     val current = remember { FocusRequester() }
-    LaunchedEffect(focusToken) { if (focusToken != null) current.requestFocusSoon() }
+    LaunchedEffect(focusToken) {
+        if (focusToken == null) return@LaunchedEffect
+        // Each opening starts on the season playing, whatever was browsed last time.
+        onSeason(state.currentSeason)
+        current.requestFocusSoon()
+    }
+    // A browsed season starts at its first episode; the playing one at the episode playing.
+    LaunchedEffect(state.stripSeason) { listState.scrollToItem((currentIndex - 1).coerceAtLeast(0)) }
 
     Column(
         modifier
@@ -403,10 +418,33 @@ internal fun EpisodesStrip(
                 .onGloballyPositioned { onCoverPx(containerH - it.positionInRoot().y.roundToInt()) }
                 .padding(bottom = 24.dp),
         ) {
-            Text(
-                stringResource(R.string.player_episodes), Modifier.padding(start = 48.dp, bottom = 4.dp),
-                style = MaterialTheme.typography.titleMedium, color = Color.White,
-            )
+            Row(
+                Modifier.padding(start = 48.dp, bottom = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    stringResource(R.string.player_episodes), Modifier.padding(end = 16.dp),
+                    style = MaterialTheme.typography.titleMedium, color = Color.White,
+                )
+                if (state.seasons.size > 1) {
+                    // Entering the tabs (Up from an episode) lands on the season shown, never a neighbour.
+                    val selectedTab = remember { FocusRequester() }
+                    Row(
+                        Modifier.focusProperties { enter = { selectedTab } }.focusGroup(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        state.seasons.forEach { n ->
+                            val selected = n == state.stripSeason
+                            SeasonTab(
+                                stringResource(R.string.title_season, n.toString().toPersianDigits()),
+                                selected,
+                                if (selected) Modifier.focusRequester(selectedTab) else Modifier,
+                            ) { onSeason(n) }
+                        }
+                    }
+                }
+            }
             LazyRow(
                 state = listState,
                 contentPadding = PaddingValues(horizontal = 48.dp, vertical = 14.dp),
@@ -450,6 +488,35 @@ internal fun EpisodesStrip(
                     }
                 }
             }
+        }
+    }
+}
+
+/** Season tab: focusing it shows that season; the selected one is bold with the accent underline. */
+@Composable
+private fun SeasonTab(label: String, selected: Boolean, modifier: Modifier, onSelect: () -> Unit) {
+    Surface(
+        onClick = onSelect,
+        modifier = modifier.onFocusChanged { if (it.isFocused && !selected) onSelect() },
+        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(50)),
+        scale = ClickableSurfaceDefaults.scale(focusedScale = 1f),
+        colors = ClickableSurfaceDefaults.colors(
+            containerColor = Color.Transparent,
+            contentColor = if (selected) Color.White else DroozColors.TextSecondary,
+            focusedContainerColor = Color.White.copy(alpha = 0.16f),
+            focusedContentColor = Color.White,
+        ),
+    ) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                label,
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium),
+                maxLines = 1, softWrap = false,
+            )
+            Box(
+                Modifier.width(24.dp).height(2.dp)
+                    .background(if (selected) DroozColors.Accent else Color.Transparent, RoundedCornerShape(1.dp)),
+            )
         }
     }
 }

@@ -11,6 +11,7 @@ import com.alikarami.drooz.data.SiteApi
 import com.alikarami.drooz.data.TitleInfoRepository
 import com.alikarami.drooz.site.ImageUrls
 import com.alikarami.drooz.site.model.TitleCard
+import com.alikarami.drooz.site.model.HomePage
 import com.alikarami.drooz.site.model.TitleRef
 import com.alikarami.drooz.ui.common.safeLaunch
 import com.alikarami.drooz.ui.common.toPersianDigits
@@ -68,7 +69,8 @@ class HomeViewModel(
     val uiState: StateFlow<HomeUiState> = _state
 
     private val entries = HashMap<String, List<Entry>>()
-    private val focus = HashMap<String, Int>()
+    /** Last focused title per row, by identity: a refresh may reorder the row. */
+    private val focus = HashMap<String, TitleRef>()
     private val started = HashSet<String>()
     private var featured: Map<TitleRef, String> = emptyMap()
 
@@ -90,30 +92,41 @@ class HomeViewModel(
     /** Reloads the home() sources only; lazily loaded list rows keep their state. */
     fun refresh() = loadHome(useCache = false)
 
+    /**
+     * [useCache]: a fresh cached page (warm start) is shown at once, with no skeleton, and then revalidated
+     * in the background; a failed revalidation keeps the cached rows quietly.
+     */
     private fun loadHome(useCache: Boolean) {
         refreshJob?.cancel()
-        _state.update { s ->
+        val cached = homeCache?.takeIf { useCache }?.fresh()
+        if (cached != null) applyHome(cached)
+        else _state.update { s ->
             s.copy(
                 rows = s.rows.map { if (isHomeRow(it.key)) it.copy(loading = true, error = false) else it },
                 error = null,
             )
         }
         refreshJob = viewModelScope.safeLaunch(onError = { e ->
-            _state.update { s ->
+            if (cached == null) _state.update { s ->
                 s.copy(rows = s.rows.map { if (isHomeRow(it.key)) it.copy(loading = false) else it },
                     error = e.message ?: "error")
             }
         }) {
-            val page = homeCache?.takeIf { useCache }?.fresh() ?: api.home().also { homeCache?.put(it) }
-            featured = page.featured.associate { it.ref to it.backdropHash }
-            for (cfg in HomeRows.rows) {
-                when (val src = cfg.source) {
-                    is RowSource.Recent -> setItems(cfg.key, page.recentlyStreamed.map { Entry(it.ref, null, it.posterHash) })
-                    is RowSource.HomeSection ->
-                        setItems(cfg.key, page.sections.firstOrNull { it.title == src.title }?.items.orEmpty()
-                            .map { Entry(it.ref, it, it.posterHash) })
-                    is RowSource.ListPath -> Unit
-                }
+            val page = api.home()
+            homeCache?.put(page)
+            applyHome(page)
+        }
+    }
+
+    private fun applyHome(page: HomePage) {
+        featured = page.featured.associate { it.ref to it.backdropHash }
+        for (cfg in HomeRows.rows) {
+            when (val src = cfg.source) {
+                is RowSource.Recent -> setItems(cfg.key, page.recentlyStreamed.map { Entry(it.ref, null, it.posterHash) })
+                is RowSource.HomeSection ->
+                    setItems(cfg.key, page.sections.firstOrNull { it.title == src.title }?.items.orEmpty()
+                        .map { Entry(it.ref, it, it.posterHash) })
+                is RowSource.ListPath -> Unit
             }
         }
     }
@@ -142,10 +155,15 @@ class HomeViewModel(
         }
     }
 
-    private fun setItems(key: String, list: List<Entry>) {
+    /** Titles are unique within a row: the UI keys cards (and focus) by title identity. */
+    private fun setItems(key: String, all: List<Entry>) {
+        val list = all.distinctBy { it.ref }
         entries[key] = list
         val landscape = configs[key]?.source is RowSource.Recent
-        updateRow(key) { it.copy(items = list.map { e -> cardUi(e, landscape) }, loading = false, error = false) }
+        val items = list.map { e -> cardUi(e, landscape) }
+        // An unchanged revalidation leaves the row (and so the screen) untouched.
+        if (_state.value.rows.any { it.key == key && it.items == items && !it.loading && !it.error }) return
+        updateRow(key) { it.copy(items = items, loading = false, error = false) }
     }
 
     private fun cardUi(e: Entry, landscape: Boolean): CardUi {
@@ -162,11 +180,15 @@ class HomeViewModel(
     private fun updateRow(key: String, f: (RowUi) -> RowUi) =
         _state.update { s -> s.copy(rows = s.rows.map { if (it.key == key) f(it) else it }) }
 
-    fun focusedIndex(rowKey: String): Int = focus[rowKey] ?: 0
+    /** Where the row's last focused title is now (0 if it is gone or the row was never focused). */
+    fun focusedIndex(rowKey: String): Int {
+        val ref = focus[rowKey] ?: return 0
+        return entries[rowKey]?.indexOfFirst { it.ref == ref }?.takeIf { it >= 0 } ?: 0
+    }
 
     fun onFocus(rowKey: String, index: Int) {
-        focus[rowKey] = index
         val entry = entries[rowKey]?.getOrNull(index) ?: return
+        focus[rowKey] = entry.ref
         heroes.focus(entry.ref, entry.card, entry.posterHash)
     }
 }

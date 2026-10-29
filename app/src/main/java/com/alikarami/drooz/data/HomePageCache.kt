@@ -6,7 +6,8 @@ import com.alikarami.drooz.site.model.HomePage
 /**
  * The last home page fetched in this process. A home recreated soon after (a warm start: Back out,
  * launch again) shows it at once instead of a skeleton while the page downloads and parses (~2 s on TV).
- * Within [ttlMs] the page is treated as current, just as a home that was never left keeps its rows.
+ * The page is revalidated right after it is shown (see HomeViewModel); past [ttlMs] it is not shown at all.
+ * It belongs to one session: AppViewModel clears it when the session is lost and on every login.
  */
 class HomePageCache(
     private val ttlMs: Long = 10 * 60_000L,
@@ -16,6 +17,10 @@ class HomePageCache(
     private var at = 0L
 
     @Synchronized fun fresh(): HomePage? = page?.takeIf { clock() - at < ttlMs }
+
+    @Synchronized fun clear() {
+        page = null
+    }
 
     @Synchronized fun put(page: HomePage) {
         this.page = page

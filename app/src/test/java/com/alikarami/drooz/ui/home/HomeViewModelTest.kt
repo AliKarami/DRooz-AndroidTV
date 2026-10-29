@@ -78,23 +78,66 @@ class HomeViewModelTest {
         assertEquals(null, vm.featuredBackdrop(ref(11)))
     }
 
-    // Warm start: a recreated home shows the page fetched moments ago at once, without a skeleton or a fetch.
-    @Test fun freshCachedHomeShowsRowsWithoutFetching() = runTest(dispatcher) {
+    // Warm start: a recreated home shows the cached page at once (no skeleton), then revalidates it.
+    @Test fun cachedHomeIsShownThenRefreshed() = runTest(dispatcher) {
         val cache = HomePageCache(ttlMs = 600_000) { 0L }
+        cache.put(home())
         val api = FakeApi(home())
+        val fresh = CompletableDeferred<HomePage>()
         var homeCalls = 0
-        api.onHome = { homeCalls++; api.homePage }
-        HomeViewModel(api, TitleInfoRepository(api, fetchScope = backgroundScope), homeCache = cache)
-        advanceUntilIdle()
-        assertEquals(1, homeCalls)
-
-        val again = HomeViewModel(api, TitleInfoRepository(api, fetchScope = backgroundScope), homeCache = cache)
+        api.onHome = { homeCalls++; fresh.await() }
+        val vm = HomeViewModel(api, TitleInfoRepository(api, fetchScope = backgroundScope), homeCache = cache)
         runCurrent()
-        assertEquals(1, homeCalls)
-        val recent = again.uiState.value.rows[0]
+        val recent = vm.uiState.value.rows[0]
         assertEquals(listOf("Shaun The Sheep", "Other One"), recent.items.map { it.title })
         assertFalse(recent.loading)
-        assertEquals("bd10", again.featuredBackdrop(ref(10)))
+        assertEquals("bd10", vm.featuredBackdrop(ref(10)))
+        assertEquals(1, homeCalls)
+
+        fresh.complete(home().copy(recentlyStreamed = listOf(PosterRef(ref(3, "brand-new"), "rp3"))))
+        advanceUntilIdle()
+        assertEquals(listOf("Brand New"), vm.uiState.value.rows[0].items.map { it.title })
+        assertEquals(ref(3, "brand-new"), cache.fresh()!!.recentlyStreamed.single().ref)
+    }
+
+    // Revalidation must not disturb the cached rows when it fails.
+    @Test fun failedRefreshKeepsCachedRows() = runTest(dispatcher) {
+        val cache = HomePageCache(ttlMs = 600_000) { 0L }
+        cache.put(home())
+        val api = FakeApi(home())
+        api.onHome = { throw com.alikarami.drooz.site.SiteException.NetworkError(RuntimeException("x")) }
+        val vm = HomeViewModel(api, TitleInfoRepository(api, fetchScope = backgroundScope), homeCache = cache)
+        advanceUntilIdle()
+        assertEquals(2, vm.uiState.value.rows[0].items.size)
+        assertNull(vm.uiState.value.error)
+    }
+
+    // A refresh that reorders the focused row keeps focus memory and the hero on the same title.
+    @Test fun reorderingRefreshKeepsFocusedTitle() = runTest(dispatcher) {
+        val api = FakeApi(home())
+        val vm = vm(api); advanceUntilIdle()
+        vm.onFocus("recent", 1); runCurrent()              // "other-one"
+        assertEquals(ref(2, "other-one"), vm.uiState.value.hero!!.ref)
+
+        api.homePage = home().copy(recentlyStreamed = listOf(
+            PosterRef(ref(5, "newcomer"), "rp5"), PosterRef(ref(1, "shaun-the-sheep"), "rp1"),
+            PosterRef(ref(2, "other-one"), "rp2"),
+        ))
+        vm.refresh(); advanceUntilIdle()
+        assertEquals(2, vm.focusedIndex("recent"))
+        assertEquals(ref(2, "other-one"), vm.uiState.value.hero!!.ref)
+        // Focus events after the refresh resolve against the new order.
+        vm.onFocus("recent", 0); runCurrent()
+        assertEquals(ref(5, "newcomer"), vm.uiState.value.hero!!.ref)
+    }
+
+    // Cards are keyed by title identity in the UI, so a row never holds the same title twice.
+    @Test fun rowItemsAreUniqueByTitle() = runTest(dispatcher) {
+        val dup = home().copy(recentlyStreamed = listOf(
+            PosterRef(ref(1, "shaun-the-sheep"), "rp1"), PosterRef(ref(1, "shaun-the-sheep"), "rp1"),
+        ))
+        val vm = vm(FakeApi(dup)); advanceUntilIdle()
+        assertEquals(1, vm.uiState.value.rows[0].items.size)
     }
 
     @Test fun firstRowIsRecentlyStreamedLandscape() = runTest(dispatcher) {

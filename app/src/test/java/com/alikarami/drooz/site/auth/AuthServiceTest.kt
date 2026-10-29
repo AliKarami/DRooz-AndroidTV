@@ -6,6 +6,9 @@ import com.alikarami.drooz.testutil.fixture
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlin.coroutines.CoroutineContext
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -102,6 +105,23 @@ class AuthServiceTest {
         assertEquals(LoginResult.NeedsMobile("0912***0000"), auth.login("testuser", "secret", null))
         assertEquals(2, server.requestCount)
         assertNull(creds.load())
+    }
+
+    // The login page is parsed off the caller's (main) thread, like every other site page.
+    @Test fun loginParsesOnParseDispatcher() = runTest {
+        var dispatches = 0
+        val parse = object : CoroutineDispatcher() {
+            override fun isDispatchNeeded(context: CoroutineContext) = true
+            override fun dispatch(context: CoroutineContext, block: Runnable) {
+                dispatches++
+                Dispatchers.IO.dispatch(context, block)
+            }
+        }
+        val auth = AuthService(SiteHttp(server.url("/"), jar), jar, creds, parseDispatcher = parse)
+        form()
+        server.enqueue(page("login_wrong.html"))
+        assertEquals(LoginResult.WrongCredentials, auth.login("testuser", "bad", null))
+        assertTrue(dispatches > 0)
     }
 
     @Test fun wrongPasswordReturnsWrongCredentials() = runTest {

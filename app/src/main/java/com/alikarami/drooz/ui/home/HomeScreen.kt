@@ -391,7 +391,9 @@ private fun CardsRow(
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = start)
     // [slot] always sits on the row's last focused card, so entering the row (Up/Down or a slot
     // hand-over) lands there; it is also the focusRestorer fallback.
-    var last by remember { mutableIntStateOf(start) }
+    // Tracked by title, not position: a background refresh may reorder the row under the user.
+    var last by remember { mutableStateOf(row.items.getOrNull(start)?.ref) }
+    val slotRef = last?.takeIf { ref -> row.items.any { it.ref == ref } } ?: row.items.firstOrNull()?.ref
     // Cards keep the same callbacks and modifiers across recompositions, so a row update skips them.
     val currentOnFocus by rememberUpdatedState(onFocus)
     val currentOnOpen by rememberUpdatedState(onOpen)
@@ -403,16 +405,19 @@ private fun CardsRow(
         contentPadding = PaddingValues(start = RowStart, end = ContentEnd, top = RowPadV, bottom = RowPadV),
         horizontalArrangement = Arrangement.spacedBy(CardGap),
     ) {
-        itemsIndexed(row.items, key = { i, c -> "$i:${c.ref.kind}:${c.ref.postId}" }) { i, card ->
+        // Keyed by title (titles are unique per row, see HomeViewModel.setItems): a reordering refresh moves
+        // the focused card instead of recreating it, so focus and the hero stay on the same title.
+        itemsIndexed(row.items, key = { _, c -> "${c.ref.kind}:${c.ref.postId}" }) { i, card ->
+            val index by rememberUpdatedState(i)
             // Focus only scrolls a card that is partly off-screen; ask explicitly so the pivot
             // specs place every focused card (and its row) at the fixed focus position.
-            val isSlot = i == last
+            val isSlot = card.ref == slotRef
             val isEntry = i == entryIndex
             val m = remember(nav, isSlot, isEntry) {
                 nav
                     .then(if (isSlot) Modifier.focusRequester(slot) else Modifier)
                     .then(if (isEntry) Modifier.focusRequester(entryRequester) else Modifier)
-                    .bringIntoViewOnFocus { last = i; currentOnFocus(i) }
+                    .bringIntoViewOnFocus { last = card.ref; currentOnFocus(index) }
             }
             val open = remember(card.ref) { { currentOnOpen(card.ref) } }
             if (landscape) {

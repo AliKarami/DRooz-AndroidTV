@@ -1,5 +1,8 @@
 package com.alikarami.drooz.site.auth
 
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import com.alikarami.drooz.site.SiteConfig
 import com.alikarami.drooz.site.SiteException
 import com.alikarami.drooz.site.http.PersistentCookieJar
@@ -20,6 +23,8 @@ class AuthService(
     private val http: SiteHttp,
     private val jar: PersistentCookieJar,
     private val creds: CredentialStore,
+    /** Login pages are parsed here, off the caller's (main) thread. */
+    private val parseDispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) {
     val isLoggedIn: Boolean get() = jar.cookie(SESSION_COOKIE) != null
 
@@ -68,7 +73,7 @@ class AuthService(
     }
 
     private suspend fun post(fields: List<Pair<String, String>>): LoginPage =
-        LoginParser.parse(http.postMultipart(SiteConfig.LOGIN_PATH, fields).body)
+        http.postMultipart(SiteConfig.LOGIN_PATH, fields).body.let { withContext(parseDispatcher) { LoginParser.parse(it) } }
 
     private fun toResult(page: LoginPage): LoginResult = when (page) {
         LoginPage.Redirecting -> if (isLoggedIn) LoginResult.Success else LoginResult.Failed("ورود انجام نشد")

@@ -4,6 +4,7 @@ import com.alikarami.drooz.data.Backdrop
 import com.alikarami.drooz.site.model.TitleKind
 import com.alikarami.drooz.site.model.TitleRef
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class HeroSettleTest {
@@ -20,6 +21,6 @@ class HeroSettleTest {
     @Test fun newTitleWaitsForFocusToSettle() {
         val d = heroSettleDelayMs(hero(1), hero(2))
         assertEquals(HERO_SETTLE_MS, d)
-        assert(d in 150L..250L) { "settle $d ms must outlast the 150 ms focus animation yet keep the hero well under 0.5 s" }
+        assertTrue("settle $d ms must outlast the 150 ms focus animation yet keep the hero well under 0.5 s", d in 150L..250L)
     }
 }

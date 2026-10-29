@@ -1,6 +1,8 @@
 package com.alikarami.drooz.ui
 
 import com.alikarami.drooz.data.AuthApi
+import com.alikarami.drooz.data.HomePageCache
+import com.alikarami.drooz.site.model.HomePage
 import com.alikarami.drooz.data.SessionEvents
 import com.alikarami.drooz.site.SiteException
 import com.alikarami.drooz.site.auth.LoginResult
@@ -16,6 +18,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Test
 
@@ -43,6 +46,22 @@ class AppViewModelTest {
 
     @Test fun startsAtHomeWhenLoggedIn() {
         assertEquals(Home, AppViewModel(FakeAuth(true), SessionEvents()).startDestination)
+    }
+
+    // A cached home from before a lost session / re-login (maybe another account) must never be shown.
+    @Test fun cacheFromPreviousSessionIsNotUsed() = runTest(dispatcher) {
+        val events = SessionEvents()
+        val cache = HomePageCache(ttlMs = 600_000) { 0L }
+        val vm = AppViewModel(FakeAuth(true), events, homeCache = cache)
+        runCurrent()
+        cache.put(HomePage(emptyList(), emptyList(), emptyList()))
+        events.report(SiteException.NotLoggedIn())
+        runCurrent()
+        assertNull(cache.fresh())
+
+        cache.put(HomePage(emptyList(), emptyList(), emptyList()))
+        vm.onLoggedIn()
+        assertNull(cache.fresh())
     }
 
     @Test fun notLoggedInRoutesToLogin() = runTest(dispatcher) {

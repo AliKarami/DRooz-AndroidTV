@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.alikarami.drooz.AppGraph
 import com.alikarami.drooz.data.AuthApi
+import com.alikarami.drooz.data.HomePageCache
 import com.alikarami.drooz.data.SessionEvents
 import com.alikarami.drooz.site.model.TitleRef
 import kotlinx.coroutines.channels.Channel
@@ -24,7 +25,12 @@ data class DebugLogin(val username: String, val password: String, val mobile: St
  * the [debug] launch shortcuts: a debug login starts at Login (even when logged in: AuthService logs the
  * old session out first) and is handed to the first Login entry; a debug play waits until Home is reached.
  */
-class AppViewModel(auth: AuthApi, events: SessionEvents, debug: DebugLaunch? = null) : ViewModel() {
+class AppViewModel(
+    auth: AuthApi,
+    events: SessionEvents,
+    debug: DebugLaunch? = null,
+    private val homeCache: HomePageCache? = null,
+) : ViewModel() {
     val startDestination: Any = if (auth.isLoggedIn && debug?.login == null) Home else Login
 
     private var debugLogin: DebugLogin? = debug?.login
@@ -47,6 +53,7 @@ class AppViewModel(auth: AuthApi, events: SessionEvents, debug: DebugLaunch? = n
     init {
         viewModelScope.launch {
             events.lost.collect {
+                homeCache?.clear()
                 if (!routedToLogin) {
                     routedToLogin = true
                     _navigation.send(AppNav.ToLogin)
@@ -56,6 +63,8 @@ class AppViewModel(auth: AuthApi, events: SessionEvents, debug: DebugLaunch? = n
     }
 
     fun onLoggedIn() {
+        // The next home must come from the new session, never from a page cached before it.
+        homeCache?.clear()
         routedToLogin = false
         loginPending = false
     }
@@ -64,5 +73,5 @@ class AppViewModel(auth: AuthApi, events: SessionEvents, debug: DebugLaunch? = n
 class AppViewModelFactory(private val graph: AppGraph, private val debug: DebugLaunch?) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T =
-        AppViewModel(graph.authApi, graph.sessionEvents, debug) as T
+        AppViewModel(graph.authApi, graph.sessionEvents, debug, graph.homeCache) as T
 }

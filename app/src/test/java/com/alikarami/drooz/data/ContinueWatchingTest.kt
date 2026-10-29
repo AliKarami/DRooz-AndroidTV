@@ -52,6 +52,44 @@ class ContinueWatchingTest {
     }
 
     @Test
+    fun order_capsLocalOnlyTitlesNewestFirst() {
+        val local = (1L..15L).map { entry("e$it", ref(it), 1, 10, updatedAt = it) }
+        val r = ContinueWatching.order(emptyList(), local)
+        assertEquals(ContinueWatching.LOCAL_ONLY_MAX, r.size)
+        assertEquals((15L downTo 6L).map { ref(it) to null }, r)
+    }
+
+    @Test
+    fun order_serverTitlesAreNotCountedOrCapped() {
+        val server = (100L..119L).map { PosterRef(ref(it), "h$it") }
+        val local = (1L..12L).map { entry("e$it", ref(it), 1, 10, updatedAt = it) }
+        val r = ContinueWatching.order(server, local)
+        assertEquals(20 + ContinueWatching.LOCAL_ONLY_MAX, r.size)
+        assertEquals(server.map { it.ref to it.posterHash }, r.take(20))
+    }
+
+    @Test
+    fun order_skipsLocalOnlyFilmWhoseNewestEntryIsFinished() {
+        val done = ref(1, TitleKind.FILM); val flagged = ref(2, TitleKind.FILM)
+        val partial = ref(3, TitleKind.FILM); val series = ref(4)
+        val local = listOf(
+            entry("f1", done, 9_500, 10_000, 40),                                  // past 90 %
+            entry("f2", flagged, 100, 10_000, 30).copy(finished = true),
+            entry("f3", partial, 60_000, 600_000, 20),
+            entry("s4", series, 9_500, 10_000, 10).copy(finished = true),         // series: kept
+        )
+        val r = ContinueWatching.order(emptyList(), local)
+        assertEquals(listOf(partial to null, series to null), r)
+    }
+
+    @Test
+    fun order_finishedFilmListedByServerIsKept() {
+        val f = ref(1, TitleKind.FILM)
+        val local = listOf(entry("f1", f, 100, 10_000, 40).copy(finished = true))
+        assertEquals(listOf(f to "h"), ContinueWatching.order(listOf(PosterRef(f, "h")), local))
+    }
+
+    @Test
     fun resolve_seriesWatchedOnServer_showsNextEpisodeLabel() {
         val r = ref(1)
         val seasons = listOf(Season(1, listOf(ep(1, 1, played = true), ep(1, 2, played = true), ep(1, 3, played = true), ep(1, 4))))

@@ -1,5 +1,6 @@
 package com.alikarami.drooz.data
 
+import com.alikarami.drooz.player.isFinished
 import com.alikarami.drooz.site.model.PosterRef
 import com.alikarami.drooz.site.model.TitleDetail
 import com.alikarami.drooz.site.model.TitleKind
@@ -19,17 +20,29 @@ data class ContinueItem(
 data class ContinuePlay(val streamId: String)
 
 object ContinueWatching {
-    /** Titles in row order: server order, then local-only titles newest first; de-duplicated by postId. */
+    /** At most this many titles come from local history alone (no server listing). */
+    const val LOCAL_ONLY_MAX = 10
+
+    /**
+     * Titles in row order: server order, then local-only titles newest first; de-duplicated by postId.
+     * Local-only titles are capped at [LOCAL_ONLY_MAX], and a local-only film whose newest entry is
+     * finished is left out (it would only resolve to nothing).
+     */
     fun order(server: List<PosterRef>, local: List<WatchEntry>): List<Pair<TitleRef, String?>> {
         val result = LinkedHashMap<Long, Pair<TitleRef, String?>>()
         server.forEach { result.putIfAbsent(it.ref.postId, it.ref to it.posterHash) }
-        local.mapNotNull { e -> TitleRef.fromPath(e.refPath)?.let { it to e.updatedAt } }
+        local.mapNotNull { e -> TitleRef.fromPath(e.refPath)?.let { it to e } }
             .groupBy({ it.first.postId }, { it })
             .values
-            .sortedByDescending { group -> group.maxOf { it.second } }
-            .forEach { group -> result.putIfAbsent(group.first().first.postId, group.first().first to null) }
+            .map { group -> group.maxBy { it.second.updatedAt } }
+            .sortedByDescending { (_, newest) -> newest.updatedAt }
+            .filter { (ref, newest) -> ref.postId !in result && !(ref.kind == TitleKind.FILM && newest.isDone()) }
+            .take(LOCAL_ONLY_MAX)
+            .forEach { (ref, _) -> result[ref.postId] = ref to null }
         return result.values.toList()
     }
+
+    private fun WatchEntry.isDone() = finished || isFinished(positionMs, durationMs)
 
     /**
      * The card for a resolved title, or null when it's done (series fully watched, film watched).

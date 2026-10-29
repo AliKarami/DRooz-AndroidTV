@@ -1,7 +1,6 @@
 package com.alikarami.drooz.ui.home
 
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -13,6 +12,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -32,6 +37,28 @@ import com.alikarami.drooz.ui.common.MetaChip
 import com.alikarami.drooz.ui.common.MetaText
 import com.alikarami.drooz.ui.common.TitleText
 import com.alikarami.drooz.ui.theme.DroozColors
+
+/** A new title replaces the hero this long after focus reached its card (see [heroSettleDelayMs]). */
+const val HERO_SETTLE_MS = 200L
+
+/**
+ * Delay before [next] replaces [shown]. A different title waits [HERO_SETTLE_MS]: the card's 150 ms focus
+ * animation then runs alone instead of sharing a frame with the hero's text layout (one ~90 ms frame per
+ * key press on the TV), and passing quickly over cards swaps the hero once, for the card focus settles on.
+ */
+fun heroSettleDelayMs(shown: HeroUi?, next: HeroUi?): Long =
+    if (shown == null || next == null || shown.ref == next.ref) 0L else HERO_SETTLE_MS
+
+/** [hero], held back per [heroSettleDelayMs]. */
+@Composable
+fun rememberSettledHero(hero: HeroUi?): HeroUi? {
+    var shown by remember { mutableStateOf(hero) }
+    LaunchedEffect(hero) {
+        delay(heroSettleDelayMs(shown, hero))
+        shown = hero
+    }
+    return shown
+}
 
 /**
  * Focus-following backdrop with the hero gradients. An image is fetched first and only then
@@ -77,7 +104,9 @@ fun HeroInfo(hero: HeroUi?, rowTitle: String?, modifier: Modifier = Modifier, co
         targetState = hero,
         modifier = modifier,
         transitionSpec = {
-            (fadeIn(tween(BACKDROP_FADE_MS)) togetherWith fadeOut(tween(BACKDROP_FADE_MS))).using(SizeTransform(clip = false))
+            // No size animation: nothing is laid out against the hero text, and animating its size
+            // re-measured the screen on every frame of the cross-fade.
+            (fadeIn(tween(BACKDROP_FADE_MS)) togetherWith fadeOut(tween(BACKDROP_FADE_MS))).using(null)
         },
         contentKey = { it?.ref },
         contentAlignment = Alignment.TopStart,

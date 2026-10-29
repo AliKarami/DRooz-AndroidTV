@@ -50,6 +50,10 @@ import androidx.compose.ui.input.key.type
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.State
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.referentialEqualityPolicy
+import androidx.compose.runtime.structuralEqualityPolicy
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.runtime.getValue
@@ -135,7 +139,11 @@ fun HomeScreen(
     onExit: () -> Unit,
     onRailSelect: (RailItem) -> Unit = {},
 ) {
-    val state by vm.uiState.collectAsStateWithLifecycle()
+    // Read through derived states: a hero change (every focus move) must not recompose the rows and
+    // their cards — on the TV that cost a ~90 ms frame per key press. Only [HomeHero] reads the hero.
+    val state = vm.uiState.collectAsStateWithLifecycle()
+    val allRows by remember { derivedStateOf(referentialEqualityPolicy()) { state.value.rows } }
+    val error by remember { derivedStateOf(structuralEqualityPolicy()) { state.value.error } }
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
     // Not saveable: home's state is kept across pushed pages, but it must come back with the rail closed
@@ -157,9 +165,11 @@ fun HomeScreen(
         }
     }
 
-    val rows = state.rows.filterNot { it.isHidden }
+    val rows = remember(allRows) { allRows.filterNot { it.isHidden } }
+    var entered by remember { mutableStateOf(false) }
     // Where focus lands on entry: the last focused row (coming back from a title) or the first row with cards.
-    val entryRow = rows.firstOrNull { it.key == focusedRowKey && it.items.isNotEmpty() }
+    // Once entered it is no longer needed, and not reading focusedRowKey here keeps row changes cheap.
+    val entryRow = if (entered) null else rows.firstOrNull { it.key == focusedRowKey && it.items.isNotEmpty() }
         ?: rows.firstOrNull { it.items.isNotEmpty() }
     val entryIndex = entryRow?.let { vm.focusedIndex(it.key).coerceIn(0, it.items.lastIndex) } ?: 0
     val entryRequester = remember { FocusRequester() }
@@ -189,8 +199,7 @@ fun HomeScreen(
             slot.requestFocusSoon()
         }
     }
-    var entered by remember { mutableStateOf(false) }
-    val homeFailed = state.error != null && rows.none { it.items.isNotEmpty() || it.loading }
+    val homeFailed = error != null && rows.none { it.items.isNotEmpty() || it.loading }
     val homeErrorRequester = remember { FocusRequester() }
     LaunchedEffect(entryRow?.key, entered, homeFailed) {
         if (homeFailed) {
@@ -215,11 +224,11 @@ fun HomeScreen(
     ) {
         BoxWithConstraints(Modifier.fillMaxSize().background(DroozColors.Background)) {
             val rowsTop = maxHeight * 0.5f
-            HeroBackdrop(state.hero, Modifier.fillMaxWidth().height(maxHeight * 0.62f))
-            HeroInfo(
-                state.hero,
-                rows.firstOrNull { it.key == focusedRowKey }?.title,
-                Modifier.align(Alignment.TopStart).padding(start = ContentStart, top = 36.dp).width(480.dp),
+            HomeHero(
+                state,
+                rowTitle = { rows.firstOrNull { it.key == focusedRowKey }?.title },
+                backdropModifier = Modifier.fillMaxWidth().height(maxHeight * 0.62f),
+                infoModifier = Modifier.align(Alignment.TopStart).padding(start = ContentStart, top = 36.dp).width(480.dp),
             )
             if (homeFailed) {
                 ErrorState(
@@ -276,6 +285,19 @@ fun HomeScreen(
     }
 }
 
+/** The only reader of the hero state, so a focus move recomposes the hero and nothing else. */
+@Composable
+private fun HomeHero(
+    state: State<HomeUiState>,
+    rowTitle: () -> String?,
+    backdropModifier: Modifier,
+    infoModifier: Modifier,
+) {
+    val hero = rememberSettledHero(state.value.hero)
+    HeroBackdrop(hero, backdropModifier)
+    HeroInfo(hero, rowTitle(), infoModifier)
+}
+
 private enum class Slot { Cards, Error, Skeleton }
 
 @Composable
@@ -303,9 +325,11 @@ private fun HomeRow(
     }
     // [slotRequester] is the row's focus target, whatever currently fills it: the last focused card,
     // the retry button or the skeleton.
-    val nav = Modifier.focusProperties {
-        down = downKey?.let(slots) ?: FocusRequester.Default
-        up = upKey?.let(slots) ?: FocusRequester.Default
+    val nav = remember(upKey, downKey, slots) {
+        Modifier.focusProperties {
+            down = downKey?.let(slots) ?: FocusRequester.Default
+            up = upKey?.let(slots) ?: FocusRequester.Default
+        }
     }
     // True while focus sits on a skeleton/error that gets swapped out, so it follows into the replacement.
     var holdFocus by remember { mutableStateOf(false) }
@@ -368,6 +392,9 @@ private fun CardsRow(
     // [slot] always sits on the row's last focused card, so entering the row (Up/Down or a slot
     // hand-over) lands there; it is also the focusRestorer fallback.
     var last by remember { mutableIntStateOf(start) }
+    // Cards keep the same callbacks and modifiers across recompositions, so a row update skips them.
+    val currentOnFocus by rememberUpdatedState(onFocus)
+    val currentOnOpen by rememberUpdatedState(onOpen)
     LazyRow(
         state = listState,
         // Entering the row by any route lands on [slot]. (focusRestorer mis-restored rows that had been
@@ -379,15 +406,19 @@ private fun CardsRow(
         itemsIndexed(row.items, key = { i, c -> "$i:${c.ref.kind}:${c.ref.postId}" }) { i, card ->
             // Focus only scrolls a card that is partly off-screen; ask explicitly so the pivot
             // specs place every focused card (and its row) at the fixed focus position.
-            val m = nav
-                .then(if (i == last) Modifier.focusRequester(slot) else Modifier)
-                .then(if (i == entryIndex) Modifier.focusRequester(entryRequester) else Modifier)
-                .bringIntoViewOnFocus { last = i; onFocus(i) }
+            val isSlot = i == last
+            val isEntry = i == entryIndex
+            val m = remember(nav, isSlot, isEntry) {
+                nav
+                    .then(if (isSlot) Modifier.focusRequester(slot) else Modifier)
+                    .then(if (isEntry) Modifier.focusRequester(entryRequester) else Modifier)
+                    .bringIntoViewOnFocus { last = i; currentOnFocus(i) }
+            }
+            val open = remember(card.ref) { { currentOnOpen(card.ref) } }
             if (landscape) {
-                LandscapeCard(card.title, card.subtitle, card.posterUrl, progress = null, onClick = { onOpen(card.ref) },
-                    modifier = m)
+                LandscapeCard(card.title, card.subtitle, card.posterUrl, progress = null, onClick = open, modifier = m)
             } else {
-                PosterCard(card.title, card.posterUrl, onClick = { onOpen(card.ref) }, modifier = m, width = PosterWidth)
+                PosterCard(card.title, card.posterUrl, onClick = open, modifier = m, width = PosterWidth)
             }
         }
     }

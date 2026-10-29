@@ -2,7 +2,6 @@ package com.alikarami.drooz.ui.theme
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -10,8 +9,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.scale
-import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.drawOutline
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.composed
@@ -44,15 +47,35 @@ fun droozSurfaceColors(): ClickableSurfaceColors = ClickableSurfaceDefaults.colo
     pressedContainerColor = DroozColors.Surface,
 )
 
-/** Focus treatment: scale up, 3dp white outline and soft shadow, animated over 150 ms. */
+/**
+ * Focus treatment: scale up, 3dp white outline and soft shadow, animated over 150 ms.
+ * The animated values are read only in the layer and draw phases, so a focus move re-draws the two
+ * cards involved instead of recomposing them on every animation frame (measured: ~50 ms frames on TV).
+ */
 fun Modifier.droozFocus(scale: Float = FocusScale.CARD): Modifier = composed {
     var focused by remember { mutableStateOf(false) }
-    val s by animateFloatAsState(if (focused) scale else 1f, tween(FOCUS_MS), label = "focusScale")
-    val a by animateFloatAsState(if (focused) 1f else 0f, tween(FOCUS_MS), label = "focusAlpha")
-    val shape = DroozCardShape
+    val s = animateFloatAsState(if (focused) scale else 1f, tween(FOCUS_MS), label = "focusScale")
+    val a = animateFloatAsState(if (focused) 1f else 0f, tween(FOCUS_MS), label = "focusAlpha")
     this
         .onFocusChanged { focused = it.hasFocus }
-        .scale(s)
-        .shadow((16 * a).dp, shape, clip = false)
-        .border(3.dp, Color.White.copy(alpha = a), shape)
+        .graphicsLayer {
+            scaleX = s.value
+            scaleY = s.value
+            shadowElevation = 16.dp.toPx() * a.value
+            shape = DroozCardShape
+            clip = false
+        }
+        .drawWithContent {
+            drawContent()
+            val alpha = a.value
+            if (alpha > 0f) {
+                val stroke = 3.dp.toPx()
+                val outline = DroozCardShape.createOutline(
+                    Size(size.width - stroke, size.height - stroke), layoutDirection, this,
+                )
+                translate(stroke / 2, stroke / 2) {
+                    drawOutline(outline, Color.White.copy(alpha = alpha), style = Stroke(stroke))
+                }
+            }
+        }
 }

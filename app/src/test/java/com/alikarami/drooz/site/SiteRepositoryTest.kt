@@ -10,6 +10,8 @@ import com.alikarami.drooz.site.model.Episode
 import com.alikarami.drooz.site.model.TitleKind
 import com.alikarami.drooz.site.model.TitleRef
 import com.alikarami.drooz.testutil.fixture
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
@@ -20,10 +22,12 @@ import mockwebserver3.RecordedRequest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import kotlin.coroutines.CoroutineContext
 
 class SiteRepositoryTest {
     @get:Rule val tmp = TemporaryFolder()
@@ -57,6 +61,39 @@ class SiteRepositoryTest {
     }
 
     private fun requests(): List<RecordedRequest> = List(server.requestCount) { server.takeRequest() }
+
+    /** Counts dispatches, so a test can tell whether work was moved onto it. */
+    private class CountingDispatcher : CoroutineDispatcher() {
+        var dispatches = 0
+        override fun isDispatchNeeded(context: CoroutineContext) = true
+        override fun dispatch(context: CoroutineContext, block: Runnable) {
+            dispatches++
+            Dispatchers.IO.dispatch(context, block)
+        }
+    }
+
+    // HTML parsing is heavy on a TV CPU: it must run on the parse dispatcher, never the caller's (main) thread.
+    @Test fun parsingRunsOnParseDispatcher() = runTest {
+        val parse = CountingDispatcher()
+        val jar = PersistentCookieJar(tmp.newFile("cookies2"), siteHost = server.hostName)
+        val http = SiteHttp(server.url("/"), jar)
+        val repo = SiteRepository(http, AuthService(http, jar, creds), parseDispatcher = parse)
+        server.enqueue(page("home.html"))
+        server.enqueue(page("list_new_films.html"))
+        server.enqueue(page("search_pluribus.html"))
+        server.enqueue(page("title_series_pluribus.html"))
+        repo.home()
+        val afterHome = parse.dispatches
+        repo.list("/archive/category/new-films/")
+        val afterList = parse.dispatches
+        repo.search("pluribus")
+        val afterSearch = parse.dispatches
+        repo.title(TitleRef(TitleKind.SERIES, 5735053, "pluribus"))
+        assertTrue("home", afterHome > 0)
+        assertTrue("list", afterList > afterHome)
+        assertTrue("search", afterSearch > afterList)
+        assertTrue("title", parse.dispatches > afterSearch)
+    }
 
     @Test fun homeParsesFixture() = runTest {
         server.enqueue(page("home.html"))

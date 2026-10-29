@@ -14,14 +14,27 @@ import com.alikarami.drooz.site.parse.ListParser
 import com.alikarami.drooz.site.parse.SearchParser
 import com.alikarami.drooz.site.parse.StreamPageParser
 import com.alikarami.drooz.site.parse.TitleParser
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import java.net.URLEncoder
 
-/** Everything the UI asks of the site. An expired session is renewed once, transparently. */
-class SiteRepository(private val http: SiteHttp, private val auth: AuthService) {
+/**
+ * Everything the UI asks of the site. An expired session is renewed once, transparently.
+ * HTML is parsed on [parseDispatcher]: callers run on the main thread, and Jsoup on a TV CPU would
+ * otherwise freeze focus and animations for the length of a parse.
+ */
+class SiteRepository(
+    private val http: SiteHttp,
+    private val auth: AuthService,
+    private val parseDispatcher: CoroutineDispatcher = Dispatchers.Default,
+) {
 
-    suspend fun home(): HomePage = authed { HomeParser.parse(http.get("/").body) }
+    private suspend fun <T> parse(block: () -> T): T = withContext(parseDispatcher) { block() }
+
+    suspend fun home(): HomePage = authed { http.get("/").body.let { parse { HomeParser.parse(it) } } }
 
     /** Page 1 is [path] itself; page N inserts `N/` before any query string. */
     suspend fun list(path: String, page: Int = 1): ListPage = authed {
@@ -30,19 +43,19 @@ class SiteRepository(private val http: SiteHttp, private val auth: AuthService) 
             val query = path.substringAfter('?', "")
             "$base$page/" + if (query.isNotEmpty()) "?$query" else ""
         }
-        ListParser.parse(http.get(target).body)
+        http.get(target).body.let { parse { ListParser.parse(it) } }
     }
 
     suspend fun search(query: String): List<TitleCard> = authed {
-        SearchParser.parse(http.get("/search/?s=${URLEncoder.encode(query, "UTF-8")}").body)
+        http.get("/search/?s=${URLEncoder.encode(query, "UTF-8")}").body.let { parse { SearchParser.parse(it) } }
     }
 
-    suspend fun title(ref: TitleRef): TitleDetail = authed { TitleParser.parse(http.get(ref.path).body, ref) }
+    suspend fun title(ref: TitleRef): TitleDetail = authed { http.get(ref.path).body.let { parse { TitleParser.parse(it, ref) } } }
 
     /** Opening the stream page marks the title as streamed on the account; call only right before playback. */
     suspend fun openStream(episode: Episode, ref: TitleRef, lang: String, height: Int): StreamSession = authed {
         val body = http.get("/stream/${episode.streamId}/${ref.postId}/?lang=$lang&h=$height").body
-        StreamPageParser.parse(body, episode.streamId)
+        parse { StreamPageParser.parse(body, episode.streamId) }
     }
 
     /** [state] is one of `watch`, `favorite`, `watched`. It toggles on the site, so it is never retried. */

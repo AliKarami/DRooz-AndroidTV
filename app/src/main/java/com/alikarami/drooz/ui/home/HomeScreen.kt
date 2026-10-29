@@ -105,7 +105,7 @@ import com.alikarami.drooz.ui.theme.DroozColors
 
 class HomeViewModelFactory(private val graph: AppGraph) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
-    override fun <T : ViewModel> create(modelClass: Class<T>): T = HomeViewModel(graph.siteApi, graph.titleInfo) as T
+    override fun <T : ViewModel> create(modelClass: Class<T>): T = HomeViewModel(graph.siteApi, graph.titleInfo, homeCache = graph.homeCache) as T
 }
 
 /** Width of the collapsed rail; rows are clipped here so cards never slide under its icons. */

@@ -9,6 +9,7 @@ import com.alikarami.drooz.data.SiteApiAdapter
 import com.alikarami.drooz.data.SessionEvents
 import com.alikarami.drooz.data.SessionGuardedSiteApi
 import com.alikarami.drooz.data.DataStoreTitlePrefs
+import com.alikarami.drooz.data.HomePageCache
 import com.alikarami.drooz.data.TitleInfoRepository
 import com.alikarami.drooz.data.TitlePrefs
 import com.alikarami.drooz.site.SiteConfig
@@ -50,6 +51,7 @@ class AppGraph(context: Context) {
     val siteApi: SiteApi = SessionGuardedSiteApi(SiteApiAdapter(repository), sessionEvents)
     val authApi: AuthApi = AuthApiAdapter(auth)
     val titleInfo = TitleInfoRepository(siteApi)
+    val homeCache = HomePageCache()
     val titlePrefs: TitlePrefs = DataStoreTitlePrefs(appContext)
 
     /** For Media3: carries the site cookies (subtitles need them) and the browser UA. */

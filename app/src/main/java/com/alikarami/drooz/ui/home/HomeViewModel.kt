@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.alikarami.drooz.data.Backdrop
 import com.alikarami.drooz.data.HomeRowConfig
+import com.alikarami.drooz.data.HomePageCache
 import com.alikarami.drooz.data.HomeRows
 import com.alikarami.drooz.data.RowSource
 import com.alikarami.drooz.data.SiteApi
@@ -59,6 +60,7 @@ class HomeViewModel(
     private val api: SiteApi,
     private val titleInfo: TitleInfoRepository,
     private val dwellMs: Long = 300,
+    private val homeCache: HomePageCache? = null,
 ) : ViewModel() {
     private val configs: Map<String, HomeRowConfig> = HomeRows.rows.associateBy { it.key }
 
@@ -78,7 +80,7 @@ class HomeViewModel(
     private var refreshJob: Job? = null
     private val listJobs = HashMap<String, Job>()
 
-    init { refresh() }
+    init { loadHome(useCache = true) }
 
     private fun initialRows() = HomeRows.rows.map {
         RowUi(it.key, it.title, emptyList(), loading = it.source !is RowSource.ListPath, error = false,
@@ -86,7 +88,9 @@ class HomeViewModel(
     }
 
     /** Reloads the home() sources only; lazily loaded list rows keep their state. */
-    fun refresh() {
+    fun refresh() = loadHome(useCache = false)
+
+    private fun loadHome(useCache: Boolean) {
         refreshJob?.cancel()
         _state.update { s ->
             s.copy(
@@ -100,7 +104,7 @@ class HomeViewModel(
                     error = e.message ?: "error")
             }
         }) {
-            val page = api.home()
+            val page = homeCache?.takeIf { useCache }?.fresh() ?: api.home().also { homeCache?.put(it) }
             featured = page.featured.associate { it.ref to it.backdropHash }
             for (cfg in HomeRows.rows) {
                 when (val src = cfg.source) {

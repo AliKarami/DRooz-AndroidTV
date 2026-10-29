@@ -1,6 +1,7 @@
 package com.alikarami.drooz.ui.home
 
 import com.alikarami.drooz.data.Backdrop
+import com.alikarami.drooz.data.HomePageCache
 import com.alikarami.drooz.data.SiteApi
 import com.alikarami.drooz.data.TitleInfoRepository
 import com.alikarami.drooz.site.model.*
@@ -75,6 +76,25 @@ class HomeViewModelTest {
         val vm = vm(FakeApi(home())); advanceUntilIdle()
         assertEquals("bd10", vm.featuredBackdrop(ref(10)))
         assertEquals(null, vm.featuredBackdrop(ref(11)))
+    }
+
+    // Warm start: a recreated home shows the page fetched moments ago at once, without a skeleton or a fetch.
+    @Test fun freshCachedHomeShowsRowsWithoutFetching() = runTest(dispatcher) {
+        val cache = HomePageCache(ttlMs = 600_000) { 0L }
+        val api = FakeApi(home())
+        var homeCalls = 0
+        api.onHome = { homeCalls++; api.homePage }
+        HomeViewModel(api, TitleInfoRepository(api, fetchScope = backgroundScope), homeCache = cache)
+        advanceUntilIdle()
+        assertEquals(1, homeCalls)
+
+        val again = HomeViewModel(api, TitleInfoRepository(api, fetchScope = backgroundScope), homeCache = cache)
+        runCurrent()
+        assertEquals(1, homeCalls)
+        val recent = again.uiState.value.rows[0]
+        assertEquals(listOf("Shaun The Sheep", "Other One"), recent.items.map { it.title })
+        assertFalse(recent.loading)
+        assertEquals("bd10", again.featuredBackdrop(ref(10)))
     }
 
     @Test fun firstRowIsRecentlyStreamedLandscape() = runTest(dispatcher) {

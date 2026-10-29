@@ -29,7 +29,10 @@ data class ListUiState(
     val pageError: Boolean = false,
     val endReached: Boolean = false,
     val hero: HeroUi? = null,
-)
+) {
+    /** Loaded with nothing to show and no error. */
+    val empty: Boolean get() = !loading && error == null && items.isEmpty()
+}
 
 /** A site list (`/archive/...`) as an infinite grid: pages load as focus nears the end. */
 class ListViewModel(

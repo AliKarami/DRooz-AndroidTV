@@ -29,4 +29,4 @@ data class Title(
 }
 
 /** A site list (`/archive/...`) grid under [title]. */
-@Serializable data class ListRoute(val title: String, val path: String)
+@Serializable data class ListRoute(val title: String, val path: String, val emptyText: String? = null)

@@ -53,7 +53,7 @@ private const val HeroFraction = 0.35f
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun ListScreen(vm: ListViewModel, onOpen: (TitleRef) -> Unit) {
+fun ListScreen(vm: ListViewModel, onOpen: (TitleRef) -> Unit, emptyText: String? = null) {
     val state by vm.uiState.collectAsStateWithLifecycle()
     BoxWithConstraints(Modifier.fillMaxSize().background(DroozColors.Background)) {
         val gridTop = maxHeight * HeroFraction
@@ -88,7 +88,7 @@ fun ListScreen(vm: ListViewModel, onOpen: (TitleRef) -> Unit) {
             }
             state.loading -> SkeletonGrid(cellWidth, content)
             else -> Box(content, contentAlignment = Alignment.TopCenter) {
-                Text(stringResource(R.string.list_empty), Modifier.padding(top = 48.dp),
+                Text(emptyText ?: stringResource(R.string.list_empty), Modifier.padding(top = 48.dp),
                     style = MaterialTheme.typography.titleMedium, color = DroozColors.TextSecondary)
             }
         }

@@ -27,6 +27,7 @@
     <string name="list_updated_series">سریال های بروز شده</string>
     <string name="list_new_films">فیلم های جدید</string>
     <string name="list_failed">فهرست بارگذاری نشد</string>
+    <string name="my_list_empty">لیست شما خالی است</string>
     <string name="list_empty">موردی پیدا نشد</string>
     <string name="search_placeholder">جستجوی فیلم و سریال</string>
     <string name="search_idle">نام فیلم یا سریال را بنویسید یا با میکروفون بگویید</string>

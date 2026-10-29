@@ -175,4 +175,17 @@ class ListViewModelTest {
         assertTrue(hero.backdrop is Backdrop.BlurredPoster)
         assertEquals(3, vm.focusedIndex)
     }
+
+    @Test fun emptyPage_reportsEmpty() = runTest(dispatcher) {
+        val api = FakeApi { _, _ -> ListPage(emptyList(), 1, 1) }
+        val vm = vm(api); advanceUntilIdle()
+        assertTrue(vm.uiState.value.empty)
+    }
+
+    @Test fun errorPage_isNotEmpty() = runTest(dispatcher) {
+        val api = FakeApi { _, _ -> error("offline") }
+        val vm = vm(api); advanceUntilIdle()
+        assertFalse(vm.uiState.value.empty)
+        assertEquals("offline", vm.uiState.value.error)
+    }
 }

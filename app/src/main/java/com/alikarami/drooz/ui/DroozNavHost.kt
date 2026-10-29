@@ -120,7 +120,12 @@ fun DroozNavHost(
                         go(entry, ListRoute(context.getString(R.string.list_updated_series), "/archive/series/"))
                     RailItem.Films ->
                         go(entry, ListRoute(context.getString(R.string.list_new_films), "/archive/category/new-films/"))
-                    RailItem.MyList, RailItem.Settings -> // Plan 4
+                    RailItem.MyList ->
+                        go(entry, ListRoute(
+                            context.getString(R.string.title_my_list), "/user/watchlist/",
+                            context.getString(R.string.my_list_empty),
+                        ))
+                    RailItem.Settings -> // Plan 4
                         Toast.makeText(context, R.string.soon, Toast.LENGTH_SHORT).show()
                 }
             })
@@ -149,7 +154,7 @@ fun DroozNavHost(
         composable<ListRoute> { entry ->
             val route = entry.toRoute<ListRoute>()
             val vm: ListViewModel = viewModel(factory = ListViewModelFactory(graph, route.path, route.title))
-            ListScreen(vm, onOpen = { openTitle(entry, it) })
+            ListScreen(vm, onOpen = { openTitle(entry, it) }, emptyText = route.emptyText)
         }
         composable<Search> { entry ->
             val vm: SearchViewModel = viewModel(factory = SearchViewModelFactory(graph))

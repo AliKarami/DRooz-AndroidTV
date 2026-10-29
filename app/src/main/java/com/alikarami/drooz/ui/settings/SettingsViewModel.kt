@@ -110,7 +110,8 @@ class SettingsViewModel(
         }
     }
 
-    fun requestLogout() = local.update { it.copy(confirmLogout = true) }
+    /** Ignored while a clear or a logout is under way: a second logout must not start mid-flight. */
+    fun requestLogout() = local.update { if (it.busy) it else it.copy(confirmLogout = true) }
     fun cancelLogout() = local.update { it.copy(confirmLogout = false) }
 
     /** Logs out and always emits [SettingsEvent.LoggedOut]: a failed site request still ends the local session. */

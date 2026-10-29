@@ -75,7 +75,9 @@ fun SettingsScreen(vm: SettingsViewModel) {
     val logout = remember { FocusRequester() }
     LaunchedEffect(Unit) { first.requestFocusSoon() }
 
-    BackHandler(enabled = state.confirmLogout) { vm.cancelLogout() }
+    // Back closes the dialog. While a logout is in flight Back is swallowed: leaving would clear the view
+    // model, so its LoggedOut would never reach the nav host (logged out, yet still on Home).
+    BackHandler(enabled = state.confirmLogout || state.busy) { if (state.confirmLogout) vm.cancelLogout() }
     // Closing the dialog hands focus back to the button that opened it.
     var dialogWasOpen by remember { mutableStateOf(false) }
     LaunchedEffect(state.confirmLogout) {

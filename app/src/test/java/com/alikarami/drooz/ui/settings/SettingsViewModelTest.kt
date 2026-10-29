@@ -9,6 +9,7 @@ import com.alikarami.drooz.data.SubtitleColor
 import com.alikarami.drooz.data.SubtitleStyle
 import com.alikarami.drooz.data.TitlePrefs
 import com.alikarami.drooz.site.auth.LoginResult
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -52,13 +53,14 @@ class SettingsViewModelTest {
         override suspend fun setDefaultDub(on: Boolean) { dub = on }
     }
 
-    private class FakeAuth(var failLogout: Boolean = false) : AuthApi {
+    private class FakeAuth(var failLogout: Boolean = false, val gate: CompletableDeferred<Unit>? = null) : AuthApi {
         var logouts = 0
         override val isLoggedIn = true
         override val username: String? = "ali"
         override suspend fun login(username: String, password: String, mobile: String?) = LoginResult.Success
         override suspend fun logout() {
             logouts++
+            gate?.await()
             if (failLogout) throw IOException("offline")
         }
     }
@@ -185,6 +187,25 @@ class SettingsViewModelTest {
         val vm = started(rig)
         val got = events(vm)
         vm.requestLogout(); vm.confirmLogout(); runCurrent()
+        assertEquals(listOf<SettingsEvent>(SettingsEvent.LoggedOut), got)
+    }
+
+    @Test fun logout_inFlight_ignoresAnotherRequest_andStillEmits() = runTest(dispatcher) {
+        val gate = CompletableDeferred<Unit>()
+        val rig = Rig(auth = FakeAuth(gate = gate))
+        val vm = started(rig)
+        val got = events(vm)
+        vm.requestLogout(); vm.confirmLogout(); runCurrent()
+        assertTrue(vm.uiState.value.busy)
+
+        vm.requestLogout(); runCurrent()
+        assertFalse(vm.uiState.value.confirmLogout)
+        vm.confirmLogout(); runCurrent()
+        assertEquals(1, rig.auth.logouts)
+        assertTrue(got.isEmpty())
+
+        gate.complete(Unit); runCurrent()
+        assertFalse(vm.uiState.value.busy)
         assertEquals(listOf<SettingsEvent>(SettingsEvent.LoggedOut), got)
     }
 }

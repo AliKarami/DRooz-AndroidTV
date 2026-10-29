@@ -285,8 +285,8 @@ fun HomeScreen(
                                         rows.subList(rowIndex + 1, minOf(rowIndex + 3, rows.size))
                                             .forEach { vm.loadRowIfNeeded(it.key) }
                                     },
-                                    onActivate = { index ->
-                                        when (val action = vm.activate(row.key, index)) {
+                                    onActivate = { ref ->
+                                        when (val action = vm.activate(row.key, ref)) {
                                             is HomeAction.Play -> onPlay(action.args)
                                             is HomeAction.Open -> onOpen(action.ref)
                                             null -> Unit // a double press while the player starts
@@ -335,7 +335,7 @@ private fun HomeRow(
     focusedIndex: () -> Int,
     drawerClosed: () -> Boolean,
     onFocus: (Int) -> Unit,
-    onActivate: (Int) -> Unit,
+    onActivate: (TitleRef) -> Unit,
     onOpen: (TitleRef) -> Unit,
     onRetry: () -> Unit,
 ) {
@@ -414,7 +414,7 @@ private fun CardsRow(
     nav: Modifier,
     focusedIndex: () -> Int,
     reclaim: () -> Boolean,
-    onActivate: (Int) -> Unit,
+    onActivate: (TitleRef) -> Unit,
     onLongOpen: ((TitleRef) -> Unit)?,
     onFocus: (Int) -> Unit,
 ) {
@@ -461,7 +461,7 @@ private fun CardsRow(
                     .then(if (isEntry) Modifier.focusRequester(entryRequester) else Modifier)
                     .bringIntoViewOnFocus { last = card.ref; currentOnFocus(index) }
             }
-            val open = remember(card.ref) { { currentOnActivate(index) } }
+            val open = remember(card.ref) { { currentOnActivate(card.ref) } }
             val longOpen = remember(card.ref, longPress) {
                 if (longPress) { { currentOnLongOpen?.invoke(card.ref); Unit } } else null
             }

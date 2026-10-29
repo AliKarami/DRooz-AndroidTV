@@ -462,7 +462,7 @@ class HomeViewModelTest {
         val a = series(1)
         val api = FakeApi(recentHome(a), onTitle = { seriesDetail(it, 1) })
         val vm = cwVm(api); advanceUntilIdle()
-        assertEquals(HomeAction.Play(PlayerArgs(a, "s1e2", dub = false)), vm.activate("recent", 0))
+        assertEquals(HomeAction.Play(PlayerArgs(a, "s1e2", dub = false)), vm.activate("recent", a))
     }
 
     @Test fun activate_usesSavedDubOnlyWhenTitleHasDub() = runTest(dispatcher) {
@@ -470,26 +470,26 @@ class HomeViewModelTest {
         val dubbed = { r: TitleRef -> seriesDetail(r).let { it.copy(catalog = it.catalog.copy(dub = it.catalog.main)) } }
         val api = FakeApi(recentHome(a, b), onTitle = { if (it == a) dubbed(it) else seriesDetail(it) })
         val vm = cwVm(api, prefs = FakeTitlePrefs(defaultDub = true)); advanceUntilIdle()
-        assertEquals(HomeAction.Play(PlayerArgs(a, "s1e1", dub = true)), vm.activate("recent", 0))
+        assertEquals(HomeAction.Play(PlayerArgs(a, "s1e1", dub = true)), vm.activate("recent", a))
         vm.onResume()
-        assertEquals(HomeAction.Play(PlayerArgs(b, "s1e1", dub = false)), vm.activate("recent", 1))
+        assertEquals(HomeAction.Play(PlayerArgs(b, "s1e1", dub = false)), vm.activate("recent", b))
     }
 
     @Test fun activate_pendingCard_opensTitle() = runTest(dispatcher) {
         val a = series(1)
         val api = FakeApi(recentHome(a), onTitle = { CompletableDeferred<TitleDetail>().await() })
         val vm = cwVm(api); runCurrent()
-        assertEquals(HomeAction.Open(a), vm.activate("recent", 0))
+        assertEquals(HomeAction.Open(a), vm.activate("recent", a))
     }
 
     @Test fun activate_twiceWithoutResume_secondIsNull() = runTest(dispatcher) {
         val a = series(1)
         val api = FakeApi(recentHome(a), onTitle = { seriesDetail(it) })
         val vm = cwVm(api); advanceUntilIdle()
-        assertTrue(vm.activate("recent", 0) is HomeAction.Play)
-        assertNull(vm.activate("recent", 0))
+        assertTrue(vm.activate("recent", a) is HomeAction.Play)
+        assertNull(vm.activate("recent", a))
         vm.onResume(); advanceUntilIdle()
-        assertTrue(vm.activate("recent", 0) is HomeAction.Play)
+        assertTrue(vm.activate("recent", a) is HomeAction.Play)
     }
 
     @Test fun onResume_refreshesProgressFromStore_withoutRefetch() = runTest(dispatcher) {
@@ -505,9 +505,29 @@ class HomeViewModelTest {
         assertEquals(calls, api.titleCalls.size)
     }
 
+    // The row can lose a card (a resolve drops it) before Compose recomposes: OK on that card must
+    // not play the title that slid into its place (opening a stream page writes to the account).
+    @Test fun activate_cardDroppedBeforeRecompose_doesNotPlayAnotherTitle() = runTest(dispatcher) {
+        val a = series(1); val b = series(2)
+        val gate = CompletableDeferred<Unit>()
+        val api = FakeApi(recentHome(a, b), onTitle = { gate.await(); if (it == a) seriesDetail(it, 1, 2) else seriesDetail(it) })
+        val vm = cwVm(api); runCurrent()
+        assertEquals(listOf(a, b), vm.recent().items.map { it.ref })   // what the screen rendered
+        gate.complete(Unit); advanceUntilIdle()                          // a is fully watched: dropped
+        assertNull(vm.activate("recent", a))
+        assertEquals(HomeAction.Play(PlayerArgs(b, "s1e1", dub = false)), vm.activate("recent", b))
+    }
+
+    @Test fun activate_unknownRef_isNull() = runTest(dispatcher) {
+        val api = FakeApi(home(), onTitle = { seriesDetail(it) })
+        val vm = cwVm(api); advanceUntilIdle()
+        assertNull(vm.activate("featured", ref(999)))
+        assertNull(vm.activate("nope", ref(11)))
+    }
+
     @Test fun activate_otherRow_opensTitle() = runTest(dispatcher) {
         val api = FakeApi(home(), onTitle = { seriesDetail(it) })
         val vm = cwVm(api); advanceUntilIdle()
-        assertEquals(HomeAction.Open(ref(11)), vm.activate("featured", 1))
+        assertEquals(HomeAction.Open(ref(11)), vm.activate("featured", ref(11)))
     }
 }

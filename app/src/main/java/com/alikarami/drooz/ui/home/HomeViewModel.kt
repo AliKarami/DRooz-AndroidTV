@@ -254,10 +254,12 @@ class HomeViewModel(
 
     /**
      * OK on a card: a resolved «ادامه تماشا» card plays its next episode, anything else opens the title.
-     * Null for a second Play before home [onResume]d (a double press while the player starts).
+     * Null for a second Play before home [onResume]d (a double press while the player starts), and for
+     * a title no longer in the row.
      */
-    fun activate(rowKey: String, index: Int): HomeAction? {
-        val e = entries[rowKey]?.getOrNull(index) ?: return null
+    fun activate(rowKey: String, ref: TitleRef): HomeAction? {
+        // By title, not position: the row may have lost a card since the screen last recomposed.
+        val e = entries[rowKey]?.firstOrNull { it.ref == ref } ?: return null
         val play = e.cont?.play ?: return HomeAction.Open(e.ref)
         if (playPending) return null
         playPending = true

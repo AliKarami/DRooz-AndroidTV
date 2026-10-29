@@ -15,6 +15,8 @@ object UiStrings {
     fun playEpisode(season: Int, episode: Int): String =
         (if (season == 1) "پخش قسمت $episode" else "پخش فصل $season قسمت $episode").toPersianDigits()
     fun upNextLabel(season: Int, episode: Int): String = "قسمت بعدی · فصل $season قسمت $episode".toPersianDigits()
+    fun remaining(min: Int): String = "$min دقیقه باقی‌مانده".toPersianDigits()
+    fun continueFilm(remainingMin: Int): String = "ادامه (${remaining(remainingMin)})"
     fun minutes(n: Int): String = "$n دقیقه".toPersianDigits()
 
     // ---- player ----

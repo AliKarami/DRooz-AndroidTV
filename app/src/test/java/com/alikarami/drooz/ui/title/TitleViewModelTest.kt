@@ -4,6 +4,10 @@ import com.alikarami.drooz.data.SiteApi
 import com.alikarami.drooz.player.PlayerArgs
 import com.alikarami.drooz.data.TitleInfoRepository
 import com.alikarami.drooz.data.TitlePrefs
+import com.alikarami.drooz.data.WatchEntry
+import com.alikarami.drooz.data.WatchStore
+import com.alikarami.drooz.ui.common.UiStrings
+import java.io.IOException
 import kotlinx.coroutines.CompletableDeferred
 import com.alikarami.drooz.site.model.*
 import kotlinx.coroutines.CoroutineScope
@@ -80,7 +84,20 @@ class TitleViewModelTest {
         }
     }
 
-    private class FakePrefs(val map: MutableMap<Long, Boolean> = mutableMapOf()) : TitlePrefs {
+    private class FakeWatchStore(val entries: MutableList<WatchEntry> = mutableListOf(), var failure: Exception? = null) : WatchStore {
+        override suspend fun get(streamId: String) = entries.firstOrNull { it.streamId == streamId }
+        override suspend fun put(entry: WatchEntry) { entries.removeAll { it.streamId == entry.streamId }; entries += entry }
+        override suspend fun all(): List<WatchEntry> { failure?.let { throw it }; return entries.toList() }
+    }
+    private var store = FakeWatchStore()
+    @Before fun resetStore() { store = FakeWatchStore() }
+
+    private fun entry(id: String, pos: Long, dur: Long, finished: Boolean = false, path: String = ref(TitleKind.SERIES).path,
+        at: Long = 1) = WatchEntry(id, path, 1, 1, pos, dur, at, finished)
+
+    private class FakePrefs(val map: MutableMap<Long, Boolean> = mutableMapOf(), var defaultDub: Boolean = false) : TitlePrefs {
+        override suspend fun defaultDub() = defaultDub
+        override suspend fun setDefaultDub(on: Boolean) { defaultDub = on }
         override suspend fun dubSelected(postId: Long) = map[postId]
         override suspend fun setDubSelected(postId: Long, selected: Boolean) { map[postId] = selected }
     }
@@ -90,7 +107,7 @@ class TitleViewModelTest {
     private fun repo(api: FakeApi) = TitleInfoRepository(api, fetchScope = CoroutineScope(dispatcher + SupervisorJob()))
 
     private fun TestScope.vm(api: FakeApi, repo: TitleInfoRepository = repo(api)): TitleViewModel =
-        TitleViewModel(api.d.card.ref, api, repo, prefs)
+        TitleViewModel(api.d.card.ref, api, repo, prefs, store)
 
     private suspend fun TestScope.load(d: TitleDetail): Pair<TitleViewModel, FakeApi> {
         val api = FakeApi(d); val v = vm(api); advanceUntilIdle(); return v to api
@@ -379,5 +396,64 @@ class TitleViewModelTest {
         assertEquals("پخش قسمت ۱", again.uiState.value.primaryLabel)
         api.titleGate!!.complete(Unit); advanceUntilIdle()
         assertEquals("ادامه فصل ۱ قسمت ۲", again.uiState.value.primaryLabel)
+    }
+
+    @Test fun localFinished_marksTileWatched_andPrimaryMovesOn() = runTest(dispatcher) {
+        store.entries += entry("s1e1", 2_900_000, 3_000_000, finished = true)
+        val (v, _) = load(series(0))
+        assertTrue(v.uiState.value.episodes[0].watched)
+        assertEquals(UiStrings.continueWatching(1, 2), v.uiState.value.primaryLabel)
+    }
+
+    @Test fun localPartial_showsProgress_andContinuesThatEpisode() = runTest(dispatcher) {
+        store.entries += entry("s1e2", 600_000, 2_400_000)
+        val (v, _) = load(series(0))
+        val s = v.uiState.value
+        assertEquals(0.25f, s.episodes[1].progress!!, 0.001f)
+        assertNull(s.episodes[0].progress)
+        assertEquals(2, s.primaryEpisode?.number)
+        assertEquals(2, s.initialFocusEpisode)
+    }
+
+    @Test fun film_resume_labelShowsRemainingMinutes() = runTest(dispatcher) {
+        val r = ref(TitleKind.FILM)
+        store.entries += entry("s1e1", 1_800_000, 7_440_000, path = r.path)
+        val (v, _) = load(detail(r, listOf(Season(1, listOf(ep(1, 1))))))
+        assertEquals("ادامه (۹۴ دقیقه باقی‌مانده)", v.uiState.value.primaryLabel)
+    }
+
+    @Test fun onResume_rereadsLocalState_withoutServerChange() = runTest(dispatcher) {
+        val (v, api) = load(series(0))
+        assertFalse(v.uiState.value.episodes[0].watched)
+        store.entries += entry("s1e1", 2_900_000, 3_000_000, finished = true)
+        v.onResume(); advanceUntilIdle()
+        assertTrue(v.uiState.value.episodes[0].watched)
+        assertEquals(1, api.titleCalls)
+    }
+
+    @Test fun watchStoreFailure_pageStillShows() = runTest(dispatcher) {
+        store.failure = IOException("disk")
+        val (v, _) = load(series(0))
+        assertNotNull(v.uiState.value.detail)
+        assertTrue(v.uiState.value.episodes.none { it.watched })
+    }
+
+    @Test fun otherTitlesEntriesAreIgnored() = runTest(dispatcher) {
+        store.entries += entry("s1e1", 2_900_000, 3_000_000, finished = true, path = "/post/series/99/other/")
+        val (v, _) = load(series(0))
+        assertFalse(v.uiState.value.episodes[0].watched)
+    }
+
+    @Test fun defaultDub_appliesOnlyWithoutSavedChoice() = runTest(dispatcher) {
+        val dub = listOf(Season(1, listOf(ep(1, 1, id = "dub1"))))
+        prefs = FakePrefs(defaultDub = true)
+        val (v, _) = load(series(0, dub = dub))
+        assertTrue(v.uiState.value.dubSelected)
+        prefs = FakePrefs(mutableMapOf(7L to false), defaultDub = true)
+        val (v2, _) = load(series(0, dub = dub))
+        assertFalse(v2.uiState.value.dubSelected)
+        prefs = FakePrefs(defaultDub = true)
+        val (v3, _) = load(series(0))
+        assertFalse(v3.uiState.value.dubSelected)
     }
 }

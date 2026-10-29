@@ -131,6 +131,8 @@ class PlayerViewModelTest {
 
     private class MemTitlePrefs : TitlePrefs {
         val map = mutableMapOf<Long, Boolean>()
+        override suspend fun defaultDub() = false
+        override suspend fun setDefaultDub(on: Boolean) {}
         override suspend fun dubSelected(postId: Long): Boolean? = map[postId]
         override suspend fun setDubSelected(postId: Long, selected: Boolean) { map[postId] = selected }
     }

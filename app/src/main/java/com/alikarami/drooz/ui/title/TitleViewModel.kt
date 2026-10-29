@@ -4,7 +4,12 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.alikarami.drooz.data.SiteApi
 import com.alikarami.drooz.data.TitleInfoRepository
+import com.alikarami.drooz.data.NextUp
 import com.alikarami.drooz.data.TitlePrefs
+import com.alikarami.drooz.data.WatchEntry
+import com.alikarami.drooz.data.WatchStore
+import com.alikarami.drooz.data.episodeState
+import com.alikarami.drooz.data.nextUp
 import com.alikarami.drooz.player.PlayerArgs
 import com.alikarami.drooz.site.model.Episode
 import com.alikarami.drooz.site.model.Season
@@ -21,7 +26,7 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 
-data class EpisodeUi(val episode: Episode, val label: String, val minutes: Int?, val watched: Boolean)
+data class EpisodeUi(val episode: Episode, val label: String, val minutes: Int?, val watched: Boolean, val progress: Float?)
 
 data class TitleUiState(
     val detail: TitleDetail?,
@@ -46,6 +51,7 @@ class TitleViewModel(
     private val api: SiteApi,
     private val titleInfo: TitleInfoRepository,
     private val prefs: TitlePrefs,
+    private val watchStore: WatchStore,
 ) : ViewModel() {
     private var detail: TitleDetail? = null
     private var seasonOverride: Int? = null
@@ -54,6 +60,8 @@ class TitleViewModel(
     private var error: String? = null
     private var watchlistInFlight = false
     private var dubRestored = false
+    /** This title's local watch entries by streamId. */
+    private var local: Map<String, WatchEntry> = emptyMap()
     /** A player start was emitted and the page hasn't been resumed since. */
     private var startPending = false
     /** Set by a play: the page (played ✓, next episode) changed and is refetched on return. */
@@ -76,9 +84,16 @@ class TitleViewModel(
         error = null
         publish()
         viewModelScope.safeLaunch(onError = { if (detail == null) { error = it.message ?: "error"; publish() } }) {
+            readLocal()
             if (detail == null) titleInfo.lastKnown(ref)?.let { show(it) }
             show(titleInfo.get(ref))
         }
+    }
+
+    /** A failing store just means no local state. */
+    private suspend fun readLocal() {
+        local = runCatching { watchStore.all() }.getOrNull().orEmpty()
+            .filter { it.refPath == ref.path }.associateBy { it.streamId }
     }
 
     private suspend fun show(d: TitleDetail) {
@@ -86,6 +101,7 @@ class TitleViewModel(
             dubRestored = true
             // A failing prefs read must not hide the title.
             val saved = runCatching { prefs.dubSelected(ref.postId) }.getOrNull()
+                ?: runCatching { prefs.defaultDub() }.getOrNull()
             dub = saved == true && d.catalog.dub.isNotEmpty()
         }
         if (dub && d.catalog.dub.isEmpty()) dub = false
@@ -99,9 +115,13 @@ class TitleViewModel(
     /** The page is showing again (e.g. back from the player): after a play, revalidate it in place. */
     fun onResume() {
         startPending = false
-        if (!playedSinceLoad || detail == null) return
-        playedSinceLoad = false
-        load()
+        if (playedSinceLoad && detail != null) {
+            playedSinceLoad = false
+            load()
+        } else {
+            // The player writes locally even when the server page is unchanged.
+            viewModelScope.safeLaunch(onError = { }) { readLocal(); publish() }
+        }
     }
 
     /** The watchlist failure toast was shown: don't show it again when the page comes back. */
@@ -163,29 +183,31 @@ class TitleViewModel(
         val d = detail
         val seasons: List<Season> = d?.let { if (dub) it.catalog.dub else it.catalog.main }.orEmpty()
             .sortedBy { it.number }
-        val all = seasons.flatMap { s -> s.episodes.sortedBy { it.number } }
-        val next = all.firstOrNull { !it.played }
-        val anyPlayed = all.any { it.played }
+        val up = nextUp(seasons, local)
         val isFilm = ref.kind == TitleKind.FILM
-        val (label, primary) = when {
-            all.isEmpty() -> "" to null
-            next == null -> UiStrings.WATCH_AGAIN to all.first()
-            isFilm -> UiStrings.FILM to next
-            !anyPlayed -> UiStrings.playEpisode(next.season, next.number) to next
-            else -> UiStrings.continueWatching(next.season, next.number) to next
+        val label = when (up) {
+            null -> ""
+            is NextUp.Start -> if (isFilm) UiStrings.FILM else UiStrings.playEpisode(up.episode.season, up.episode.number)
+            is NextUp.Resume -> if (isFilm) UiStrings.continueFilm(up.state.remainingMin ?: 0)
+                else UiStrings.continueWatching(up.episode.season, up.episode.number)
+            is NextUp.Next -> UiStrings.continueWatching(up.episode.season, up.episode.number)
+            is NextUp.Again -> UiStrings.WATCH_AGAIN
         }
+        val primary = up?.episode
         val numbers = seasons.map { it.number }
         val selected = seasonOverride?.takeIf { it in numbers } ?: primary?.season ?: numbers.firstOrNull() ?: 1
         val minutes = d?.card?.durationMin
         val eps = seasons.firstOrNull { it.number == selected }?.episodes.orEmpty().sortedBy { it.number }
+        val states = eps.map { it to episodeState(it, local[it.streamId]) }
         return TitleUiState(
             detail = d,
             primaryLabel = label,
             primaryEpisode = primary,
             seasons = numbers,
             selectedSeason = selected,
-            episodes = eps.map { EpisodeUi(it, episodeLabel(it.season, it.number), minutes, it.played) },
-            initialFocusEpisode = eps.firstOrNull { !it.played }?.number,
+            episodes = states.map { (e, st) -> EpisodeUi(e, episodeLabel(e.season, e.number), minutes, st.watched, st.progress) },
+            initialFocusEpisode = primary?.takeIf { p -> eps.any { it.season == p.season && it.number == p.number } }?.number
+                ?: states.firstOrNull { !it.second.watched }?.first?.number,
             dubAvailable = d?.catalog?.dub?.isNotEmpty() == true,
             dubSelected = dub,
             inWatchlist = inWatchlist,

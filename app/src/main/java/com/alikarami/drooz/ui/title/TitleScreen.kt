@@ -110,7 +110,7 @@ import com.alikarami.drooz.ui.theme.droozSurfaceScale
 class TitleViewModelFactory(private val graph: AppGraph, private val ref: TitleRef) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T =
-        TitleViewModel(ref, graph.siteApi, graph.titleInfo, graph.titlePrefs) as T
+        TitleViewModel(ref, graph.siteApi, graph.titleInfo, graph.titlePrefs, graph.watchStore) as T
 }
 
 /** Distance from the right (start) screen edge to the content; there is no rail on this page. */
@@ -597,7 +597,7 @@ private fun Episodes(state: TitleUiState, vm: TitleViewModel, requester: FocusRe
                 number = e.episode.number,
                 minutes = e.minutes,
                 watched = e.watched,
-                progress = null,
+                progress = e.progress,
                 onClick = { vm.play(e.episode) },
                 modifier = Modifier
                     .then(if (i == last.coerceIn(0, eps.lastIndex)) Modifier.focusRequester(slot) else Modifier)

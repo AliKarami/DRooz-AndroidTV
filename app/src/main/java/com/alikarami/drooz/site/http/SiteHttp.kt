@@ -2,8 +2,9 @@ package com.alikarami.drooz.site.http
 
 import com.alikarami.drooz.site.SiteConfig
 import com.alikarami.drooz.site.SiteException
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.suspendCancellableCoroutine
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.HttpUrl
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
@@ -11,6 +12,7 @@ import okhttp3.Request
 import okhttp3.Response
 import java.io.IOException
 import java.util.concurrent.TimeUnit
+import kotlin.coroutines.resumeWithException
 
 data class SiteResponse(val finalPath: String, val body: String)
 
@@ -72,42 +74,58 @@ class SiteHttp(
     }
 
     /** Returns the redirect target of [path] without downloading it (used for `/dln/` file links). */
-    suspend fun getFinalUrl(path: String): String = withContext(Dispatchers.IO) {
-        try {
-            noRedirectClient.newCall(Request.Builder().url(resolve(path)).build()).execute().use { r ->
-                if (r.isRedirect) {
-                    val location = r.header("Location") ?: throw SiteException.ParseError("redirect location")
-                    r.request.url.resolve(location)?.toString() ?: location
-                } else {
-                    checkStatus(r, r.body.string())
-                    r.request.url.toString()
-                }
+    suspend fun getFinalUrl(path: String): String =
+        call(noRedirectClient, Request.Builder().url(resolve(path)).build()) { r ->
+            if (r.isRedirect) {
+                val location = r.header("Location") ?: throw SiteException.ParseError("redirect location")
+                r.request.url.resolve(location)?.toString() ?: location
+            } else {
+                checkStatus(r, r.body.string())
+                r.request.url.toString()
             }
-        } catch (e: IOException) {
-            throw SiteException.NetworkError(e)
         }
-    }
+
+    /**
+     * Runs [request] asynchronously; cancelling the coroutine cancels the OkHttp call. [handle] runs on
+     * the OkHttp callback thread (body reads are blocking) and may throw [SiteException]s; an
+     * [IOException] becomes [SiteException.NetworkError].
+     */
+    private suspend fun <T> call(client: OkHttpClient, request: Request, handle: (Response) -> T): T =
+        suspendCancellableCoroutine { cont ->
+            val call = client.newCall(request)
+            cont.invokeOnCancellation { call.cancel() }
+            call.enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    if (cont.isActive) cont.resumeWithException(SiteException.NetworkError(e))
+                }
+
+                override fun onResponse(call: Call, response: Response) {
+                    val result = try {
+                        response.use { Result.success(handle(it)) }
+                    } catch (e: IOException) {
+                        Result.failure(SiteException.NetworkError(e))
+                    } catch (e: Throwable) {
+                        Result.failure(e)
+                    }
+                    if (cont.isActive) cont.resumeWith(result)
+                }
+            })
+        }
 
     private fun resolve(path: String): HttpUrl =
         baseUrl.resolve(path) ?: throw IllegalArgumentException("bad path $path")
 
     private suspend fun execute(request: Request, requiresAuth: Boolean, client: OkHttpClient = this.client): SiteResponse =
-        withContext(Dispatchers.IO) {
-        try {
-            client.newCall(request).execute().use { r ->
-                val body = r.body.string()
-                checkStatus(r, body)
-                val finalPath = r.request.url.encodedPath
-                if (requiresAuth && finalPath.startsWith(SiteConfig.LOGIN_PATH)) throw SiteException.SessionExpired()
-                if (body.length < 4000 && body.contains("setCookie(window.devicePixelRatio)")) {
-                    throw SiteException.ParseError("scr-stub")
-                }
-                SiteResponse(finalPath, body)
+        call(client, request) { r ->
+            val body = r.body.string()
+            checkStatus(r, body)
+            val finalPath = r.request.url.encodedPath
+            if (requiresAuth && finalPath.startsWith(SiteConfig.LOGIN_PATH)) throw SiteException.SessionExpired()
+            if (body.length < 4000 && body.contains("setCookie(window.devicePixelRatio)")) {
+                throw SiteException.ParseError("scr-stub")
             }
-        } catch (e: IOException) {
-            throw SiteException.NetworkError(e)
+            SiteResponse(finalPath, body)
         }
-    }
 
     private companion object {
         val GATEWAY_ERRORS = setOf(502, 503, 504)

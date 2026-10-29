@@ -72,6 +72,8 @@ class AppViewModelTest {
     }
 
     private class NoApi : com.alikarami.drooz.data.SiteApi {
+    override suspend fun subtitle(url: String): String = error("unused")
+    override suspend fun reportStreamError(streamId: String, event: String, msg: String) {}
         override suspend fun home() = error("unused")
         override suspend fun list(path: String, page: Int) = error("unused")
         override suspend fun search(query: String) = error("unused")

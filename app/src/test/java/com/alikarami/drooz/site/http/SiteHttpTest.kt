@@ -2,7 +2,15 @@ package com.alikarami.drooz.site.http
 
 import com.alikarami.drooz.site.SiteConfig
 import com.alikarami.drooz.site.SiteException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
+import okhttp3.OkHttpClient
+import java.util.concurrent.TimeUnit
+import org.junit.Assert.assertTrue
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import org.junit.After
@@ -17,10 +25,11 @@ class SiteHttpTest {
     @get:Rule val tmp = TemporaryFolder()
     private val server = MockWebServer()
     private lateinit var http: SiteHttp
+    private val okHttpClient = OkHttpClient()
 
     @Before fun start() {
         server.start()
-        http = SiteHttp(server.url("/"), PersistentCookieJar(tmp.newFile(), siteHost = server.hostName))
+        http = SiteHttp(server.url("/"), PersistentCookieJar(tmp.newFile(), siteHost = server.hostName), okHttpClient)
     }
 
     @After fun stop() = server.close()
@@ -136,5 +145,15 @@ class SiteHttpTest {
         server.enqueue(MockResponse.Builder().code(302).addHeader("Location", "https://cdn.example/dl/file.mkv").build())
         assertEquals("https://cdn.example/dl/file.mkv", http.getFinalUrl("/dln/x/1/2/file.mkv"))
         assertEquals(1, server.requestCount)
+    }
+
+    @Test fun cancellingTheCoroutineCancelsTheCall() = runBlocking {
+        server.enqueue(MockResponse.Builder().body("x").headersDelay(5, TimeUnit.SECONDS).build())
+        val job = launch(Dispatchers.Default) { http.get("/slow/") }
+        delay(300)
+        val t0 = System.nanoTime()
+        job.cancelAndJoin()
+        assertTrue((System.nanoTime() - t0) < 1_000_000_000)
+        assertTrue(okHttpClient.dispatcher.runningCallsCount() == 0)
     }
 }

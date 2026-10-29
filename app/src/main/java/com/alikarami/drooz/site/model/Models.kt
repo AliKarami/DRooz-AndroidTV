@@ -88,7 +88,23 @@ data class TitleDetail(
 )
 
 /** Labels as on the site: Farsi, English, English + Farsi, Farsi for Dub. */
-data class SubtitleTrack(val label: String, val url: String)
+data class SubtitleTrack(val label: String, val url: String) {
+    val kind: SubtitleKind get() = SubtitleKind.of(label)
+}
+
+enum class SubtitleKind {
+    FA, EN, DUAL, FA_DUB, OTHER;
+
+    companion object {
+        fun of(label: String): SubtitleKind = when (label.trim()) {
+            "Farsi" -> FA
+            "English" -> EN
+            "English + Farsi" -> DUAL
+            "Farsi for Dub" -> FA_DUB
+            else -> OTHER
+        }
+    }
+}
 
 data class StreamSession(
     val title: String,

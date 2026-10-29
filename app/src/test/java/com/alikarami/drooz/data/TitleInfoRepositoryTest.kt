@@ -20,6 +20,8 @@ class TitleInfoRepositoryTest {
     )
 
     private class FakeApi(val onTitle: suspend (TitleRef) -> TitleDetail) : SiteApi {
+    override suspend fun subtitle(url: String): String = error("unused")
+    override suspend fun reportStreamError(streamId: String, event: String, msg: String) {}
         var calls = 0
         override suspend fun title(ref: TitleRef): TitleDetail { calls++; return onTitle(ref) }
         override suspend fun home() = error("unused")

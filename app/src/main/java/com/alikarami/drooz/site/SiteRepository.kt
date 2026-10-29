@@ -63,6 +63,9 @@ class SiteRepository(
         authed { http.get("/json/userWatchlist/$postId/$state/", retry = false) }
     }
 
+    /** [url] is absolute, as the stream parser produces it; [SiteHttp] resolves it as-is. */
+    suspend fun subtitle(url: String): String = authed { http.get(url).body }
+
     suspend fun reportStreamError(streamId: String, event: String, msg: String) {
         runCatching {
             http.get("/json/logStreamError/$streamId/?event=$event&msg=${URLEncoder.encode(msg, "UTF-8")}", requiresAuth = false, retry = false)

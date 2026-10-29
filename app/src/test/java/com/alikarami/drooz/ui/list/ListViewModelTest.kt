@@ -36,6 +36,8 @@ class ListViewModelTest {
     private fun page(n: Int, last: Int) = ListPage((0 until 20).map { card(n * 100L + it) }, n, last)
 
     private class FakeApi(var onList: suspend (String, Int) -> ListPage) : SiteApi {
+    override suspend fun subtitle(url: String): String = error("unused")
+    override suspend fun reportStreamError(streamId: String, event: String, msg: String) {}
         val listCalls = mutableListOf<Pair<String, Int>>()
         override suspend fun list(path: String, page: Int): ListPage { listCalls += path to page; return onList(path, page) }
         override suspend fun home() = error("unused")

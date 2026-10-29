@@ -34,4 +34,7 @@ class SessionGuardedSiteApi(private val api: SiteApi, private val events: Sessio
     override suspend fun openStream(episode: Episode, ref: TitleRef, lang: String, height: Int) =
         guard { api.openStream(episode, ref, lang, height) }
     override suspend fun setWatchlist(postId: Long, state: String) = guard { api.setWatchlist(postId, state) }
+    override suspend fun subtitle(url: String) = guard { api.subtitle(url) }
+    override suspend fun reportStreamError(streamId: String, event: String, msg: String) =
+        guard { api.reportStreamError(streamId, event, msg) }
 }

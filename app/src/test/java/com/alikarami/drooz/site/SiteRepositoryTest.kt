@@ -212,4 +212,18 @@ class SiteRepositoryTest {
         assertThrows(SiteException.NotLoggedIn::class.java) { runBlocking { repo.home() } }
         assertEquals(0, requests().count { it.method == "POST" })
     }
+
+    @Test fun subtitleFetchesAbsoluteUrlThroughTheSiteClient() = runBlocking {
+        val srt = "1\n00:00:01,000 --> 00:00:02,000\nHi\n"
+        server.enqueue(ok(srt))
+        assertEquals(srt, repo.subtitle(server.url("/json/subtitle/1/2/sub.srt?stream=3").toString()))
+        assertEquals("/json/subtitle/1/2/sub.srt?stream=3", server.takeRequest().target)
+    }
+
+    @Test fun subtitleRetriesDroppedRequests() = runBlocking {
+        server.enqueue(MockResponse.Builder().onResponseStart(mockwebserver3.SocketEffect.CloseSocket()).build())
+        server.enqueue(ok("srt"))
+        assertEquals("srt", repo.subtitle(server.url("/json/subtitle/1/2/sub.srt").toString()))
+        assertEquals(2, server.requestCount)
+    }
 }

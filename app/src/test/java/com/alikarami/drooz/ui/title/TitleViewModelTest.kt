@@ -46,6 +46,8 @@ class TitleViewModelTest {
     )
 
     private class FakeApi(var d: TitleDetail) : SiteApi {
+    override suspend fun subtitle(url: String): String = error("unused")
+    override suspend fun reportStreamError(streamId: String, event: String, msg: String) {}
         var titleCalls = 0
         var titleGate: CompletableDeferred<Unit>? = null
         var titleFailure: Exception? = null

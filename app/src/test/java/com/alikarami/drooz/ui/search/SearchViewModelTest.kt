@@ -30,6 +30,8 @@ class SearchViewModelTest {
         2025, "ph$id", null, Rating(8.0, 100), null, listOf("Drama"), emptyList(), null, emptyList(), "syn $id", null, null)
 
     private class FakeApi(var onSearch: suspend (String) -> List<TitleCard>) : SiteApi {
+    override suspend fun subtitle(url: String): String = error("unused")
+    override suspend fun reportStreamError(streamId: String, event: String, msg: String) {}
         val calls = mutableListOf<String>()
         override suspend fun search(query: String): List<TitleCard> { calls += query; return onSearch(query) }
         override suspend fun list(path: String, page: Int): ListPage = error("unused")

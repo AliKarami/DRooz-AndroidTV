@@ -13,6 +13,8 @@ interface SiteApi {
     suspend fun title(ref: TitleRef): TitleDetail
     suspend fun openStream(episode: Episode, ref: TitleRef, lang: String, height: Int): StreamSession
     suspend fun setWatchlist(postId: Long, state: String)
+    suspend fun subtitle(url: String): String
+    suspend fun reportStreamError(streamId: String, event: String, msg: String)
 }
 
 interface AuthApi {
@@ -28,6 +30,9 @@ class SiteApiAdapter(private val repo: SiteRepository) : SiteApi {
     override suspend fun openStream(episode: Episode, ref: TitleRef, lang: String, height: Int) =
         repo.openStream(episode, ref, lang, height)
     override suspend fun setWatchlist(postId: Long, state: String) = repo.setWatchlist(postId, state)
+    override suspend fun subtitle(url: String) = repo.subtitle(url)
+    override suspend fun reportStreamError(streamId: String, event: String, msg: String) =
+        repo.reportStreamError(streamId, event, msg)
 }
 
 class AuthApiAdapter(private val auth: AuthService) : AuthApi {

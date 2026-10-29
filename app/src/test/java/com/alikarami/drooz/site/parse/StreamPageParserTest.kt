@@ -6,6 +6,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
+import com.alikarami.drooz.site.model.SubtitleKind
 import org.junit.Test
 
 class StreamPageParserTest {
@@ -58,4 +59,10 @@ class StreamPageParserTest {
         val e = assertThrows(SiteException.ParseError::class.java) { StreamPageParser.parse("<html></html>", "1") }
         assertEquals("m3u8", e.what)
     }
+
+    @Test fun subtitleKindsFromFixture() {
+        assertEquals(listOf(SubtitleKind.FA, SubtitleKind.EN, SubtitleKind.DUAL), s.subtitles.map { it.kind })
+    }
+
+    @Test fun farsiForDubKind() = assertEquals(SubtitleKind.FA_DUB, SubtitleKind.of("Farsi for Dub"))
 }

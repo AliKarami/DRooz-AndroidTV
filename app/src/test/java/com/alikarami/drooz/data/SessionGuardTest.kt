@@ -14,6 +14,8 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class SessionGuardTest {
     private class Failing(val e: Exception) : SiteApi {
+    override suspend fun subtitle(url: String): String = error("unused")
+    override suspend fun reportStreamError(streamId: String, event: String, msg: String) {}
         override suspend fun home() = throw e
         override suspend fun list(path: String, page: Int) = throw e
         override suspend fun search(query: String) = throw e

@@ -47,6 +47,8 @@ class HomeViewModelTest {
         var onList: suspend (String) -> ListPage = { ListPage(emptyList(), 1, 1) },
         var onTitle: suspend (TitleRef) -> TitleDetail = { error("no detail") },
     ) : SiteApi {
+    override suspend fun subtitle(url: String): String = error("unused")
+    override suspend fun reportStreamError(streamId: String, event: String, msg: String) {}
         val listCalls = mutableListOf<String>()
         val titleCalls = mutableListOf<TitleRef>()
         var onHome: suspend () -> HomePage = { homePage }

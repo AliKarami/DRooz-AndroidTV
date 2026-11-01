@@ -53,6 +53,10 @@ interface PlaybackEngine {
     /** null = Automatic (ABR). */
     fun selectQuality(height: Int?)
     fun selectAudio(index: Int)
+    /** Frees the decoders while the player is hidden; keeps the item and position. A [load] meanwhile waits. */
+    fun suspend()
+    /** Undoes [suspend]: prepares again at the kept position, paused unless already playing. */
+    fun resume()
     fun release()
 }
 

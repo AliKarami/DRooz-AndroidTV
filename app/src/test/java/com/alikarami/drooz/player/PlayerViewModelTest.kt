@@ -277,6 +277,19 @@ class PlayerViewModelTest {
         assertTrue(watch.map["s1e1"]!!.finished)
     }
 
+    @Test fun backgroundSuspendsEngineAndForegroundResumesIt() = playerTest {
+        val v = Env().vm(scope = this)
+        runCurrent()
+        engine.emit(EngineEvent.Ready)
+        runCurrent()
+        v.onStop()
+        assertTrue(engine.suspended) // the hardware decoder is freed while the player is hidden
+        val played = engine.played
+        v.onStart()
+        assertFalse(engine.suspended)
+        assertEquals(played, engine.played) // coming back does not start by itself
+    }
+
     @Test fun nothingSavedBeforePlaybackStarted() = playerTest {
         val v = Env().vm(scope = this)
         runCurrent()

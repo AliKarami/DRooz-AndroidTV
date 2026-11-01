@@ -96,6 +96,7 @@ class ExoPlaybackEngine(context: Context, client: OkHttpClient) : PlaybackEngine
     private var audioRefs: List<Pair<Tracks.Group, Int>> = emptyList()
     private var awaitingReady = false
     private var released = false
+    private var suspended = false
 
     private val listener = object : Player.Listener {
         override fun onPlaybackStateChanged(playbackState: Int) {
@@ -174,7 +175,7 @@ class ExoPlaybackEngine(context: Context, client: OkHttpClient) : PlaybackEngine
             .setMimeType(MimeTypes.APPLICATION_M3U8)
             .build()
         exoPlayer.setMediaItem(item, startMs.coerceAtLeast(0))
-        exoPlayer.prepare()
+        if (!suspended) exoPlayer.prepare()
         if (BuildConfig.DEBUG) Log.d(TAG, "load start=$startMs")
     }
 
@@ -212,6 +213,19 @@ class ExoPlaybackEngine(context: Context, client: OkHttpClient) : PlaybackEngine
         exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters.buildUpon()
             .setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, track))
             .build()
+    }
+
+    // stop() releases the codecs: a hidden player must not hold the TV's few hardware decoders.
+    override fun suspend() {
+        if (released || suspended) return
+        suspended = true
+        exoPlayer.stop()
+    }
+
+    override fun resume() {
+        if (released || !suspended) return
+        suspended = false
+        if (exoPlayer.mediaItemCount > 0) exoPlayer.prepare()
     }
 
     override fun release() {

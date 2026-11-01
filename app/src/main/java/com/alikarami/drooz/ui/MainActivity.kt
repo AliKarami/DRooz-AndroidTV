@@ -22,6 +22,14 @@ class MainActivity : ComponentActivity() {
         // system bars to draw under.
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        // Some launchers start a second copy on top of a running task instead of bringing it forward; each
+        // copy stacked another player behind it. Show the running task instead.
+        if (!isTaskRoot && intent.action == Intent.ACTION_MAIN &&
+            (intent.hasCategory(Intent.CATEGORY_LAUNCHER) || intent.hasCategory(Intent.CATEGORY_LEANBACK_LAUNCHER))
+        ) {
+            finish()
+            return
+        }
         val preview = if (BuildConfig.DEBUG) intent.getStringExtra(EXTRA_PREVIEW_LOGIN) else null
         // Read before appVm is first touched: its factory takes them (a recreated activity keeps its VM).
         debug = if (BuildConfig.DEBUG && savedInstanceState == null) debugLaunch(intent) else null

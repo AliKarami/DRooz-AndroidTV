@@ -15,6 +15,7 @@ class FakeEngine : PlaybackEngine {
     var played = 0
     var paused = 0
     var released = false
+    var suspended = false
     val gains = mutableListOf<Float>()
     val qualitySelections = mutableListOf<Int?>()
     val audioSelections = mutableListOf<Int>()
@@ -47,5 +48,7 @@ class FakeEngine : PlaybackEngine {
     override fun setGain(gain: Float) { gains += gain }
     override fun selectQuality(height: Int?) { qualitySelections += height }
     override fun selectAudio(index: Int) { audioSelections += index }
+    override fun suspend() { suspended = true }
+    override fun resume() { suspended = false }
     override fun release() { released = true }
 }

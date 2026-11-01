@@ -832,14 +832,19 @@ class PlayerViewModel(
     /** Back in the foreground: later loads may play again (nothing resumes by itself). */
     fun onStart() {
         foreground = true
+        engine.resume()
     }
 
-    /** Pauses and saves; a load still in flight (open, recovery, switch) will finish paused. */
+    /**
+     * Pauses, saves and frees the decoders (a hidden player held them, and leftover players ran the TV
+     * out); a load still in flight (open, recovery, switch) will finish paused.
+     */
     fun onStop() {
         foreground = false
         save()
         wantsPlay = false
         engine.pause()
+        engine.suspend()
     }
 
     /** User Back: cancels a pending open (its HTTP call dies with it), saves, emits exit. */

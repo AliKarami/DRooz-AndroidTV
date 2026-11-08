@@ -29,6 +29,10 @@ class AuthService(
     private val creds: CredentialStore,
     /** Login pages are parsed here, off the caller's (main) thread. */
     private val parseDispatcher: CoroutineDispatcher = Dispatchers.Default,
+    /** Which account the local per-account data belongs to; null keeps no record (tests). */
+    private val owner: AccountOwner? = null,
+    /** Runs before a login of a different account than [owner] completes: clear that account's local data. */
+    private val onAccountChanged: suspend () -> Unit = {},
 ) {
     val isLoggedIn: Boolean get() = jar.cookie(SESSION_COOKIE) != null
 
@@ -88,6 +92,8 @@ class AuthService(
         if (result == LoginResult.Success) {
             creds.save(Credentials(username, password, mobile))
             knownUsername = username
+            val changed = owner?.let { o -> withContext(Dispatchers.IO) { o.claim(username) } } ?: false
+            if (changed) onAccountChanged()
             reportDevice()
         }
         return result

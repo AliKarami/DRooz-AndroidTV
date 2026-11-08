@@ -375,4 +375,31 @@ class AuthServiceTest {
         val store = CredentialStore(tmp.root.resolve("k.bin").apply { writeBytes(ByteArray(40)) }, KeystoreSecretBox())
         assertNull(store.load())
     }
+
+    // Watch progress and title choices belong to one account: a different account signing in on this
+    // TV gets them cleared before its login completes; the same account keeps them (D8).
+    @Test fun aDifferentAccountSigningInReportsTheChange() = runTest {
+        var changes = 0
+        val auth = AuthService(SiteHttp(server.url("/"), jar), jar, creds,
+            owner = AccountOwner(tmp.root.resolve("account.id")), onAccountChanged = { changes++ })
+        fun success() {
+            form()
+            server.enqueue(page("login_success.html", "cf=s"))
+            server.enqueue(MockResponse.Builder().body("ok").build())
+        }
+        success(); assertEquals(LoginResult.Success, auth.login("first", "pw", null))
+        assertEquals(0, changes)
+        server.enqueue(MockResponse.Builder().body("bye").build())
+        auth.logout()
+        success(); auth.login("first", "pw", null)
+        assertEquals(0, changes)
+        server.enqueue(MockResponse.Builder().body("bye").build())
+        auth.logout()
+        success(); auth.login("second", "pw", null)
+        assertEquals(1, changes)
+        // A refused login changes nothing.
+        form(); server.enqueue(page("login_wrong.html"))
+        auth.login("first", "bad", null)
+        assertEquals(1, changes)
+    }
 }

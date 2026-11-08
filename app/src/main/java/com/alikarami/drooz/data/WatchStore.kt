@@ -66,6 +66,14 @@ class FileWatchStore(
 
     override suspend fun all(): List<WatchEntry> = mutex.withLock { loaded().values.sortedByDescending { it.updatedAt } }
 
+    /** Forgets every entry, on disk too (another account signed in on this TV). */
+    suspend fun clear() = mutex.withLock {
+        entries = LinkedHashMap()
+        withContext(Dispatchers.IO) {
+            if (file.exists() && !file.delete()) persist(emptyList())
+        }
+    }
+
     /** Caller holds the mutex. */
     private suspend fun loaded(): MutableMap<String, WatchEntry> = entries ?: withContext(Dispatchers.IO) {
         val list = read()

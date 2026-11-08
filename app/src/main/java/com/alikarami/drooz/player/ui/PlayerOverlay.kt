@@ -37,16 +37,20 @@ import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.alikarami.drooz.data.SubtitleChoice
 import com.alikarami.drooz.data.SubtitleStyle
+import com.alikarami.drooz.player.END_GUARD_MS
 import com.alikarami.drooz.player.PlayerUiState
 import com.alikarami.drooz.player.PlayerViewModel
 import com.alikarami.drooz.player.UpNext
 import com.alikarami.drooz.player.engine.ExoPlaybackEngine
 import com.alikarami.drooz.player.engine.VideoSize
+import com.alikarami.drooz.player.scrubOffsetMs
 import com.alikarami.drooz.ui.common.BusySpinner
 import com.alikarami.drooz.ui.common.requestFocusSoon
 import kotlinx.coroutines.delay
@@ -71,12 +75,16 @@ internal class OverlayController {
         private set
     /** The scrub head while a held LEFT/RIGHT moves it; null when not scrubbing. */
     var scrubMs by mutableStateOf<Long?>(null)
+    /** Where the current hold began (the scrub head moves from here by the hold time). */
+    var scrubOriginMs = 0L
     var seekBarFocused = false
     /** Bumped after a seek so the seek bar re-reads the engine at once. */
     var refresh by mutableIntStateOf(0)
     /** Height (px above the screen's bottom edge) of the controls' bottom block / the episodes strip. */
     var controlsCoverPx by mutableIntStateOf(0)
     var stripCoverPx by mutableIntStateOf(0)
+    /** Right edge (px from the screen's left) of the up-next card: the subtitles centre beside it. */
+    var upNextRightPx by mutableIntStateOf(0)
     /** Uptime of the last key event (auto-hide). */
     var lastKeyAt = 0L
     /** Keys whose KeyDown the screen consumed: their KeyUp is consumed too (never a stray click). */
@@ -125,8 +133,10 @@ internal fun PlayerOverlayHost(
     val root = remember { FocusRequester() }
     val playNow = remember { FocusRequester() }
     val isPlaying by engine.isPlaying.collectAsStateWithLifecycle()
+    // A silent reopen (engine idle while the stream page reloads) looks like a rebuffer, not a hang.
+    val busy = buffering || state.recovering
     // The user's intent, so a rebuffer does not flip the icon to ▶ (engine.isPlaying is false while buffering).
-    val playing = isPlaying || (buffering && engine.exoPlayer.playWhenReady)
+    val playing = isPlaying || (busy && engine.exoPlayer.playWhenReady)
     val upNext = state.upNext
     val upNextShown = upNext != null
     val scrubbing by remember { derivedStateOf { c.scrubMs != null } }
@@ -161,9 +171,11 @@ internal fun PlayerOverlayHost(
                 showIfHidden(ControlsTarget.SEEK_BAR)
             }
             is KeyAction.Scrub -> {
+                if (c.scrubMs == null) c.scrubOriginMs = engine.positionMs
                 val duration = engine.durationMs
-                val next = max(0L, (c.scrubMs ?: engine.positionMs) + action.deltaMs)
-                c.scrubMs = if (duration > 0) min(next, duration) else next
+                val next = max(0L, c.scrubOriginMs + action.direction * scrubOffsetMs(action.heldMs))
+                // Short of the end, as the commit's seek will be (landing on the end ends the episode).
+                c.scrubMs = if (duration > 0) min(next, max(0L, duration - END_GUARD_MS)) else next
                 showIfHidden(ControlsTarget.SEEK_BAR)
             }
             KeyAction.CommitScrub -> {
@@ -172,6 +184,8 @@ internal fun PlayerOverlayHost(
                 c.refresh++
             }
             KeyAction.Back -> handleBack()
+            KeyAction.Next -> vm.playNext()
+            KeyAction.Stop -> vm.close()
             KeyAction.PlayAndShow -> {
                 vm.play()
                 showIfHidden(ControlsTarget.PLAY)
@@ -200,6 +214,7 @@ internal fun PlayerOverlayHost(
             n.keyCode, down, n.repeatCount, overlayForKeys,
             seekBarFocused = c.seekBarFocused && c.overlay == Overlay.CONTROLS,
             scrubbing = c.scrubMs != null,
+            heldMs = n.eventTime - n.downTime,
         )
         if (action == KeyAction.None) return !down && c.consumedDowns.remove(n.keyCode)
         perform(action)
@@ -212,6 +227,8 @@ internal fun PlayerOverlayHost(
     // Where the key event does arrive, onKey consumes its KeyUp and this never fires.
     BackHandler { handleBack() }
 
+    // Back from Home / standby (paused): the controls show, so the screen reads as paused, not hung.
+    LaunchedEffect(Unit) { vm.resumes.collect { showIfHidden(ControlsTarget.PLAY) } }
     // The view model holds a due up-next card back while a panel is open.
     LaunchedEffect(c.overlay.isPanel) { vm.setPanelOpen(c.overlay.isPanel) }
     // The card takes over when it appears (the controls, if open) and is dismissed by Back.
@@ -260,14 +277,21 @@ internal fun PlayerOverlayHost(
             Overlay.EPISODES -> c.stripCoverPx
             else -> 0
         }
+        // The up-next card (bottom left, over the credits' dialogue) pushes the subtitles to its right.
+        val gapPx = with(LocalDensity.current) { 24.dp.roundToPx() }
+        val leftInset = when {
+            panel != null -> (containerW * panel).roundToInt()
+            upNextShown && c.upNextRightPx > 0 -> c.upNextRightPx + gapPx
+            else -> 0
+        }
         CueLayer(
             vm, state.style, state.subtitle, videoSize, containerW, containerH,
             coverPx = cover,
             preview = overlay == Overlay.SUBTITLE_AUDIO,
-            leftInsetFraction = panel ?: 0f,
+            leftInsetPx = leftInset,
         )
 
-        if (buffering) {
+        if (busy) {
             BusySpinner(Modifier.align(Alignment.Center), size = 48.dp, stroke = 4.dp, color = Color.White)
         }
 
@@ -348,7 +372,9 @@ internal fun PlayerOverlayHost(
                     card, state.backdropUrl, playNow,
                     onPlay = vm::playNext,
                     onCredits = vm::dismissUpNext,
-                    modifier = Modifier.absolutePadding(left = 48.dp, bottom = 48.dp),
+                    modifier = Modifier
+                        .absolutePadding(left = 48.dp, bottom = 48.dp)
+                        .onGloballyPositioned { c.upNextRightPx = (it.positionInRoot().x + it.size.width).roundToInt() },
                 )
             }
         }
@@ -357,7 +383,8 @@ internal fun PlayerOverlayHost(
 
 /**
  * Reads [PlayerViewModel.cues] itself, so a cue change recomposes only this. [coverPx] (the visible
- * bottom block) lifts the subtitles, animated; [leftInsetFraction] centres them beside a side panel.
+ * bottom block) lifts the subtitles, animated; [leftInsetPx] centres them beside a side panel or the
+ * up-next card, animated.
  */
 @Composable
 private fun CueLayer(
@@ -369,7 +396,7 @@ private fun CueLayer(
     containerH: Int,
     coverPx: Int,
     preview: Boolean,
-    leftInsetFraction: Float,
+    leftInsetPx: Int,
 ) {
     val cues by vm.cues.collectAsStateWithLifecycle()
     val density = LocalDensity.current
@@ -382,7 +409,8 @@ private fun CueLayer(
         dual = choice == SubtitleChoice.DUAL,
         controlsHeightPx = cover.takeIf { it > 0 },
     )
-    val inset = with(density) { (containerW * leftInsetFraction).toDp() }
+    val insetPx by animateIntAsState(leftInsetPx, tween(200), label = "subtitleInset")
+    val inset = with(density) { insetPx.toDp() }
     Box(Modifier.fillMaxSize().absolutePadding(left = inset)) {
         SubtitleLayer(cues, style, placement, preview = preview, choice = choice)
     }

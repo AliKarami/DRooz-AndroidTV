@@ -49,9 +49,12 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -62,8 +65,15 @@ const val TICK_MS = 100L
 const val SAVE_EVERY_MS = 10_000L
 const val STREAM_HEIGHT = 1080
 const val REOPEN_MIN_INTERVAL_MS = 60_000L
+/**
+ * Reopens within [REOPEN_MIN_INTERVAL_MS] of the previous one are allowed only after that one played
+ * again (reached Ready), and at most this many in a row: flaky Wi-Fi recovers, a broken stream fails.
+ */
+const val MAX_QUICK_REOPENS = 3
 const val ERROR_REPORT_MIN_INTERVAL_MS = 60_000L
 const val SUBTITLE_STEP_MS = 500L
+/** A user seek forward lands at most this far before the end (never on the end itself). */
+const val END_GUARD_MS = 1_500L
 /** A failed subtitle download is retried once automatically after this delay (the site drops requests). */
 const val SUBTITLE_RETRY_MS = 5_000L
 val SPEEDS = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f)
@@ -78,6 +88,15 @@ const val STALE_STREAM_AFTER_MS = 10 * 60_000L
 
 /** HTTP statuses that mean the stream key expired / the CDN URL went stale: reopen the stream page. */
 private val RECOVERABLE_HTTP = setOf(403, 404, 410)
+
+/** The files a choice needs; DUAL uses the separate FA and EN files, never the merged track. */
+internal fun subtitleKinds(choice: SubtitleChoice): List<SubtitleKind> = when (choice) {
+    SubtitleChoice.FA -> listOf(SubtitleKind.FA)
+    SubtitleChoice.EN -> listOf(SubtitleKind.EN)
+    SubtitleChoice.DUAL -> listOf(SubtitleKind.FA, SubtitleKind.EN)
+    SubtitleChoice.FA_DUB -> listOf(SubtitleKind.FA_DUB)
+    SubtitleChoice.OFF -> emptyList()
+}
 
 sealed interface PlayerPhase {
     data object Loading : PlayerPhase
@@ -119,6 +138,10 @@ data class PlayerUiState(
     val currentSeason: Int = 0,
     val currentStreamId: String = "",
     val hasNext: Boolean = false,
+    /** A silent reopen (recovery, fresh stream after a long absence) is loading: the spinner shows. */
+    val recovering: Boolean = false,
+    /** Subtitle files of this stream that failed even after the automatic retry (the panel offers a retry). */
+    val subtitleErrors: Set<SubtitleKind> = emptySet(),
 )
 
 /**
@@ -155,6 +178,14 @@ class PlayerViewModel(
     /** The activity finishes on each emission. */
     val exits: Flow<Unit> = _exits.receiveAsFlow()
 
+    /** The activity keeps the screen on only while this is true: a paused film lets the screensaver start. */
+    val keepScreenOn: StateFlow<Boolean> = combine(engine.isPlaying, engine.buffering) { playing, buffering -> playing || buffering }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    private val _resumes = Channel<Unit>(Channel.CONFLATED)
+    /** Back in the foreground while playing (paused): the overlay shows the controls, so it reads as paused. */
+    val resumes: Flow<Unit> = _resumes.receiveAsFlow()
+
     private var streamId: String = args.streamId
     private var episode: Episode? = null
     private var session: StreamSession? = null
@@ -172,6 +203,10 @@ class PlayerViewModel(
     /** A Ready was seen since the last [loadEngine]: errors before it are "setupError". */
     private var readySinceLoad = false
     private var lastReopenAt: Long? = null
+    /** The last silent reopen reached Ready (it played again). */
+    private var reopenReady = false
+    /** Reopens in a row, each within [REOPEN_MIN_INTERVAL_MS] of the one before. */
+    private var quickReopens = 0
     /** When the player was last hidden (onStop), for [STALE_STREAM_AFTER_MS]. */
     private var stoppedAt: Long? = null
     private var lastReportAt: Long? = null
@@ -265,6 +300,8 @@ class PlayerViewModel(
             streamId = id
             everReady = false
             lastReopenAt = null
+            reopenReady = false
+            quickReopens = 0
             upNextReached = false
             upNextDismissed = false
             upNextShownMs = 0L
@@ -273,12 +310,23 @@ class PlayerViewModel(
             knownDurationMs = 0L
             gainSchedule = null
             smoother = GainSmoother()
+            // The engine keeps the last gain until the next boost tick: the new episode starts at unity.
+            engine.setGain(1f)
             _state.update {
-                it.copy(subtitleOffsetMs = 0, availableSubtitles = emptyList(), upNext = null, hasNext = nextEpisode(seasons, id) != null)
+                it.copy(
+                    subtitleOffsetMs = 0, availableSubtitles = emptyList(), upNext = null,
+                    hasNext = nextEpisode(seasons, id) != null, subtitleErrors = emptySet(),
+                )
             }
             _cues.value = SubtitleCues()
+            // Only the current stream's files are kept: a binge would otherwise hold every episode's cues.
+            timelines.keys.removeAll { it.first != id }
+            requestedSubtitles.removeAll { it.first != id }
+            autoRetriedSubtitles.removeAll { it.first != id }
         }
-        if (!silent) _state.update { it.copy(phase = PlayerPhase.Loading, currentStreamId = id) }
+        _state.update {
+            if (silent) it.copy(recovering = true) else it.copy(phase = PlayerPhase.Loading, currentStreamId = id, recovering = false)
+        }
         openJob = viewModelScope.launch {
             var attempt = 0
             while (true) {
@@ -403,7 +451,7 @@ class PlayerViewModel(
 
     private fun fail(message: String) {
         switching = false
-        if (!closed) _state.update { it.copy(phase = PlayerPhase.Failed(message)) }
+        if (!closed) _state.update { it.copy(phase = PlayerPhase.Failed(message), recovering = false) }
     }
 
     /** What the title page shows before the session's own image arrives. */
@@ -424,7 +472,14 @@ class PlayerViewModel(
                 readySinceLoad = true
                 everReady = true
                 switching = false
-                _state.update { it.copy(phase = PlayerPhase.Playing) }
+                if (lastReopenAt != null) reopenReady = true
+                _state.update { it.copy(phase = PlayerPhase.Playing, recovering = false) }
+            }
+            EngineEvent.PausedBySystem -> {
+                // As if the user paused: the next OK plays (wantsPlay would otherwise still say playing).
+                if (!wantsPlay) return
+                wantsPlay = false
+                save()
             }
             EngineEvent.Ended -> {
                 // A late Ended of the previous episode while switching: the new open is under way.
@@ -449,18 +504,43 @@ class PlayerViewModel(
     private fun onError(e: EngineEvent.Error) {
         report(e, streamId)
         if (BuildConfig.DEBUG) Log.w(TAG, "engine error ${e.codeName} http=${e.httpStatus}")
-        if (closed) return
+        if (closed || _state.value.phase is PlayerPhase.Failed) return
         durationMs()
-        val recoverable = everReady && session != null &&
+        // Before the first Ready too (the stream key just expired, Wi-Fi not up yet after wake).
+        val recoverable = session != null &&
             (e.httpStatus in RECOVERABLE_HTTP || e.codeName.startsWith("ERROR_CODE_IO_"))
-        val now = clock()
-        val reopenAllowed = lastReopenAt?.let { now - it >= REOPEN_MIN_INTERVAL_MS } ?: true
-        if (recoverable && reopenAllowed) {
-            lastReopenAt = now
-            open(streamId, startAt = engine.positionMs, silent = true)
+        if (recoverable && reopenAllowed()) {
+            open(streamId, startAt = if (everReady) engine.positionMs else null, silent = true)
         } else {
-            fail(UiStrings.PLAYBACK_FAILED)
+            // A reopen still opening would load the stream again under the Failed screen.
+            openJob?.cancel()
+            fail(if (e.codeName.startsWith("ERROR_CODE_IO_NETWORK")) UiStrings.PLAY_FAILED_NETWORK else UiStrings.PLAYBACK_FAILED)
         }
+    }
+
+    /**
+     * One reopen per [REOPEN_MIN_INTERVAL_MS]; sooner only after the last one played again, at most
+     * [MAX_QUICK_REOPENS] in a row. Records the reopen when allowed.
+     */
+    private fun reopenAllowed(): Boolean {
+        val now = clock()
+        val last = lastReopenAt
+        val allowed = when {
+            last == null || now - last >= REOPEN_MIN_INTERVAL_MS -> {
+                quickReopens = 0
+                true
+            }
+            reopenReady && quickReopens < MAX_QUICK_REOPENS -> {
+                quickReopens++
+                true
+            }
+            else -> false
+        }
+        if (allowed) {
+            lastReopenAt = now
+            reopenReady = false
+        }
+        return allowed
     }
 
     /** Fire-and-forget, at most once per [ERROR_REPORT_MIN_INTERVAL_MS]; never affects the phase. */
@@ -587,15 +667,6 @@ class PlayerViewModel(
     private fun originalChoice(available: List<SubtitleChoice>): SubtitleChoice =
         listOf(globalChoice, SubtitleChoice.FA, SubtitleChoice.EN).firstOrNull { it in available } ?: SubtitleChoice.OFF
 
-    /** The files a choice needs; DUAL uses the separate FA and EN files, never the merged track. */
-    private fun kindsFor(choice: SubtitleChoice): List<SubtitleKind> = when (choice) {
-        SubtitleChoice.FA -> listOf(SubtitleKind.FA)
-        SubtitleChoice.EN -> listOf(SubtitleKind.EN)
-        SubtitleChoice.DUAL -> listOf(SubtitleKind.FA, SubtitleKind.EN)
-        SubtitleChoice.FA_DUB -> listOf(SubtitleKind.FA_DUB)
-        SubtitleChoice.OFF -> emptyList()
-    }
-
     /**
      * Starts the downloads [choice] needs, once per stream id and kind. A failure leaves that side blank,
      * retries once by itself after [SUBTITLE_RETRY_MS] and again on the next request (choice change, reopen).
@@ -603,16 +674,20 @@ class PlayerViewModel(
     private fun ensureSubtitles(choice: SubtitleChoice) {
         val s = session ?: return
         val id = streamId
-        for (kind in kindsFor(choice)) {
+        for (kind in subtitleKinds(choice)) {
             val url = s.subtitles.firstOrNull { it.kind == kind }?.url ?: continue
             val key = id to kind
             if (!requestedSubtitles.add(key)) continue
+            setSubtitleError(kind, false)
             viewModelScope.launch {
                 try {
                     val body = api.subtitle(url)
                     val timeline = withContext(parseDispatcher) { SubtitleTimeline(SrtParser.parse(body)) }
-                    timelines[key] = timeline
-                    if (id == streamId) updateCues()
+                    // A download that outlived its episode is dropped (that episode's files were evicted).
+                    if (id == streamId) {
+                        timelines[key] = timeline
+                        updateCues()
+                    }
                 } catch (e: CancellationException) {
                     requestedSubtitles.remove(key)
                     throw e
@@ -622,10 +697,19 @@ class PlayerViewModel(
                     if (autoRetriedSubtitles.add(key)) {
                         delay(SUBTITLE_RETRY_MS)
                         // Only while the same stream is current and its choice still needs this file.
-                        if (id == streamId && kind in kindsFor(_state.value.subtitle)) ensureSubtitles(_state.value.subtitle)
+                        if (id == streamId && kind in subtitleKinds(_state.value.subtitle)) ensureSubtitles(_state.value.subtitle)
+                    } else if (id == streamId) {
+                        setSubtitleError(kind, true)
                     }
                 }
             }
+        }
+    }
+
+    private fun setSubtitleError(kind: SubtitleKind, failed: Boolean) {
+        _state.update {
+            if ((kind in it.subtitleErrors) == failed) it
+            else it.copy(subtitleErrors = if (failed) it.subtitleErrors + kind else it.subtitleErrors - kind)
         }
     }
 
@@ -756,7 +840,7 @@ class PlayerViewModel(
         persistSettings { it.copy(audioBoost = on) }
     }
 
-    /** Every [GAIN_TICK_MS] while playing: follow the session's loudness map. A seek resets nothing. */
+    /** Every [GAIN_TICK_MS] while playing: follow the session's loudness map (a seek jumps to it, see [seekEngine]). */
     private fun boostTick() {
         if (!_state.value.boost) return
         val schedule = gainSchedule ?: return
@@ -831,14 +915,28 @@ class PlayerViewModel(
     /** Snapped to the session's keyframes. */
     fun seekBy(deltaMs: Long) {
         val current = engine.positionMs
-        engine.seekTo(snapped(current + deltaMs, current))
-        updateCues()
+        seekEngine(snapped(current + deltaMs, current))
     }
 
     /** Scrub commit; snapped like [seekBy]. */
     fun seekTo(ms: Long) {
-        engine.seekTo(snapped(ms, engine.positionMs))
+        seekEngine(snapped(ms, engine.positionMs))
+    }
+
+    /**
+     * Seeks and re-judges what depends on the position at once (the tick loops only run while playing):
+     * the up-next window (a paused seek back out of it is not "finished") and the boost gain (no slow
+     * ramp from the old scene's level).
+     */
+    private fun seekEngine(ms: Long) {
+        engine.seekTo(ms)
         updateCues()
+        if (!upNextDue(ms, durationMs())) {
+            upNextReached = false
+            upNextShownMs = 0L
+            if (_state.value.upNext != null) _state.update { it.copy(upNext = null) }
+        }
+        gainSchedule?.let { smoother = GainSmoother(it.targetAt(ms / 1000.0)) }
     }
 
     private fun snapped(targetMs: Long, currentMs: Long): Long {
@@ -846,7 +944,9 @@ class PlayerViewModel(
         // Unknown duration: snapToKeyframe would clamp everything to 0.
         if (durationMs <= 0) return maxOf(0L, targetMs)
         val frames = session?.iframes?.firstOrNull().orEmpty()
-        return (snapToKeyframe(targetMs / 1000.0, currentMs / 1000.0, frames, durationMs / 1000.0) * 1000).roundToLong()
+        val ms = (snapToKeyframe(targetMs / 1000.0, currentMs / 1000.0, frames, durationMs / 1000.0) * 1000).roundToLong()
+        // A seek forward stops short of the end: landing on it would end the episode (exit / next).
+        return if (ms > currentMs) minOf(ms, maxOf(currentMs, durationMs - END_GUARD_MS)) else ms
     }
 
     /** Reopens at the current position once something played, else where the watch store says. */
@@ -857,12 +957,16 @@ class PlayerViewModel(
     /** Back in the foreground: later loads may play again (nothing resumes by itself). */
     fun onStart() {
         foreground = true
+        val returning = stoppedAt != null
         val hiddenMs = stoppedAt?.let { clock() - it } ?: 0L
         stoppedAt = null
-        if (hiddenMs >= STALE_STREAM_AFTER_MS && everReady && session != null && !closed &&
-            _state.value.phase == PlayerPhase.Playing
+        if (returning && _state.value.phase == PlayerPhase.Playing) _resumes.trySend(Unit)
+        // Whatever the phase: an open that finished while hidden (still Loading) holds an old key too.
+        // Not while an open is still in flight (no session yet) or after a failure (Retry reopens).
+        if (hiddenMs >= STALE_STREAM_AFTER_MS && session != null && !closed &&
+            _state.value.phase !is PlayerPhase.Failed
         ) {
-            val at = engine.positionMs
+            val at = if (everReady) engine.positionMs else null
             engine.resume(prepare = false)
             open(streamId, startAt = at, silent = true)
         } else {

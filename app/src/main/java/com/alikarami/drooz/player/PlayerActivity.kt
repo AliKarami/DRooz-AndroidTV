@@ -41,7 +41,15 @@ class PlayerActivity : ComponentActivity() {
             }
         }
         val engine = vm.engine as ExoPlaybackEngine
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        lifecycleScope.launch {
+            vm.keepScreenOn.collect { on ->
+                if (on) {
+                    window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                } else {
+                    window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                }
+            }
+        }
         lifecycleScope.launch { vm.exits.collect { finish() } }
         setContent { DroozTheme { PlayerScreen(vm, engine) } }
         this.vm = vm
@@ -54,8 +62,10 @@ class PlayerActivity : ComponentActivity() {
         vm?.onStart()
     }
 
+    // A configuration change the manifest does not list recreates the activity: the view model and the
+    // playback carry on, so it is not a trip to the background (no pause, no decoder release).
     override fun onStop() {
-        vm?.onStop()
+        if (!isChangingConfigurations) vm?.onStop()
         super.onStop()
     }
 

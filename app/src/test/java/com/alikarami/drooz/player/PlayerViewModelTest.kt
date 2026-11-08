@@ -149,8 +149,8 @@ class PlayerViewModelTest {
     private val engine = FakeEngine()
     private val watch = MemWatch()
 
-    private inner class Env(detail: TitleDetail = series) {
-        val api = FakeApi(detail, listOf(K))
+    private inner class Env(detail: TitleDetail = series, iframes: List<Double> = K) {
+        val api = FakeApi(detail, listOf(iframes))
         val titleInfo = TitleInfoRepository(api, now = { now }, fetchScope = CoroutineScope(dispatcher + SupervisorJob()))
         val exits = mutableListOf<Unit>()
         val prefs = MemPrefs()
@@ -1411,5 +1411,242 @@ class PlayerViewModelTest {
         v.onStop()
         runCurrent()
         assertTrue(watch.map["s1e1"]!!.finished)
+    }
+
+    // ---- QA batch A ----
+
+    @Test fun seekBackOutOfUpNextWindowWhilePausedIsNotSavedAsFinished() = playerTest {
+        // 3-minute episode: the window starts below 90 %, so only the window could mark it finished.
+        val v = started(Env(iframes = emptyList()))
+        engine.durationMs = 180_000
+        engine.positionMs = 141_000
+        advanceTimeBy(TICK_MS); runCurrent()
+        assertNotNull(v.state.value.upNext)
+        v.togglePlay()
+        v.seekBy(-30_000)
+        assertNull(v.state.value.upNext)
+        v.onStop()
+        runCurrent()
+        val e = watch.map["s1e1"]!!
+        assertEquals(111_000L, e.positionMs)
+        assertFalse(e.finished)
+    }
+
+    @Test fun userSeeksStopShortOfTheEnd() = playerTest {
+        val v = started(Env(iframes = emptyList()))
+        engine.durationMs = HOUR
+        engine.positionMs = HOUR - 5_000
+        v.seekBy(10_000)
+        assertEquals(HOUR - END_GUARD_MS, engine.seeks.last())
+        engine.positionMs = 1_000_000
+        v.seekTo(HOUR)
+        assertEquals(HOUR - END_GUARD_MS, engine.seeks.last())
+        // Already inside the guard: forward does not jump back.
+        engine.positionMs = HOUR - 1_000
+        v.seekBy(10_000)
+        assertEquals(HOUR - 1_000, engine.seeks.last())
+        // Backward seeks are untouched.
+        v.seekBy(-10_000)
+        assertEquals(HOUR - 11_000, engine.seeks.last())
+    }
+
+    @Test fun seekJumpsBoostGainToTheNewTarget() = playerTest {
+        val env = Env()
+        env.api.gains = fixtureGains
+        env.api.minGain = 0.64
+        env.api.maxGain = 1.93
+        val v = started(env)
+        engine.durationMs = HOUR
+        advanceTimeBy(GAIN_TICK_MS); runCurrent()
+        assertEquals(1.05f, engine.gains.last(), 1e-6f)
+        v.seekTo(20_000)
+        advanceTimeBy(GAIN_TICK_MS); runCurrent()
+        assertEquals(1.93f, engine.gains.last(), 1e-6f)
+    }
+
+    @Test fun episodeSwitchResetsGainToUnity() = playerTest {
+        val env = Env()
+        env.api.gains = fixtureGains
+        env.api.maxGain = 1.93
+        val v = started(env)
+        advanceTimeBy(GAIN_TICK_MS * 4); runCurrent()
+        assertTrue(engine.gains.last() > 1f)
+        v.playNext()
+        assertEquals(1f, engine.gains.last())
+    }
+
+    private val E403 = EngineEvent.Error(2004, "ERROR_CODE_IO_BAD_HTTP_STATUS", 403)
+    private val ENET = EngineEvent.Error(2001, "ERROR_CODE_IO_NETWORK_CONNECTION_FAILED", null)
+
+    @Test fun errorAfterARecoveryThatPlayedRecoversAgain() = playerTest {
+        val env = Env()
+        val v = started(env)
+        engine.emit(E403)
+        runCurrent()
+        assertEquals(2, env.api.opens.size)
+        engine.emit(EngineEvent.Ready)
+        runCurrent()
+        now += 30_000
+        engine.emit(E403)
+        runCurrent()
+        assertEquals(3, env.api.opens.size)
+        assertEquals(PlayerPhase.Playing, v.state.value.phase)
+    }
+
+    @Test fun quickRecoveriesAreBounded() = playerTest {
+        val env = Env()
+        val v = started(env)
+        repeat(MAX_QUICK_REOPENS + 1) {
+            now += 5_000
+            engine.emit(E403)
+            runCurrent()
+            engine.emit(EngineEvent.Ready)
+            runCurrent()
+        }
+        assertEquals(MAX_QUICK_REOPENS + 2, env.api.opens.size)
+        now += 5_000
+        engine.emit(E403)
+        runCurrent()
+        assertEquals(MAX_QUICK_REOPENS + 2, env.api.opens.size)
+        assertEquals(PlayerPhase.Failed(UiStrings.PLAYBACK_FAILED), v.state.value.phase)
+    }
+
+    @Test fun firstLoadStreamErrorReopensOnceSilently() = playerTest {
+        val env = Env()
+        val v = env.vm(scope = this)
+        runCurrent()
+        engine.emit(E403)
+        runCurrent()
+        assertEquals(2, env.api.opens.size)
+        assertEquals(2, engine.loads.size)
+        assertEquals(PlayerPhase.Loading, v.state.value.phase)
+        engine.emit(E403)
+        runCurrent()
+        assertEquals(2, env.api.opens.size)
+        assertEquals(PlayerPhase.Failed(UiStrings.PLAYBACK_FAILED), v.state.value.phase)
+    }
+
+    @Test fun networkStreamErrorShowsNetworkMessage() = playerTest {
+        val env = Env()
+        val v = env.vm(scope = this)
+        runCurrent()
+        engine.emit(ENET)
+        runCurrent()
+        engine.emit(ENET)
+        runCurrent()
+        assertEquals(PlayerPhase.Failed(UiStrings.PLAY_FAILED_NETWORK), v.state.value.phase)
+    }
+
+    @Test fun failedEngineErrorCancelsAPendingReopen() = playerTest {
+        val env = Env()
+        val v = started(env)
+        env.api.gate = CompletableDeferred()
+        engine.emit(E403)
+        runCurrent()
+        engine.emit(E403) // the reopen has not loaded yet: this one fails
+        env.api.gate!!.complete(Unit)
+        runCurrent()
+        assertEquals(1, engine.loads.size)
+        assertEquals(PlayerPhase.Failed(UiStrings.PLAYBACK_FAILED), v.state.value.phase)
+    }
+
+    @Test fun silentRecoveryIsFlaggedUntilReady() = playerTest {
+        val env = Env()
+        val v = started(env)
+        assertFalse(v.state.value.recovering)
+        env.api.gate = CompletableDeferred()
+        engine.emit(E403)
+        runCurrent()
+        assertTrue(v.state.value.recovering)
+        env.api.gate!!.complete(Unit)
+        runCurrent()
+        assertTrue(v.state.value.recovering)
+        engine.emit(EngineEvent.Ready)
+        runCurrent()
+        assertFalse(v.state.value.recovering)
+    }
+
+    @Test fun backAfterLongAbsenceDuringInitialOpenFetchesAFreshStream() = playerTest {
+        val env = Env()
+        env.api.gate = CompletableDeferred()
+        val v = env.vm(scope = this)
+        runCurrent()
+        v.onStop()
+        env.api.gate!!.complete(Unit)
+        runCurrent()
+        assertEquals(1, engine.loads.size) // loaded paused behind the suspension
+        env.api.gate = null
+        now += STALE_STREAM_AFTER_MS
+        v.onStart()
+        runCurrent()
+        assertEquals(2, env.api.opens.size)
+        assertEquals("https://cdn/master-2.m3u8", engine.loads.last().first)
+        assertFalse(engine.suspended)
+    }
+
+    @Test fun systemPauseIsTheUsersPauseToo() = playerTest {
+        val v = started(Env())
+        engine.durationMs = HOUR
+        engine.positionMs = 300_000
+        engine.isPlaying.value = false // the engine paused itself (audio focus lost / headphones out)
+        engine.emit(EngineEvent.PausedBySystem)
+        runCurrent()
+        assertEquals(300_000L, watch.map["s1e1"]!!.positionMs)
+        val played = engine.played
+        v.togglePlay() // one press plays again (it used to pause the paused player first)
+        assertEquals(played + 1, engine.played)
+    }
+
+    @Test fun returningToThePlayerSignalsTheOverlay() = playerTest {
+        val v = started(Env())
+        val signals = mutableListOf<Unit>()
+        backgroundScope.launch { v.resumes.collect { signals += it } }
+        v.onStart() // the first start (or one without a stop) is not a return
+        runCurrent()
+        assertTrue(signals.isEmpty())
+        v.onStop()
+        v.onStart()
+        runCurrent()
+        assertEquals(1, signals.size)
+    }
+
+    @Test fun screenStaysOnOnlyWhilePlayingOrBuffering() = playerTest {
+        val v = started(Env())
+        backgroundScope.launch { v.keepScreenOn.collect {} }
+        runCurrent()
+        assertTrue(v.keepScreenOn.value)
+        v.togglePlay()
+        runCurrent()
+        assertFalse(v.keepScreenOn.value) // a long pause lets the TV's screensaver start
+        engine.buffering.value = true
+        runCurrent()
+        assertTrue(v.keepScreenOn.value)
+    }
+
+    @Test fun subtitleThatFailsForGoodIsFlaggedUntilARetryWorks() = playerTest {
+        val env = Env().withSubtitles()
+        env.api.subtitleFailure = SiteException.NetworkError(IOException("down"))
+        val v = started(env)
+        assertTrue(v.state.value.subtitleErrors.isEmpty()) // the automatic retry is still pending
+        advanceTimeBy(SUBTITLE_RETRY_MS * 2); runCurrent()
+        assertEquals(setOf(SubtitleKind.FA), v.state.value.subtitleErrors)
+        env.api.subtitleFailure = null
+        v.setSubtitle(SubtitleChoice.FA)
+        runCurrent()
+        assertTrue(v.state.value.subtitleErrors.isEmpty())
+    }
+
+    @Test fun episodeSwitchDropsThePreviousEpisodesSubtitles() = playerTest {
+        val env = Env().withSubtitles()
+        val v = started(env)
+        assertEquals(listOf(FA_URL), env.api.subtitleCalls)
+        v.playEpisode("s1e2")
+        runCurrent()
+        engine.emit(EngineEvent.Ready)
+        runCurrent()
+        v.playEpisode("s1e1")
+        runCurrent()
+        // Evicted on the switch away, so coming back downloads it again.
+        assertEquals(listOf(FA_URL, FA_URL, FA_URL), env.api.subtitleCalls)
     }
 }

@@ -69,4 +69,18 @@ class SubtitlePlacementTest {
         val p = subtitlePlacement(w, h, VideoSize(1920, 1028), line, dual = false, controlsHeightPx = null)
         assertEquals(64, p.primaryBottomPx)
     }
+
+    @Test fun dualFarsiKeepsItsPlaceAboveAShortEnglishCue() {
+        val p = subtitlePlacement(w, h, fullFrame, line, dual = true, controlsHeightPx = null)
+        assertEquals(214, dualPrimaryBottomPx(p, secondaryHeightPx = 2 * line))
+        assertEquals(214, dualPrimaryBottomPx(p, secondaryHeightPx = line))
+    }
+
+    @Test fun dualFarsiRisesAboveATallEnglishCue() {
+        val p = subtitlePlacement(w, h, fullFrame, line, dual = true, controlsHeightPx = null)
+        // 3 lines of English from 64 px up end at 244: Farsi sits half a line above.
+        assertEquals(64 + 3 * line + line / 2, dualPrimaryBottomPx(p, secondaryHeightPx = 3 * line))
+        val bar = subtitlePlacement(w, h, scope, line, dual = true, controlsHeightPx = null)
+        assertEquals(39 + 2 * line + line / 2, dualPrimaryBottomPx(bar, secondaryHeightPx = 2 * line))
+    }
 }

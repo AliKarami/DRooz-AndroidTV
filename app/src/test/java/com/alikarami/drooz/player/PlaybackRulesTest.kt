@@ -21,6 +21,14 @@ class PlaybackRulesTest {
         assertEquals(0.0, snapToKeyframe(-6.0, 4.0, K, 8400.0), 0.0)
         assertEquals(60.0, snapToKeyframe(70.0, 59.0, emptyList(), 60.0), 0.0)
     }
+    // Keyframes further apart than a step: a ±10 s press must still move (it used to round back to 35).
+    private val SPARSE = listOf(0.0, 35.0, 47.0, 60.0)
+    @Test fun snapSparseTenForwardMovesToNextKeyframe() = assertEquals(47.0, snapToKeyframe(45.0, 35.0, SPARSE, 8400.0), 0.0)
+    @Test fun snapSparseTenBackwardMovesToPreviousKeyframe() = assertEquals(0.0, snapToKeyframe(25.0, 35.0, SPARSE, 8400.0), 0.0)
+    @Test fun snapSparseForwardFromBetweenKeyframes() = assertEquals(47.0, snapToKeyframe(45.4, 35.4, SPARSE, 8400.0), 0.0)
+    @Test fun snapSparseBackwardFromBetweenKeyframes() = assertEquals(35.0, snapToKeyframe(37.0, 47.0, SPARSE, 8400.0), 0.0)
+    @Test fun snapForwardPastLastKeyframeStillMovesClamped() =
+        assertEquals(65.0, snapToKeyframe(70.0, 60.0, SPARSE, 65.0), 0.0)
     @Test fun snapWithoutKeyframesReturnsTarget() = assertEquals(123.4, snapToKeyframe(123.4, 113.4, emptyList(), 8400.0), 0.0)
 
     @Test fun resumeOnlyAfterThirtySecondsAndBeforeFinish() {
@@ -60,7 +68,10 @@ class PlaybackRulesTest {
         assertNull(nextEpisode(seasons, "nope"))
     }
 
-    @Test fun scrubAccelerates() = assertEquals(listOf(10_000L, 10_000L, 30_000L, 60_000L), listOf(0, 4, 5, 10).map(::scrubStepMs))
+    @Test fun scrubDistanceGrowsWithHoldTime() = assertEquals(
+        listOf(0L, 10_000L, 20_000L, 50_000L, 80_000L, 200_000L, 320_000L),
+        listOf(-5L, 1_000L, 2_000L, 3_000L, 4_000L, 6_000L, 7_000L).map(::scrubOffsetMs),
+    )
 
     @Test fun qualityOptionsUseSiteLabelsByHeight() = assertEquals(
         listOf(QualityOption(1080, "1080 [ 2.48 GB ]"), QualityOption(720, "720 [ 1.14 GB ]"), QualityOption(480, "480 [ 553 MB ]"), QualityOption(360, "360p")),

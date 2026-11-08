@@ -25,6 +25,8 @@ sealed interface EngineEvent {
     /** First STATE_READY after each [PlaybackEngine.load]. */
     data object Ready : EngineEvent
     data object Ended : EngineEvent
+    /** The engine paused itself: audio focus lost for good, or the audio output went away (headphones out). */
+    data object PausedBySystem : EngineEvent
     data class Error(val code: Int, val codeName: String, val httpStatus: Int?) : EngineEvent
 }
 

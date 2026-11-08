@@ -4,8 +4,23 @@ import com.alikarami.drooz.site.model.Episode
 import com.alikarami.drooz.site.model.Season
 import kotlin.math.abs
 
-/** Port of the site's seekControl plugin: snap a seek target to a keyframe, with edge guards. */
+/**
+ * Port of the site's seekControl plugin: snap a seek target to a keyframe, with edge guards. Unlike the
+ * port, a seek always moves in its direction: with keyframes further apart than the step the port could
+ * round back to the current one, and every press stayed put.
+ */
 fun snapToKeyframe(targetSec: Double, currentSec: Double, iframes: List<Double>, durationSec: Double): Double {
+    val snapped = portSnap(targetSec, currentSec, iframes, durationSec)
+    return when {
+        targetSec > currentSec && snapped <= currentSec ->
+            (iframes.firstOrNull { it > currentSec } ?: targetSec).coerceIn(0.0, durationSec)
+        targetSec < currentSec && snapped >= currentSec ->
+            (iframes.lastOrNull { it < currentSec } ?: targetSec).coerceIn(0.0, durationSec)
+        else -> snapped
+    }
+}
+
+private fun portSnap(targetSec: Double, currentSec: Double, iframes: List<Double>, durationSec: Double): Double {
     if (iframes.isEmpty()) return targetSec.coerceIn(0.0, durationSec)
     var closest = 0
     var best = Double.MAX_VALUE

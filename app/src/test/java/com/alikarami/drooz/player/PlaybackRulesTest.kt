@@ -21,6 +21,14 @@ class PlaybackRulesTest {
         assertEquals(0.0, snapToKeyframe(-6.0, 4.0, K, 8400.0), 0.0)
         assertEquals(60.0, snapToKeyframe(70.0, 59.0, emptyList(), 60.0), 0.0)
     }
+    // Keyframes further apart than a step: a ±10 s press must still move (it used to round back to 35).
+    private val SPARSE = listOf(0.0, 35.0, 47.0, 60.0)
+    @Test fun snapSparseTenForwardMovesToNextKeyframe() = assertEquals(47.0, snapToKeyframe(45.0, 35.0, SPARSE, 8400.0), 0.0)
+    @Test fun snapSparseTenBackwardMovesToPreviousKeyframe() = assertEquals(0.0, snapToKeyframe(25.0, 35.0, SPARSE, 8400.0), 0.0)
+    @Test fun snapSparseForwardFromBetweenKeyframes() = assertEquals(47.0, snapToKeyframe(45.4, 35.4, SPARSE, 8400.0), 0.0)
+    @Test fun snapSparseBackwardFromBetweenKeyframes() = assertEquals(35.0, snapToKeyframe(37.0, 47.0, SPARSE, 8400.0), 0.0)
+    @Test fun snapForwardPastLastKeyframeStillMovesClamped() =
+        assertEquals(65.0, snapToKeyframe(70.0, 60.0, SPARSE, 65.0), 0.0)
     @Test fun snapWithoutKeyframesReturnsTarget() = assertEquals(123.4, snapToKeyframe(123.4, 113.4, emptyList(), 8400.0), 0.0)
 
     @Test fun resumeOnlyAfterThirtySecondsAndBeforeFinish() {

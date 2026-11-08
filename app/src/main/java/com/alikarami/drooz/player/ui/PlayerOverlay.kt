@@ -216,7 +216,11 @@ internal fun PlayerOverlayHost(
             scrubbing = c.scrubMs != null,
             heldMs = n.eventTime - n.downTime,
         )
-        if (action == KeyAction.None) return !down && c.consumedDowns.remove(n.keyCode)
+        if (action == KeyAction.None) {
+            val ownUp = !down && c.consumedDowns.remove(n.keyCode)
+            // A media key's repeat / stray up falling through would reach the media session as a press.
+            return ownUp || isPlayerMediaKey(n.keyCode)
+        }
         perform(action)
         // After perform: an overlay change clears the set, but this press's own KeyUp must still be eaten.
         if (down) c.consumedDowns += n.keyCode else c.consumedDowns -= n.keyCode

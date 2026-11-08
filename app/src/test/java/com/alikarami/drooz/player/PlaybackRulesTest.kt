@@ -51,6 +51,13 @@ class PlaybackRulesTest {
         assertEquals(600_000L, resumePositionMs(600_000, 0, false))
     }
 
+    @Test fun resumeStartRewindsAFewSecondsNeverBelowZero() {
+        assertEquals(597_000L, resumeStartMs(600_000, 3_600_000, false))
+        assertEquals(31_000L - RESUME_REWIND_MS, resumeStartMs(31_000, 3_600_000, false))
+        assertEquals(0L, resumeStartMs(29_000, 3_600_000, false))
+        assertEquals(0L, resumeStartMs(600_000, 3_600_000, true))
+    }
+
     @Test fun finishedAtNinetyPercent() {
         assertTrue(isFinished(3_240_000, 3_600_000))
         assertFalse(isFinished(3_239_000, 3_600_000))

@@ -215,7 +215,45 @@ class PlayerViewModelTest {
         watch.map["s1e1"] = WatchEntry("s1e1", seriesRef.path, 1, 1, 600_000, 3_600_000, 0, false)
         Env().vm(scope = this)
         runCurrent()
-        assertEquals(600_000L, engine.loads.single().second)
+        // A few seconds earlier, so the scene picks up where the viewer left it.
+        assertEquals(597_000L, engine.loads.single().second)
+    }
+
+    @Test fun recoveryAndReturnAfterAResumeKeepTheExactPosition() = playerTest {
+        watch.map["s1e1"] = WatchEntry("s1e1", seriesRef.path, 1, 1, 600_000, 3_600_000, 0, false)
+        val env = Env()
+        val v = env.vm(scope = this)
+        runCurrent()
+        engine.emit(EngineEvent.Ready)
+        runCurrent()
+        engine.positionMs = 640_000
+        engine.emit(EngineEvent.Error(2004, "ERROR_CODE_IO_BAD_HTTP_STATUS", 403))
+        runCurrent()
+        assertEquals(640_000L, engine.loads.last().second)
+        engine.emit(EngineEvent.Ready)
+        runCurrent()
+        engine.positionMs = 700_000
+        v.onStop()
+        v.onStart()
+        runCurrent()
+        assertEquals(700_000L, engine.loads.last().second)
+    }
+
+    @Test fun silentReopenBeforeFirstReadyReloadsTheSameRewoundStart() = playerTest {
+        watch.map["s1e1"] = WatchEntry("s1e1", seriesRef.path, 1, 1, 600_000, 3_600_000, 0, false)
+        val env = Env()
+        env.vm(scope = this)
+        runCurrent()
+        engine.emit(EngineEvent.Error(2004, "ERROR_CODE_IO_BAD_HTTP_STATUS", 403))
+        runCurrent()
+        assertEquals(listOf(597_000L, 597_000L), engine.loads.map { it.second })
+    }
+
+    @Test fun startFromZeroIsNotRewound() = playerTest {
+        watch.map["s1e1"] = WatchEntry("s1e1", seriesRef.path, 1, 1, 20_000, 3_600_000, 0, false)
+        Env().vm(scope = this)
+        runCurrent()
+        assertEquals(0L, engine.loads.single().second)
     }
 
     @Test fun finishedEntryStartsFromZero() = playerTest {
@@ -291,6 +329,23 @@ class PlayerViewModelTest {
         v.onStart()
         assertFalse(engine.suspended)
         assertEquals(played, engine.played) // coming back does not start by itself
+    }
+
+    @Test fun playWhileHiddenIsIgnored() = playerTest {
+        // A media-session command (Assistant, another device) never starts a hidden, suspended player.
+        val v = Env().vm(scope = this)
+        runCurrent()
+        engine.emit(EngineEvent.Ready)
+        runCurrent()
+        v.onStop()
+        val played = engine.played
+        v.play()
+        v.togglePlay()
+        assertEquals(played, engine.played)
+        assertFalse(engine.isPlaying.value)
+        v.onStart()
+        runCurrent()
+        assertEquals(played, engine.played) // and the return reopen stays paused
     }
 
     @Test fun nothingSavedBeforePlaybackStarted() = playerTest {

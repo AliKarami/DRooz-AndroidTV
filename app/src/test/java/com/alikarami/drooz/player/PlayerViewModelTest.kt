@@ -149,8 +149,8 @@ class PlayerViewModelTest {
     private val engine = FakeEngine()
     private val watch = MemWatch()
 
-    private inner class Env(detail: TitleDetail = series) {
-        val api = FakeApi(detail, listOf(K))
+    private inner class Env(detail: TitleDetail = series, iframes: List<Double> = K) {
+        val api = FakeApi(detail, listOf(iframes))
         val titleInfo = TitleInfoRepository(api, now = { now }, fetchScope = CoroutineScope(dispatcher + SupervisorJob()))
         val exits = mutableListOf<Unit>()
         val prefs = MemPrefs()
@@ -1411,5 +1411,67 @@ class PlayerViewModelTest {
         v.onStop()
         runCurrent()
         assertTrue(watch.map["s1e1"]!!.finished)
+    }
+
+    // ---- QA batch A ----
+
+    @Test fun seekBackOutOfUpNextWindowWhilePausedIsNotSavedAsFinished() = playerTest {
+        // 3-minute episode: the window starts below 90 %, so only the window could mark it finished.
+        val v = started(Env(iframes = emptyList()))
+        engine.durationMs = 180_000
+        engine.positionMs = 141_000
+        advanceTimeBy(TICK_MS); runCurrent()
+        assertNotNull(v.state.value.upNext)
+        v.togglePlay()
+        v.seekBy(-30_000)
+        assertNull(v.state.value.upNext)
+        v.onStop()
+        runCurrent()
+        val e = watch.map["s1e1"]!!
+        assertEquals(111_000L, e.positionMs)
+        assertFalse(e.finished)
+    }
+
+    @Test fun userSeeksStopShortOfTheEnd() = playerTest {
+        val v = started(Env(iframes = emptyList()))
+        engine.durationMs = HOUR
+        engine.positionMs = HOUR - 5_000
+        v.seekBy(10_000)
+        assertEquals(HOUR - END_GUARD_MS, engine.seeks.last())
+        engine.positionMs = 1_000_000
+        v.seekTo(HOUR)
+        assertEquals(HOUR - END_GUARD_MS, engine.seeks.last())
+        // Already inside the guard: forward does not jump back.
+        engine.positionMs = HOUR - 1_000
+        v.seekBy(10_000)
+        assertEquals(HOUR - 1_000, engine.seeks.last())
+        // Backward seeks are untouched.
+        v.seekBy(-10_000)
+        assertEquals(HOUR - 11_000, engine.seeks.last())
+    }
+
+    @Test fun seekJumpsBoostGainToTheNewTarget() = playerTest {
+        val env = Env()
+        env.api.gains = fixtureGains
+        env.api.minGain = 0.64
+        env.api.maxGain = 1.93
+        val v = started(env)
+        engine.durationMs = HOUR
+        advanceTimeBy(GAIN_TICK_MS); runCurrent()
+        assertEquals(1.05f, engine.gains.last(), 1e-6f)
+        v.seekTo(20_000)
+        advanceTimeBy(GAIN_TICK_MS); runCurrent()
+        assertEquals(1.93f, engine.gains.last(), 1e-6f)
+    }
+
+    @Test fun episodeSwitchResetsGainToUnity() = playerTest {
+        val env = Env()
+        env.api.gains = fixtureGains
+        env.api.maxGain = 1.93
+        val v = started(env)
+        advanceTimeBy(GAIN_TICK_MS * 4); runCurrent()
+        assertTrue(engine.gains.last() > 1f)
+        v.playNext()
+        assertEquals(1f, engine.gains.last())
     }
 }

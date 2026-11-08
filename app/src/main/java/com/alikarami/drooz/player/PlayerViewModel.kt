@@ -64,6 +64,8 @@ const val STREAM_HEIGHT = 1080
 const val REOPEN_MIN_INTERVAL_MS = 60_000L
 const val ERROR_REPORT_MIN_INTERVAL_MS = 60_000L
 const val SUBTITLE_STEP_MS = 500L
+/** A user seek forward lands at most this far before the end (never on the end itself). */
+const val END_GUARD_MS = 1_500L
 /** A failed subtitle download is retried once automatically after this delay (the site drops requests). */
 const val SUBTITLE_RETRY_MS = 5_000L
 val SPEEDS = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f)
@@ -273,6 +275,8 @@ class PlayerViewModel(
             knownDurationMs = 0L
             gainSchedule = null
             smoother = GainSmoother()
+            // The engine keeps the last gain until the next boost tick: the new episode starts at unity.
+            engine.setGain(1f)
             _state.update {
                 it.copy(subtitleOffsetMs = 0, availableSubtitles = emptyList(), upNext = null, hasNext = nextEpisode(seasons, id) != null)
             }
@@ -756,7 +760,7 @@ class PlayerViewModel(
         persistSettings { it.copy(audioBoost = on) }
     }
 
-    /** Every [GAIN_TICK_MS] while playing: follow the session's loudness map. A seek resets nothing. */
+    /** Every [GAIN_TICK_MS] while playing: follow the session's loudness map (a seek jumps to it, see [seekEngine]). */
     private fun boostTick() {
         if (!_state.value.boost) return
         val schedule = gainSchedule ?: return
@@ -831,14 +835,28 @@ class PlayerViewModel(
     /** Snapped to the session's keyframes. */
     fun seekBy(deltaMs: Long) {
         val current = engine.positionMs
-        engine.seekTo(snapped(current + deltaMs, current))
-        updateCues()
+        seekEngine(snapped(current + deltaMs, current))
     }
 
     /** Scrub commit; snapped like [seekBy]. */
     fun seekTo(ms: Long) {
-        engine.seekTo(snapped(ms, engine.positionMs))
+        seekEngine(snapped(ms, engine.positionMs))
+    }
+
+    /**
+     * Seeks and re-judges what depends on the position at once (the tick loops only run while playing):
+     * the up-next window (a paused seek back out of it is not "finished") and the boost gain (no slow
+     * ramp from the old scene's level).
+     */
+    private fun seekEngine(ms: Long) {
+        engine.seekTo(ms)
         updateCues()
+        if (!upNextDue(ms, durationMs())) {
+            upNextReached = false
+            upNextShownMs = 0L
+            if (_state.value.upNext != null) _state.update { it.copy(upNext = null) }
+        }
+        gainSchedule?.let { smoother = GainSmoother(it.targetAt(ms / 1000.0)) }
     }
 
     private fun snapped(targetMs: Long, currentMs: Long): Long {
@@ -846,7 +864,9 @@ class PlayerViewModel(
         // Unknown duration: snapToKeyframe would clamp everything to 0.
         if (durationMs <= 0) return maxOf(0L, targetMs)
         val frames = session?.iframes?.firstOrNull().orEmpty()
-        return (snapToKeyframe(targetMs / 1000.0, currentMs / 1000.0, frames, durationMs / 1000.0) * 1000).roundToLong()
+        val ms = (snapToKeyframe(targetMs / 1000.0, currentMs / 1000.0, frames, durationMs / 1000.0) * 1000).roundToLong()
+        // A seek forward stops short of the end: landing on it would end the episode (exit / next).
+        return if (ms > currentMs) minOf(ms, maxOf(currentMs, durationMs - END_GUARD_MS)) else ms
     }
 
     /** Reopens at the current position once something played, else where the watch store says. */

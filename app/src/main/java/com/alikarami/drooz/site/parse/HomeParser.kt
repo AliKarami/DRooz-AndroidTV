@@ -1,6 +1,7 @@
 package com.alikarami.drooz.site.parse
 
 import com.alikarami.drooz.site.ImageUrls
+import com.alikarami.drooz.site.SiteException
 import com.alikarami.drooz.site.model.FeaturedItem
 import com.alikarami.drooz.site.model.HomePage
 import com.alikarami.drooz.site.model.HomeSection
@@ -41,6 +42,8 @@ object HomeParser {
 
         val newFilms = doc.select(".postMeta").mapNotNull(CardParser::parse).distinctBy { it.ref }
         if (newFilms.isNotEmpty()) sections += HomeSection(NEW_FILMS_TITLE, NEW_FILMS_PATH, newFilms)
+        // The home always has content: nothing recognised means the markup changed (never cache that as a page).
+        if (featured.isEmpty() && recent.isEmpty() && sections.isEmpty()) throw SiteException.ParseError("home")
         return HomePage(featured, recent, sections)
     }
 

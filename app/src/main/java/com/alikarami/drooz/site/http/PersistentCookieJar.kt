@@ -15,11 +15,13 @@ import java.io.IOException
 /**
  * Cookie jar persisted to [file] (one JSON object per line) so the site session survives restarts.
  * Adds the `scr=1` cookie to every request for [siteHost]; `scr` itself is never stored.
+ * The synced [write] runs outside the jar's monitor (every request needs it) and only when the content changed.
  */
 class PersistentCookieJar(
     private val file: File,
     private val siteHost: String = SiteConfig.HOST,
     private val now: () -> Long = System::currentTimeMillis,
+    private val write: (File, ByteArray) -> Unit = ::writeAtomically,
 ) : CookieJar {
 
     @Serializable
@@ -30,6 +32,11 @@ class PersistentCookieJar(
 
     private val json = Json { ignoreUnknownKeys = true }
     private val cookies = mutableListOf<Cookie>()
+    /** Bumped per snapshot under the jar's monitor: a writer never replaces a newer snapshot with an older one. */
+    private var snapshots = 0L
+    private val writeLock = Any()
+    private var written = 0L
+    private var lastText: String? = null
 
     /**
      * Built in Application.onCreate, so nothing here may throw: an unreadable file starts an empty jar and
@@ -55,15 +62,17 @@ class PersistentCookieJar(
         dropExpired()
     }
 
-    @Synchronized
     override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
-        for (cookie in cookies) {
-            if (cookie.name == SiteConfig.SCR_COOKIE) continue
-            this.cookies.removeAll { it.name == cookie.name && it.domain == cookie.domain && it.path == cookie.path }
-            this.cookies += cookie
+        val snapshot = synchronized(this) {
+            for (cookie in cookies) {
+                if (cookie.name == SiteConfig.SCR_COOKIE) continue
+                this.cookies.removeAll { it.name == cookie.name && it.domain == cookie.domain && it.path == cookie.path }
+                this.cookies += cookie
+            }
+            dropExpired()
+            snapshot()
         }
-        dropExpired()
-        persist()
+        persist(snapshot)
     }
 
     @Synchronized
@@ -83,10 +92,12 @@ class PersistentCookieJar(
     }
 
     /** Removes all cookies except those named in [keep] (logout keeps the device id `sf`). */
-    @Synchronized
     fun clear(keep: Set<String> = emptySet()) {
-        cookies.retainAll { it.name in keep }
-        persist()
+        val snapshot = synchronized(this) {
+            cookies.retainAll { it.name in keep }
+            snapshot()
+        }
+        persist(snapshot)
     }
 
     private fun dropExpired() {
@@ -94,16 +105,28 @@ class PersistentCookieJar(
         cookies.removeAll { it.expiresAt <= t }
     }
 
-    /** Atomic; a disk error keeps the cookies in memory and must not fail the HTTP call that set them. */
-    private fun persist() {
-        val text = cookies.joinToString("\n") { c ->
-            json.encodeToString(Stored.serializer(),
-                Stored(c.name, c.value, c.domain, c.path, c.expiresAt, c.secure, c.httpOnly, c.hostOnly))
-        }
-        try {
-            writeAtomically(file, text.toByteArray(Charsets.UTF_8))
-        } catch (e: IOException) {
-            if (BuildConfig.DEBUG) Log.w(TAG, "cookie persist failed: $e")
+    /** Under the jar's monitor. */
+    private fun snapshot(): Pair<Long, String> = ++snapshots to cookies.joinToString("\n") { c ->
+        json.encodeToString(Stored.serializer(),
+            Stored(c.name, c.value, c.domain, c.path, c.expiresAt, c.secure, c.httpOnly, c.hostOnly))
+    }
+
+    /**
+     * Atomic; skipped when a newer snapshot was written already or the content is unchanged. A disk error
+     * keeps the cookies in memory and must not fail the HTTP call that set them.
+     */
+    private fun persist(snapshot: Pair<Long, String>) {
+        val (n, text) = snapshot
+        synchronized(writeLock) {
+            if (n <= written) return
+            written = n
+            if (text == lastText) return
+            try {
+                write(file, text.toByteArray(Charsets.UTF_8))
+                lastText = text
+            } catch (e: IOException) {
+                if (BuildConfig.DEBUG) Log.w(TAG, "cookie persist failed: $e")
+            }
         }
     }
 

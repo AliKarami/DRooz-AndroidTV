@@ -2,6 +2,8 @@ package com.alikarami.drooz.site.http
 
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
+import okhttp3.Cookie
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.junit.After
@@ -12,6 +14,9 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import kotlin.concurrent.thread
 
 class PersistentCookieJarTest {
     @get:Rule val tmp = TemporaryFolder()
@@ -114,5 +119,40 @@ class PersistentCookieJarTest {
         call(jar, MockResponse.Builder().addHeader("Set-Cookie", "cf=s1; Max-Age=1000; path=/").build())
         assertTrue(file.exists())
         assertTrue(!tmp.root.resolve("cookies.jsonl.tmp").exists())
+    }
+
+    private val url = "https://example.test/".toHttpUrl()
+    private fun cookie(name: String, value: String) = Cookie.Builder().name(name).value(value)
+        .hostOnlyDomain("example.test").path("/").expiresAt(Long.MAX_VALUE).build()
+
+    // Most responses re-send the same cookies: a synced write for each would be wasted disk time (M1).
+    @Test
+    fun unchangedCookiesAreNotRewritten() {
+        var writes = 0
+        val jar = PersistentCookieJar(tmp.root.resolve("c.jsonl"), siteHost = "example.test") { _, _ -> writes++ }
+        jar.saveFromResponse(url, listOf(cookie("cf", "s1")))
+        jar.saveFromResponse(url, listOf(cookie("cf", "s1")))
+        assertEquals(1, writes)
+        jar.saveFromResponse(url, listOf(cookie("cf", "s2")))
+        assertEquals(2, writes)
+    }
+
+    // The synced write must not hold the monitor every request needs for its cookies (M1).
+    @Test
+    fun persistDoesNotBlockRequests() {
+        val writing = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val jar = PersistentCookieJar(tmp.root.resolve("c.jsonl"), siteHost = "example.test") { _, _ ->
+            writing.countDown()
+            release.await(5, TimeUnit.SECONDS)
+        }
+        val saver = thread { jar.saveFromResponse(url, listOf(cookie("cf", "s1"))) }
+        assertTrue(writing.await(5, TimeUnit.SECONDS))
+        val loaded = CountDownLatch(1)
+        thread { jar.loadForRequest(url); loaded.countDown() }
+        val unblocked = loaded.await(2, TimeUnit.SECONDS)
+        release.countDown()
+        saver.join()
+        assertTrue(unblocked)
     }
 }

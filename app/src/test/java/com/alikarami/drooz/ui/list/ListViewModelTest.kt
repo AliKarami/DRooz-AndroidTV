@@ -219,6 +219,30 @@ class ListViewModelTest {
         assertEquals(2, api.listCalls.size)                  // seen once
     }
 
+    // Removing a title deep in the list keeps the user's place: every loaded page is reloaded, focus keeps
+    // its index and the hero moves to the card now there (M3).
+    @Test fun watchlistReloadKeepsLoadedPagesAndRefocusesHero() = runTest(dispatcher) {
+        var ids = (0L until 60L).toList()
+        val api = FakeApi { _, p ->
+            ListPage(ids.drop((p - 1) * 20).take(20).map { card(it) }, p, (ids.size + 19) / 20)
+        }
+        val (vm, repo) = watchlistVm(api); advanceUntilIdle()
+        vm.onFocusIndex(10); advanceUntilIdle()
+        vm.onFocusIndex(30); advanceUntilIdle()
+        vm.onFocusIndex(50); advanceUntilIdle()
+        assertEquals(60, vm.uiState.value.items.size)
+        assertEquals(ref(50), vm.uiState.value.hero?.ref)
+
+        ids = ids - 50L
+        repo.watchlistChanged()
+        api.listCalls.clear()
+        vm.onResume(); advanceUntilIdle()
+        assertEquals(listOf(1, 2, 3), api.listCalls.map { it.second })
+        assertEquals(59, vm.uiState.value.items.size)
+        assertEquals(50, vm.focusedIndex)
+        assertEquals(ref(51), vm.uiState.value.hero?.ref)
+    }
+
     @Test fun watchlistReloadFailureKeepsGrid() = runTest(dispatcher) {
         var fail = false
         val api = FakeApi { _, p -> if (fail) error("net") else ListPage(listOf(card(1), card(2)), p, 1) }

@@ -73,8 +73,8 @@ class ListViewModel(
     }
 
     /**
-     * The grid is showing again (Back from a title): after a watchlist toggle, page 1 replaces the grid
-     * (no skeleton; a failure keeps it). Focus stays at its index, which is now the card in its place.
+     * The grid is showing again (Back from a title): after a watchlist toggle, the loaded pages replace the
+     * grid (no skeleton; a failure keeps it). Focus stays at its index and the hero moves to the card now there.
      */
     fun onResume() {
         if (!reloadOnWatchlistChange) return
@@ -86,20 +86,31 @@ class ListViewModel(
             return
         }
         job?.cancel()
+        val pages = loadedPage
         job = viewModelScope.safeLaunch(onError = { /* keep the grid */ }) {
-            val page = api.list(path, 1)
+            val loaded = ArrayList<TitleCard>()
+            var n = 0
+            var last: Int
+            do {
+                val page = api.list(path, ++n)
+                loaded += page.items
+                last = maxOf(page.lastPage, n)
+            } while (n < pages && n < last)
             cards.clear()
             seen.clear()
-            cards += page.items.filter { seen.add(it.ref.kind to it.ref.postId) }
-            loadedPage = 1
-            lastPage = maxOf(page.lastPage, 1)
+            cards += loaded.filter { seen.add(it.ref.kind to it.ref.postId) }
+            loadedPage = n
+            lastPage = last
             focusedIndex = focusedIndex.coerceAtMost(maxOf(cards.lastIndex, 0))
             _state.update {
                 it.copy(
                     items = cards.map { c -> c.toPosterCardUi() }, loading = false, loadingMore = false,
                     error = null, pageError = false, endReached = loadedPage >= lastPage,
+                    hero = if (cards.isEmpty()) null else it.hero,
                 )
             }
+            val focused = cards.getOrNull(focusedIndex)
+            if (focused != null) heroes.focus(focused.ref, focused, focused.posterHash) else heroes.clear()
         }
     }
 

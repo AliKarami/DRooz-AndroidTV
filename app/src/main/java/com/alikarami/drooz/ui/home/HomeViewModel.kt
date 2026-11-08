@@ -227,6 +227,8 @@ class HomeViewModel(
                 if (recentServer == null && watchStore != null) recentKey?.let { showRecent(it, emptyList(), refetch = false) }
             }
         }) {
+            // A session that ends while the page downloads must not get it back (AppViewModel clears the cache).
+            val gen = cache?.generation() ?: 0
             val page = try {
                 api.home()
             } catch (e: CancellationException) {
@@ -239,10 +241,10 @@ class HomeViewModel(
             // The fresh page wins over a stored one still being read.
             staleJob?.cancel()
             staleShown = false
-            cache?.put(page)
+            cache?.put(page, gen)
             loadedAt = now()
             applyHome(page)
-            cache?.persist(page)
+            cache?.persist(page, gen)
         }
     }
 

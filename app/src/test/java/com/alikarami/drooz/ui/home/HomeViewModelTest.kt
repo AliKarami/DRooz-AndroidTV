@@ -829,6 +829,20 @@ class HomeViewModelTest {
         assertEquals(listOf("Brand New"), vm.uiState.value.rows[0].items.map { it.title })
     }
 
+    // The session ended while home's request was in flight: its page must not come back afterwards.
+    @Test fun pageFetchedBeforeClear_isNotCachedAfterIt() = runTest(dispatcher) {
+        val cache = diskCache()
+        val api = FakeApi(home())
+        val gate = CompletableDeferred<Unit>()
+        api.onHome = { gate.await(); home() }
+        HomeViewModel(api, TitleInfoRepository(api, fetchScope = backgroundScope), homeCache = cache)
+        runCurrent()
+        cache.clear()                                   // AppViewModel.forgetSession
+        gate.complete(Unit); advanceUntilIdle()
+        assertNull(cache.fresh())
+        assertFalse(stored.exists())
+    }
+
     @Test fun coldStart_withoutStoredPage_showsSkeletonThenError() = runTest(dispatcher) {
         val api = FakeApi(home())
         val gate = CompletableDeferred<Unit>()

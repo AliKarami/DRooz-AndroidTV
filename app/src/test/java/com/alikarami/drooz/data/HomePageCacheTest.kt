@@ -108,6 +108,23 @@ class HomePageCacheTest {
         assertFalse(file.exists())
     }
 
+    // A page fetched under the old session (a request begun before clear) neither returns to memory nor to disk.
+    @Test fun writesBegunBeforeClearAreDropped() = runTest {
+        val c = disk()
+        val gen = c.generation()
+        c.clear()
+        c.put(full, gen)
+        c.persist(full, gen)
+        testScheduler.advanceUntilIdle()
+        assertNull(c.fresh())
+        assertFalse(file.exists())
+        // The new session's writes land.
+        c.put(full, c.generation())
+        c.persist(full, c.generation())
+        assertEquals(full, c.fresh())
+        assertEquals(full, disk().stored())
+    }
+
     @Test fun missingOrCorruptFileIsNoPage() = runTest {
         assertNull(disk().stored())
         file.writeText("{not json")

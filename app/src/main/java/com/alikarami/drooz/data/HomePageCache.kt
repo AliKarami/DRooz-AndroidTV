@@ -78,15 +78,22 @@ class HomePageCache(
         }
     }
 
-    @Synchronized fun put(page: HomePage) {
+    /** Which session's pages [put] and [persist] take: read it when the request for one begins. */
+    fun generation(): Int = generation.get()
+
+    /** [gen]: [generation] when the page was asked for; a [clear] since then drops it. */
+    @Synchronized fun put(page: HomePage, gen: Int = generation()) {
+        if (gen != generation.get()) return
         this.page = page
         at = clock()
     }
 
-    /** Writes [page] for the next cold start (atomically: a kill leaves the old copy or the new one). Never throws. */
-    suspend fun persist(page: HomePage) {
+    /**
+     * Writes [page] for the next cold start (atomically: a kill leaves the old copy or the new one), unless
+     * cleared since [gen]. Never throws.
+     */
+    suspend fun persist(page: HomePage, gen: Int = generation()) {
         val f = file ?: return
-        val gen = generation.get()
         withContext(io) {
             val bytes = json.encodeToString(StoredHome.serializer(), page.toStored(wallClock())).toByteArray(Charsets.UTF_8)
             synchronized(diskLock) {

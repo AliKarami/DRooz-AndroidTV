@@ -16,6 +16,7 @@ import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -92,6 +93,18 @@ class HomePageCacheTest {
         c.clear()
         assertNull(c.stored())
         assertNull(disk().stored())
+        assertFalse(file.exists())
+    }
+
+    // clear() runs on main (session lost, login): the delete goes to io, never waiting there on a write's fsync.
+    @Test fun clearDeletesOnIo() = runTest {
+        val c = disk()
+        c.persist(full)
+        c.put(full)
+        c.clear()
+        assertNull(c.fresh())                           // memory at once
+        assertTrue(file.exists())                       // the file on io, after
+        testScheduler.advanceUntilIdle()
         assertFalse(file.exists())
     }
 

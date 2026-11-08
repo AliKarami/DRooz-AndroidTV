@@ -12,12 +12,16 @@ import com.alikarami.drooz.site.model.TitleCard
 import com.alikarami.drooz.site.model.TitleRef
 import com.alikarami.drooz.site.writeAtomically
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.io.IOException
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * The last home page fetched in this process. A home recreated soon after (a warm start: Back out,
@@ -37,6 +41,8 @@ class HomePageCache(
     /** The stored copy's age is wall time: elapsedRealtime restarts at every boot. */
     private val wallClock: () -> Long = System::currentTimeMillis,
     private val io: CoroutineDispatcher = Dispatchers.IO,
+    /** Runs [clear]'s delete; app-wide, like the cache. */
+    private val scope: CoroutineScope = CoroutineScope(SupervisorJob()),
     private val clock: () -> Long = SystemClock::elapsedRealtime,
 ) {
     companion object {
@@ -47,20 +53,28 @@ class HomePageCache(
     private var page: HomePage? = null
     private var at = 0L
 
-    /** Guards the file and [generation]; never held across a suspension. */
+    /** Guards the file; taken on [io] only (a write holds it across its fsync), never across a suspension. */
     private val diskLock = Any()
     /** Bumped by [clear]: a write begun before it must not bring the old session's page back. */
-    private var generation = 0
+    private val generation = AtomicInteger()
     private val json = Json { ignoreUnknownKeys = true }
 
     @Synchronized fun fresh(): HomePage? = page?.takeIf { clock() - at < ttlMs }
 
-    /** Forgets the page, in memory and on disk. */
+    /**
+     * Forgets the page: in memory at once, on disk on [io] (main never waits on a write's fsync). A write
+     * already under way finishes first and is then deleted; one not yet begun is dropped.
+     */
     fun clear() {
-        synchronized(this) { page = null }
-        synchronized(diskLock) {
-            generation++
-            file?.let { if (it.exists() && !it.delete() && BuildConfig.DEBUG) Log.w(TAG, "could not delete the stored page") }
+        synchronized(this) {
+            page = null
+            generation.incrementAndGet()
+        }
+        val f = file ?: return
+        scope.launch(io) {
+            synchronized(diskLock) {
+                if (f.exists() && !f.delete() && BuildConfig.DEBUG) Log.w(TAG, "could not delete the stored page")
+            }
         }
     }
 
@@ -72,11 +86,11 @@ class HomePageCache(
     /** Writes [page] for the next cold start (atomically: a kill leaves the old copy or the new one). Never throws. */
     suspend fun persist(page: HomePage) {
         val f = file ?: return
-        val gen = synchronized(diskLock) { generation }
-        val bytes = json.encodeToString(StoredHome.serializer(), page.toStored(wallClock())).toByteArray(Charsets.UTF_8)
+        val gen = generation.get()
         withContext(io) {
+            val bytes = json.encodeToString(StoredHome.serializer(), page.toStored(wallClock())).toByteArray(Charsets.UTF_8)
             synchronized(diskLock) {
-                if (gen != generation) return@withContext
+                if (gen != generation.get()) return@withContext
                 try {
                     writeAtomically(f, bytes)
                 } catch (e: IOException) {

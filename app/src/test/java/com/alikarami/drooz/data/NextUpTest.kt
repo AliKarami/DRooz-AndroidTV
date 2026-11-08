@@ -65,6 +65,38 @@ class NextUpTest {
     }
 
     @Test
+    fun laterEpisodesFinishedAfterPartial_moveOnPastIt() {
+        val e9 = ep(1, 9)
+        val eps = (1..8).map { ep(1, it, played = it < 5) }
+        val entries = mapOf(
+            "s1e5" to entry("s1e5", 300_000, 3_600_000, 1),
+            "s1e6" to entry("s1e6", 0, 3_600_000, 2, finished = true),
+            "s1e7" to entry("s1e7", 0, 3_600_000, 3, finished = true),
+            "s1e8" to entry("s1e8", 0, 3_600_000, 4, finished = true),
+        )
+        assertEquals(NextUp.Next(e9), nextUp(season1(*eps.toTypedArray(), e9), entries))
+        assertEquals(NextUp.Again(eps[0]), nextUp(season1(*eps.toTypedArray()), entries))
+    }
+
+    @Test
+    fun laterEpisodePlayedOnServer_supersedesLocalPartial() {
+        val e3 = ep(1, 3)
+        val entries = mapOf("s1e1" to entry("s1e1", 600_000, 2_400_000, 1))
+        assertEquals(NextUp.Next(e3), nextUp(season1(ep(1, 1), ep(1, 2, true), e3), entries))
+    }
+
+    @Test
+    fun rewatchingEarlierEpisodeAfterLaterOnes_resumesIt() {
+        val e1 = ep(1, 1)
+        val entries = mapOf(
+            "s1e1" to entry("s1e1", 600_000, 2_400_000, 9),
+            "s1e2" to entry("s1e2", 0, 2_400_000, 5, finished = true),
+        )
+        val r = nextUp(season1(e1, ep(1, 2), ep(1, 3)), entries) as NextUp.Resume
+        assertEquals(e1, r.episode)
+    }
+
+    @Test
     fun underThirtySeconds_isNotResumable() {
         val e1 = ep(1, 1)
         val en = entry("s1e1", 20_000, 2_400_000, 1)

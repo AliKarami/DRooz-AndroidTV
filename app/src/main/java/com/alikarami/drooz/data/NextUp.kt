@@ -31,7 +31,7 @@ sealed interface NextUp {
     /** Nothing watched yet: the first episode. */
     data class Start(override val episode: Episode) : NextUp
 
-    /** An episode is part-watched locally (the most recently updated one wins). */
+    /** An episode is part-watched locally and nothing later was watched since (the most recently updated wins). */
     data class Resume(override val episode: Episode, val state: EpisodeState) : NextUp
 
     /** The episode after the last watched one, across seasons. */
@@ -47,9 +47,18 @@ fun nextUp(seasons: List<Season>, entries: Map<String, WatchEntry>): NextUp? {
     val first = ordered.firstOrNull() ?: return null
     val states = ordered.map { it to episodeState(it, entries[it.streamId]) }
 
-    states.filter { it.second.progress != null }
-        .maxByOrNull { entries.getValue(it.first.streamId).updatedAt }
-        ?.let { (ep, state) -> return NextUp.Resume(ep, state) }
+    // A partial episode is left behind once a later one is watched after it; a server-played episode has no
+    // time, so it counts as later. Going back to an earlier episode makes it the newest entry again.
+    fun supersededAfter(i: Int): Boolean {
+        val at = entries.getValue(ordered[i].streamId).updatedAt
+        return states.drop(i + 1).any { (ep, state) ->
+            state.watched && (entries[ep.streamId]?.updatedAt ?: Long.MAX_VALUE) > at
+        }
+    }
+    states.withIndex()
+        .filter { (i, s) -> s.second.progress != null && !supersededAfter(i) }
+        .maxByOrNull { entries.getValue(it.value.first.streamId).updatedAt }
+        ?.let { (_, s) -> return NextUp.Resume(s.first, s.second) }
 
     val lastWatched = states.indexOfLast { it.second.watched }
     if (lastWatched < 0) return NextUp.Start(first)

@@ -51,6 +51,15 @@ data class HomePage(val featured: List<FeaturedItem>, val recentlyStreamed: List
 
 data class ListPage(val items: List<TitleCard>, val page: Int, val lastPage: Int)
 
+/** Which rail page a site category belongs on. */
+enum class CategoryKind { FILM, SERIES, BOTH }
+
+/** A listing from the site's navigation menu: [path] is a list path ListParser handles, [label] the menu text. */
+data class SiteCategory(val label: String, val path: String, val kind: CategoryKind)
+
+/** A list page plus the navigation menu's categories found in the same HTML (empty when the menu isn't recognised). */
+data class CategorizedListPage(val page: ListPage, val categories: List<SiteCategory>)
+
 data class VideoVariant(val id: String, val width: Int, val height: Int, val size: String)
 
 /** [lang] is "original" or "dubbed-fa". */

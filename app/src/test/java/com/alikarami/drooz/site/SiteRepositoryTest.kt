@@ -118,6 +118,23 @@ class SiteRepositoryTest {
         assertEquals("/archive/category/anime/2/?type=film", server.takeRequest().target)
     }
 
+    @Test fun listWithCategoriesReadsPageAndMenuFromOneRequest() = runTest {
+        server.enqueue(page("list_new_films.html"))
+        val r = repo.listWithCategories("/archive/series/")
+        assertEquals("/archive/series/", server.takeRequest().target)
+        assertEquals(1, server.requestCount)
+        assertEquals(8, r.page.items.size)
+        assertEquals(478, r.page.lastPage)
+        assertTrue(r.categories.any { it.path == "/archive/category/dubbed-series/" })
+    }
+
+    @Test fun listWithCategoriesWithoutMenuStillGivesThePage() = runTest {
+        server.enqueue(ok("<html><body></body></html>"))
+        val r = repo.listWithCategories("/archive/series/")
+        assertEquals(0, r.page.items.size)
+        assertEquals(emptyList<Any>(), r.categories)
+    }
+
     @Test fun searchEncodesQuery() = runTest {
         server.enqueue(page("search_pluribus.html"))
         assertEquals(1, repo.search("plur ibus").size)

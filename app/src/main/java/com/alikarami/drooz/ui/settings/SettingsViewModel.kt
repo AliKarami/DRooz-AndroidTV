@@ -127,6 +127,7 @@ class SettingsViewModel(
         local.update { it.copy(confirmLogout = false, busy = true) }
         viewModelScope.launch {
             safely { auth.logout() }
+            safely { cache.clearRecentSearches() }
             local.update { it.copy(busy = false) }
             _events.send(SettingsEvent.LoggedOut)
         }

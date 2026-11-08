@@ -86,4 +86,6 @@
     <string name="cw_menu_details">جزئیات</string>
     <string name="cw_menu_remove">حذف از ادامه تماشا</string>
     <string name="cw_menu_hint">برای گزینه‌های بیشتر OK را نگه دارید</string>
+    <string name="search_recent">جستجوهای اخیر</string>
+    <string name="search_recent_clear">پاک کردن</string>
 </resources>

@@ -73,7 +73,13 @@ class SettingsViewModelTest {
 
     private class FakeCache : CacheCleaner {
         var clears = 0
+        var recentClears = 0
+        var failRecent = false
         override suspend fun clear() { clears++ }
+        override suspend fun clearRecentSearches() {
+            recentClears++
+            if (failRecent) throw IOException("disk")
+        }
     }
 
     private class Rig(
@@ -218,6 +224,18 @@ class SettingsViewModelTest {
 
         vm.requestLogout(); vm.confirmLogout(); runCurrent()
         assertEquals(1, rig.auth.logouts)
+        assertEquals(listOf<SettingsEvent>(SettingsEvent.LoggedOut), got)
+    }
+
+    @Test fun logout_forgetsRecentSearches_evenWhenThatFails() = runTest(dispatcher) {
+        val rig = Rig(cache = FakeCache().apply { failRecent = true })
+        val vm = started(rig)
+        val got = events(vm)
+        vm.clearCache(); runCurrent()
+        // Clearing the app cache keeps the history; only logout forgets it.
+        assertEquals(0, rig.cache.recentClears)
+        vm.requestLogout(); vm.confirmLogout(); runCurrent()
+        assertEquals(1, rig.cache.recentClears)
         assertEquals(listOf<SettingsEvent>(SettingsEvent.LoggedOut), got)
     }
 

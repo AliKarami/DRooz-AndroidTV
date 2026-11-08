@@ -24,6 +24,9 @@ import com.alikarami.drooz.data.TitlePrefs
 import com.alikarami.drooz.data.titlePrefsStore
 import com.alikarami.drooz.site.SiteConfig
 import com.alikarami.drooz.ui.common.buildImageLoader
+import com.alikarami.drooz.data.DataStoreRecentSearches
+import com.alikarami.drooz.data.RecentSearches
+import com.alikarami.drooz.data.recentSearchesStore
 import com.alikarami.drooz.site.SiteRepository
 import com.alikarami.drooz.site.auth.AccountOwner
 import com.alikarami.drooz.site.auth.AuthService
@@ -80,6 +83,7 @@ class AppGraph(context: Context) {
     val playerPrefs: PlayerPrefs = DataStorePlayerPrefs(playerPrefsStore(appContext))
     val watchStore: WatchStore = fileWatchStore
     val hiddenTitles: HiddenTitles = fileHiddenTitles
+    val recentSearches: RecentSearches = DataStoreRecentSearches(recentSearchesStore(appContext))
 
     /** For Media3: carries the site cookies (subtitles need them) and the browser UA. */
     val mediaClient: OkHttpClient = baseClient.newBuilder()
@@ -90,5 +94,5 @@ class AppGraph(context: Context) {
         .build()
 
     val imageLoader: ImageLoader = buildImageLoader(appContext, mediaClient)
-    val cacheCleaner: CacheCleaner = AppCacheCleaner(imageLoader, homeCache, titleInfo)
+    val cacheCleaner: CacheCleaner = AppCacheCleaner(imageLoader, homeCache, titleInfo, recentSearches)
 }

@@ -1,7 +1,11 @@
 package com.alikarami.drooz.data
 
 import com.alikarami.drooz.site.SiteException
+import com.alikarami.drooz.site.model.CategorizedListPage
+import com.alikarami.drooz.site.model.CategoryKind
 import com.alikarami.drooz.site.model.Episode
+import com.alikarami.drooz.site.model.ListPage
+import com.alikarami.drooz.site.model.SiteCategory
 import com.alikarami.drooz.site.model.TitleRef
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
@@ -35,6 +39,24 @@ class SessionGuardTest {
 
         val other = SessionGuardedSiteApi(Failing(SiteException.Blocked()), events)
         assertTrue(runCatching { other.search("x") }.exceptionOrNull() is SiteException.Blocked)
+        assertEquals(1, lost)
+    }
+
+    @Test fun passesCategoriesThroughAndReportsTheirLostSession() = runTest(UnconfinedTestDispatcher()) {
+        val events = SessionEvents()
+        var lost = 0
+        backgroundScope.launch { events.lost.collect { lost++ } }
+        val cats = listOf(SiteCategory("مینی سریال", "/archive/category/tv-mini-series/", CategoryKind.SERIES))
+        val ok = object : SiteApi by Failing(SiteException.Blocked()) {
+            override suspend fun listWithCategories(path: String) = CategorizedListPage(ListPage(emptyList(), 1, 1), cats)
+        }
+        assertEquals(cats, SessionGuardedSiteApi(ok, events).listWithCategories("/archive/series/").categories)
+
+        val gone = object : SiteApi by Failing(SiteException.Blocked()) {
+            override suspend fun listWithCategories(path: String): CategorizedListPage = throw SiteException.NotLoggedIn()
+        }
+        assertTrue(runCatching { SessionGuardedSiteApi(gone, events).listWithCategories("/x/") }.exceptionOrNull()
+            is SiteException.NotLoggedIn)
         assertEquals(1, lost)
     }
 }

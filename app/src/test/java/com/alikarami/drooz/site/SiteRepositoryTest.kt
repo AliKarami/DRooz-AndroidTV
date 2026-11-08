@@ -207,8 +207,8 @@ class SiteRepositoryTest {
         assertEquals(1, requests().count { it.method == "POST" })
     }
 
-    /** Every page but the login flow redirects to the login form unless the request carries `cf=new`. */
-    private fun refusingSite(post: () -> MockResponse) {
+    /** Every page but the login flow redirects to the login form unless the request carries [valid]. */
+    private fun refusingSite(valid: () -> String = { "cf=new" }, post: () -> MockResponse) {
         server.dispatcher = object : mockwebserver3.Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 val path = request.url.encodedPath
@@ -216,7 +216,7 @@ class SiteRepositoryTest {
                     request.method == "POST" -> post()
                     path.startsWith("/json/device/") -> ok()
                     path == "/user/login/" -> page("login_form.html")
-                    request.headers["Cookie"].orEmpty().contains("cf=new") -> page("home.html")
+                    request.headers["Cookie"].orEmpty().split("; ").contains(valid()) -> page("home.html")
                     else -> MockResponse.Builder().code(302).addHeader("Location", "/user/login/").build()
                 }
             }
@@ -242,13 +242,22 @@ class SiteRepositoryTest {
         val auth = AuthService(http, jar, creds)
         val repo = SiteRepository(http, auth)
         creds.save(Credentials("testuser", "secret", null))
-        var accept = false
-        refusingSite { if (accept) page("login_success.html", "cf=new") else page("login_form.html") }
+        var token: String? = null
+        var posts = 0
+        refusingSite({ "cf=$token" }) {
+            posts++
+            token?.let { page("login_success.html", "cf=$it") } ?: page("login_form.html")
+        }
         assertThrows(SiteException.NotLoggedIn::class.java) { runBlocking { repo.home() } }
-        accept = true
-        // The user signs in again from Login; the session works and a later expiry renews it once more.
+        // The user signs in again from Login; the session works.
+        token = "new"
         assertEquals(com.alikarami.drooz.site.auth.LoginResult.Success, runBlocking { auth.login("testuser", "secret", null) })
         assertEquals(6, runBlocking { repo.home() }.featured.size)
+        assertEquals(2, posts)
+        // A later expiry renews it once more, with a single POST.
+        token = "newer"
+        assertEquals(6, runBlocking { repo.home() }.featured.size)
+        assertEquals(3, posts)
     }
 
     @Test fun noStoredCredentialsThrowsNotLoggedIn() {

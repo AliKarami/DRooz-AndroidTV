@@ -183,6 +183,17 @@ class AuthServiceTest {
         assertEquals(0, server.requestCount)
     }
 
+    // Credentials lost (unreadable file): the dead cookie goes too, so the next launch starts at Login (D6).
+    @Test fun reloginWithoutStoredCredentialsDropsTheDeadSession() = runTest {
+        loggedIn()
+        creds.clear()
+        val before = server.requestCount
+        assertFalse(auth.relogin())
+        assertEquals(before, server.requestCount)
+        assertFalse(auth.isLoggedIn)
+        assertEquals("dev1", jar.cookie("sf"))
+    }
+
     @Test fun logoutKeepsDeviceCookieOnly() = runTest {
         form()
         server.enqueue(page("login_success.html", "sf=dev1", "cf=sess1"))

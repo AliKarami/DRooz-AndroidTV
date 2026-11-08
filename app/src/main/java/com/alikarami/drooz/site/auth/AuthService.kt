@@ -98,9 +98,13 @@ class AuthService(
     suspend fun relogin(): Boolean {
         // Taken before the credentials are read: a logout from here on voids this relogin.
         val generation = logoutGeneration.get()
-        val c = creds.load() ?: return false
+        val c = creds.load()
         return lock.withLock {
             withContext(NonCancellable) {
+                if (c == null) {
+                    if (logoutGeneration.get() == generation) jar.clear(keep = setOf(DEVICE_COOKIE))
+                    return@withContext false
+                }
                 val result = loginLocked(c.username, c.password, c.mobile, generation)
                 if (result != LoginResult.Success && logoutGeneration.get() == generation) {
                     if (result == LoginResult.WrongCredentials) creds.clear()

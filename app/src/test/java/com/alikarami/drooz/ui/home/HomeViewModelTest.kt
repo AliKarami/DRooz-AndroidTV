@@ -420,8 +420,12 @@ class HomeViewModelTest {
     ) = HomeViewModel(api, TitleInfoRepository(api, clock, fetchScope = CoroutineScope(dispatcher + SupervisorJob())),
         watchStore = store, titlePrefs = prefs, now = clock, hiddenTitles = hidden)
 
-    private class FakeHiddenTitles(val map: MutableMap<Long, Long> = mutableMapOf(), var failure: Exception? = null) : HiddenTitles {
-        override suspend fun all(): Map<Long, Long> { failure?.let { throw it }; return map.toMap() }
+    private class FakeHiddenTitles(
+        val map: MutableMap<Long, Long> = mutableMapOf(),
+        var failure: Exception? = null,
+        val gate: CompletableDeferred<Unit>? = null,
+    ) : HiddenTitles {
+        override suspend fun all(): Map<Long, Long> { gate?.await(); failure?.let { throw it }; return map.toMap() }
         override suspend fun hide(postId: Long, at: Long) { failure?.let { throw it }; map[postId] = at }
     }
 
@@ -737,6 +741,18 @@ class HomeViewModelTest {
         repo.invalidate(a)
         vm.onResume(); advanceUntilIdle()
         assertEquals(listOf(a, b), vm.recent().items.map { it.ref })
+    }
+
+    // Cold start: a removed title must not flash back while the hides are still being read.
+    @Test fun hiddenTitle_neverShownBeforeHidesAreRead() = runTest(dispatcher) {
+        val a = series(1); val b = series(2)
+        val gate = CompletableDeferred<Unit>()
+        val hidden = FakeHiddenTitles(mutableMapOf(1L to 100L), gate = gate)
+        val api = FakeApi(recentHome(a, b), onTitle = { seriesDetail(it) })
+        val vm = cwVm(api, hidden = hidden); runCurrent()
+        assertFalse(a in vm.recent().items.map { it.ref })
+        gate.complete(Unit); advanceUntilIdle()
+        assertEquals(listOf(b), vm.recent().items.map { it.ref })
     }
 
     // A failing hidden store must neither drop the row nor undo a removal made this session.

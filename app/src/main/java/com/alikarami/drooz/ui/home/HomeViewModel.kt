@@ -141,6 +141,8 @@ class HomeViewModel(
     private var local: List<WatchEntry> = emptyList()
     /** postId → when it was removed from the row ([removeFromContinue] or an earlier session). */
     private var hidden: Map<Long, Long> = emptyMap()
+    /** The stored hides have been read once: before that the row is not shown, or removed titles would flash. */
+    private var hidesRead = hiddenTitles == null
     private val resolved = HashMap<TitleRef, TitleDetail>()
     private val dubs = HashMap<TitleRef, Boolean>()
     private val resolving = HashMap<TitleRef, Job>()
@@ -278,6 +280,7 @@ class HomeViewModel(
             runCatching { hiddenTitles?.all() }.getOrNull()?.let { stored ->
                 hidden = stored + hidden.filter { (id, at) -> at > (stored[id] ?: Long.MIN_VALUE) }
             }
+            hidesRead = true
             for ((ref, d) in resolved) dubs[ref] = dubFor(ref, d)
             renderRecent(key)
             for ((ref, _) in ContinueWatching.order(server, local, hidden)) {
@@ -311,6 +314,7 @@ class HomeViewModel(
 
     private fun renderRecent(key: String) {
         val server = recentServer ?: return
+        if (!hidesRead) return
         val byStream = local.associateBy { it.streamId }
         val list = ContinueWatching.order(server, local, hidden).mapNotNull { (ref, hash) ->
             val d = resolved[ref] ?: return@mapNotNull Entry(ref, null, hash, ContinueWatching.pending(ref, hash))

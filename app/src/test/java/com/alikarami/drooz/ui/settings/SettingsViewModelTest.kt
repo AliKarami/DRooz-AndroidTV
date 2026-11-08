@@ -55,8 +55,14 @@ class SettingsViewModelTest {
 
     private class FakeAuth(var failLogout: Boolean = false, val gate: CompletableDeferred<Unit>? = null) : AuthApi {
         var logouts = 0
+        var usernameGate: CompletableDeferred<Unit>? = null
+        var failUsername = false
         override val isLoggedIn = true
-        override val username: String? = "ali"
+        override suspend fun username(): String? {
+            usernameGate?.await()
+            if (failUsername) throw IllegalStateException("keystore")
+            return "ali"
+        }
         override suspend fun login(username: String, password: String, mobile: String?) = LoginResult.Success
         override suspend fun logout() {
             logouts++
@@ -90,6 +96,24 @@ class SettingsViewModelTest {
         backgroundScope.launch(dispatcher) { rig.vm.uiState.collect {} }
         runCurrent()
         return rig.vm
+    }
+
+    // The account name comes from the encrypted credentials: read in the background, never in the
+    // constructor on the main thread (D17).
+    @Test fun usernameIsLoadedAfterConstruction() = runTest(dispatcher) {
+        val gate = CompletableDeferred<Unit>()
+        val rig = Rig(auth = FakeAuth().apply { usernameGate = gate })
+        val vm = started(rig)
+        assertEquals(null, vm.uiState.value.username)
+        gate.complete(Unit)
+        runCurrent()
+        assertEquals("ali", vm.uiState.value.username)
+    }
+
+    @Test fun usernameFailureLeavesTheScreenWorking() = runTest(dispatcher) {
+        val vm = started(Rig(auth = FakeAuth().apply { failUsername = true }))
+        assertEquals(null, vm.uiState.value.username)
+        assertEquals("0.1.0", vm.uiState.value.version)
     }
 
     @Test fun exposesUsernameAndVersion() = runTest(dispatcher) {

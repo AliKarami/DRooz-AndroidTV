@@ -357,4 +357,22 @@ class AuthServiceTest {
         assertEquals(Credentials("testuser", "secret", null), creds.load())
         assertEquals("dev1", jar.cookie("sf"))
     }
+
+    @Test fun usernameComesFromTheLoginThenFromStoredCredentials() = runTest {
+        assertNull(auth.username())
+        loggedIn()
+        assertEquals("testuser", auth.username())
+        // A fresh process knows it only from the stored credentials.
+        assertEquals("testuser", AuthService(SiteHttp(server.url("/"), jar), jar, creds).username())
+        server.enqueue(MockResponse.Builder().body("bye").build())
+        auth.logout()
+        assertNull(auth.username())
+    }
+
+    // KeystoreSecretBox is built in Application.onCreate: a broken (here: absent) Keystore must not
+    // crash the app there; it surfaces as unreadable credentials instead (D17).
+    @Test fun keystoreBoxConstructionNeverThrows() {
+        val store = CredentialStore(tmp.root.resolve("k.bin").apply { writeBytes(ByteArray(40)) }, KeystoreSecretBox())
+        assertNull(store.load())
+    }
 }

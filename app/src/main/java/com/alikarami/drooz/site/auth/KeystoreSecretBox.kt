@@ -8,10 +8,16 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-/** AES-256/GCM with a non-exportable AndroidKeyStore key. Output = 12-byte IV + ciphertext. */
+/**
+ * AES-256/GCM with a non-exportable AndroidKeyStore key. Output = 12-byte IV + ciphertext.
+ * The Keystore is opened on first use, never in the constructor (built in Application.onCreate), so a
+ * broken Keystore fails a save or load, not the app start.
+ */
 class KeystoreSecretBox(private val alias: String = "drooz_creds") : SecretBox {
-    private val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+    private val keyStore by lazy { KeyStore.getInstance("AndroidKeyStore").apply { load(null) } }
 
+    /** Synchronized: two first uses at once must not each generate (and so replace) the key. */
+    @Synchronized
     private fun key(): SecretKey =
         (keyStore.getKey(alias, null) as? SecretKey) ?: KeyGenerator
             .getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")

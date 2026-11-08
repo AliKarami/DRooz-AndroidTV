@@ -51,16 +51,16 @@ class SettingsViewModel(
         val cacheCleared: Boolean = false,
         val confirmLogout: Boolean = false,
         val busy: Boolean = false,
+        val username: String? = null,
     )
 
     private val local = MutableStateFlow(Local())
-    private val username: String? = runCatching { auth.username }.getOrNull()
 
     val uiState: StateFlow<SettingsUiState> = combine(playerPrefs.settings, local) { p, l ->
-        SettingsUiState(p, l.defaultDub, username, version, l.cacheCleared, l.confirmLogout, l.busy)
+        SettingsUiState(p, l.defaultDub, l.username, version, l.cacheCleared, l.confirmLogout, l.busy)
     }.stateIn(
         viewModelScope, SharingStarted.Eagerly,
-        SettingsUiState(PlayerSettings(), false, username, version, false, false, false),
+        SettingsUiState(PlayerSettings(), false, null, version, false, false, false),
     )
 
     private val _events = Channel<SettingsEvent>(Channel.BUFFERED)
@@ -70,6 +70,11 @@ class SettingsViewModel(
         viewModelScope.launch {
             val on = try { titlePrefs.defaultDub() } catch (e: CancellationException) { throw e } catch (_: Exception) { false }
             local.update { it.copy(defaultDub = on) }
+        }
+        viewModelScope.launch {
+            // Decrypting the stored credentials is slow on a TV: AuthApi does it off the main thread.
+            val name = try { auth.username() } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
+            local.update { it.copy(username = name) }
         }
     }
 

@@ -32,8 +32,11 @@ class AuthService(
 ) {
     val isLoggedIn: Boolean get() = jar.cookie(SESSION_COOKIE) != null
 
-    /** The signed-in account's username from the stored credentials; null if none. */
-    val username: String? get() = creds.load()?.username
+    /** Set by a successful login, cleared by logout: the account name without a Keystore decrypt. */
+    @Volatile private var knownUsername: String? = null
+
+    /** The signed-in account's username; null if none. A fresh process decrypts it, off the caller's thread. */
+    suspend fun username(): String? = knownUsername ?: withContext(Dispatchers.IO) { creds.load()?.username }
 
     /** The current session cookie value; changes whenever a login succeeds. */
     val sessionToken: String? get() = jar.cookie(SESSION_COOKIE)
@@ -84,6 +87,7 @@ class AuthService(
         }
         if (result == LoginResult.Success) {
             creds.save(Credentials(username, password, mobile))
+            knownUsername = username
             reportDevice()
         }
         return result
@@ -121,8 +125,10 @@ class AuthService(
      */
     suspend fun logout() = withContext(NonCancellable) {
         logoutGeneration.incrementAndGet()
+        knownUsername = null
         creds.clear()
         lock.withLock {
+            knownUsername = null
             creds.clear()
             runCatching { http.get(LOGOUT_PATH, requiresAuth = false, retry = false) }
             jar.clear(keep = setOf(DEVICE_COOKIE))

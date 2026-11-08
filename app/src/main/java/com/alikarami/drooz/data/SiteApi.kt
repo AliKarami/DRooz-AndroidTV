@@ -19,8 +19,8 @@ interface SiteApi {
 
 interface AuthApi {
     val isLoggedIn: Boolean
-    /** The signed-in account's username, from the stored credentials; null if none. */
-    val username: String?
+    /** The signed-in account's username; null if none. Safe to call from the main thread. */
+    suspend fun username(): String?
     suspend fun login(username: String, password: String, mobile: String?): LoginResult
     /** Ends the session; the device cookie is kept. Never throws for a failed site request. */
     suspend fun logout()
@@ -41,7 +41,7 @@ class SiteApiAdapter(private val repo: SiteRepository) : SiteApi {
 
 class AuthApiAdapter(private val auth: AuthService) : AuthApi {
     override val isLoggedIn: Boolean get() = auth.isLoggedIn
-    override val username: String? get() = auth.username
+    override suspend fun username(): String? = auth.username()
     override suspend fun login(username: String, password: String, mobile: String?) =
         auth.login(username, password, mobile)
     override suspend fun logout() = auth.logout()

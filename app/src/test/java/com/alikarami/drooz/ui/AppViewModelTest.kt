@@ -37,7 +37,7 @@ class AppViewModelTest {
     @After fun tearDown() = Dispatchers.resetMain()
 
     private class FakeAuth(override val isLoggedIn: Boolean) : AuthApi {
-        override val username: String? = null
+        override suspend fun username(): String? = null
         override suspend fun login(username: String, password: String, mobile: String?) = LoginResult.Success
         override suspend fun logout() {}
     }

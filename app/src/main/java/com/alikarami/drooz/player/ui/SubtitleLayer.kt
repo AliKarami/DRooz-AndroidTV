@@ -12,6 +12,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
@@ -45,8 +46,20 @@ val SUBTITLE_BOX_PADDING_V: Dp = 2.dp
 private val SUBTITLE_BOX_PADDING_H: Dp = 10.dp
 private val SUBTITLE_BOX_SHAPE = RoundedCornerShape(6.dp)
 
-/** Distances (px) from the screen's bottom edge to each text block's bottom. Secondary = English in DUAL. */
-data class SubtitlePlacement(val primaryBottomPx: Int, val secondaryBottomPx: Int?)
+/**
+ * Distances (px) from the screen's bottom edge to each text block's bottom. Secondary = English in DUAL;
+ * [gapPx] = the least space kept between English and the Farsi above it.
+ */
+data class SubtitlePlacement(val primaryBottomPx: Int, val secondaryBottomPx: Int?, val gapPx: Int = 0)
+
+/**
+ * DUAL: the Farsi block's bottom once the English block below it is measured. It keeps its placed
+ * spot, and rises only when the English cue is taller than the room left for it (3 lines, a thin bar).
+ */
+fun dualPrimaryBottomPx(placement: SubtitlePlacement, secondaryHeightPx: Int): Int {
+    val secondary = placement.secondaryBottomPx ?: return placement.primaryBottomPx
+    return max(placement.primaryBottomPx, secondary + secondaryHeightPx + placement.gapPx)
+}
 
 /** Subtitle font size in px for a container height and a [SubtitleStyle.sizePercent]. */
 fun subtitleFontPx(containerH: Int, sizePercent: Int): Float = containerH * SUBTITLE_BASE_FRACTION * sizePercent / 100f
@@ -97,7 +110,7 @@ fun subtitlePlacement(
         primary += lift
         secondary = secondary?.plus(lift)
     }
-    return SubtitlePlacement(primary, secondary)
+    return SubtitlePlacement(primary, secondary, margin)
 }
 
 /**
@@ -141,30 +154,61 @@ fun SubtitleLayer(
                 color = Color(style.color.argb),
                 shadow = Shadow(Color.Black, blurRadius = 6f),
                 textAlign = TextAlign.Center,
-                textDirection = TextDirection.Content,
                 // The rendered line box must match the lineHeightPx subtitlePlacement was given.
                 lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.None),
             )
         }
+        // The track's language sets the base direction, not the cue's first strong character: a Persian
+        // cue starting with a Latin name or a digit keeps its punctuation and dialogue dashes in place.
+        val primaryStyle = textStyle.copy(textDirection = if (choice == SubtitleChoice.EN) TextDirection.Ltr else TextDirection.Rtl)
+        val secondaryStyle = textStyle.copy(textDirection = TextDirection.Ltr)
         val box = Color.Black.copy(alpha = style.backgroundOpacity / 100f)
         val maxW = maxWidth * 0.8f
 
         @Composable
-        fun Line(text: String, bottomPx: Int) {
+        fun LineBox(text: String, lineStyle: TextStyle, modifier: Modifier = Modifier) {
             Box(
-                Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = with(density) { bottomPx.toDp() })
+                modifier
                     .widthIn(max = maxW)
                     .background(box, SUBTITLE_BOX_SHAPE)
                     .padding(horizontal = SUBTITLE_BOX_PADDING_H, vertical = SUBTITLE_BOX_PADDING_V),
             ) {
-                Text(text, style = textStyle)
+                Text(text, style = lineStyle)
             }
         }
 
-        primary?.let { Line(it, placement.primaryBottomPx) }
+        @Composable
+        fun Line(text: String, lineStyle: TextStyle, bottomPx: Int) {
+            LineBox(
+                text, lineStyle,
+                Modifier.align(Alignment.BottomCenter).padding(bottom = with(density) { bottomPx.toDp() }),
+            )
+        }
+
         val secondaryBottom = placement.secondaryBottomPx
-        if (secondary != null) Line(secondary, secondaryBottom ?: placement.primaryBottomPx)
+        if (primary != null && secondary != null && secondaryBottom != null) {
+            // Both blocks: measured together, so a tall English cue pushes Farsi up instead of overprinting it.
+            Layout(
+                content = {
+                    LineBox(primary, primaryStyle)
+                    LineBox(secondary, secondaryStyle)
+                },
+                modifier = Modifier.fillMaxSize(),
+            ) { measurables, constraints ->
+                val loose = constraints.copy(minWidth = 0, minHeight = 0)
+                val p = measurables[0].measure(loose)
+                val s = measurables[1].measure(loose)
+                val w = constraints.maxWidth
+                val h = constraints.maxHeight
+                val primaryBottom = dualPrimaryBottomPx(placement, s.height)
+                layout(w, h) {
+                    s.place((w - s.width) / 2, h - secondaryBottom - s.height)
+                    p.place((w - p.width) / 2, h - primaryBottom - p.height)
+                }
+            }
+        } else {
+            primary?.let { Line(it, primaryStyle, placement.primaryBottomPx) }
+            if (secondary != null) Line(secondary, secondaryStyle, secondaryBottom ?: placement.primaryBottomPx)
+        }
     }
 }

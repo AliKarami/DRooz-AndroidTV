@@ -37,6 +37,8 @@ import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -81,6 +83,8 @@ internal class OverlayController {
     /** Height (px above the screen's bottom edge) of the controls' bottom block / the episodes strip. */
     var controlsCoverPx by mutableIntStateOf(0)
     var stripCoverPx by mutableIntStateOf(0)
+    /** Right edge (px from the screen's left) of the up-next card: the subtitles centre beside it. */
+    var upNextRightPx by mutableIntStateOf(0)
     /** Uptime of the last key event (auto-hide). */
     var lastKeyAt = 0L
     /** Keys whose KeyDown the screen consumed: their KeyUp is consumed too (never a stray click). */
@@ -273,11 +277,18 @@ internal fun PlayerOverlayHost(
             Overlay.EPISODES -> c.stripCoverPx
             else -> 0
         }
+        // The up-next card (bottom left, over the credits' dialogue) pushes the subtitles to its right.
+        val gapPx = with(LocalDensity.current) { 24.dp.roundToPx() }
+        val leftInset = when {
+            panel != null -> (containerW * panel).roundToInt()
+            upNextShown && c.upNextRightPx > 0 -> c.upNextRightPx + gapPx
+            else -> 0
+        }
         CueLayer(
             vm, state.style, state.subtitle, videoSize, containerW, containerH,
             coverPx = cover,
             preview = overlay == Overlay.SUBTITLE_AUDIO,
-            leftInsetFraction = panel ?: 0f,
+            leftInsetPx = leftInset,
         )
 
         if (busy) {
@@ -361,7 +372,9 @@ internal fun PlayerOverlayHost(
                     card, state.backdropUrl, playNow,
                     onPlay = vm::playNext,
                     onCredits = vm::dismissUpNext,
-                    modifier = Modifier.absolutePadding(left = 48.dp, bottom = 48.dp),
+                    modifier = Modifier
+                        .absolutePadding(left = 48.dp, bottom = 48.dp)
+                        .onGloballyPositioned { c.upNextRightPx = (it.positionInRoot().x + it.size.width).roundToInt() },
                 )
             }
         }
@@ -370,7 +383,8 @@ internal fun PlayerOverlayHost(
 
 /**
  * Reads [PlayerViewModel.cues] itself, so a cue change recomposes only this. [coverPx] (the visible
- * bottom block) lifts the subtitles, animated; [leftInsetFraction] centres them beside a side panel.
+ * bottom block) lifts the subtitles, animated; [leftInsetPx] centres them beside a side panel or the
+ * up-next card, animated.
  */
 @Composable
 private fun CueLayer(
@@ -382,7 +396,7 @@ private fun CueLayer(
     containerH: Int,
     coverPx: Int,
     preview: Boolean,
-    leftInsetFraction: Float,
+    leftInsetPx: Int,
 ) {
     val cues by vm.cues.collectAsStateWithLifecycle()
     val density = LocalDensity.current
@@ -395,7 +409,8 @@ private fun CueLayer(
         dual = choice == SubtitleChoice.DUAL,
         controlsHeightPx = cover.takeIf { it > 0 },
     )
-    val inset = with(density) { (containerW * leftInsetFraction).toDp() }
+    val insetPx by animateIntAsState(leftInsetPx, tween(200), label = "subtitleInset")
+    val inset = with(density) { insetPx.toDp() }
     Box(Modifier.fillMaxSize().absolutePadding(left = inset)) {
         SubtitleLayer(cues, style, placement, preview = preview, choice = choice)
     }

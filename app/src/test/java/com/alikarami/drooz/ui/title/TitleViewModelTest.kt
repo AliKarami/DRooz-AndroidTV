@@ -132,7 +132,45 @@ class TitleViewModelTest {
         val (v, _) = load(series(5, s2Played = 3))
         assertEquals("تماشای دوباره", v.uiState.value.primaryLabel)
         assertEquals(1, v.uiState.value.primaryEpisode?.number)
+        // H3: the tabs open on the last season watched (no local times: the last one with a ✓), not S1.
+        assertEquals(2, v.uiState.value.selectedSeason)
+        assertEquals(1, v.uiState.value.primaryEpisode?.season)
+    }
+
+    // H3: with local history, everything watched opens on the season (and tile) watched most recently.
+    @Test fun allWatchedOpensOnNewestLocalSeason() = runTest(dispatcher) {
+        store.entries += entry("s2e3", 3_000_000, 3_000_000, finished = true, at = 5)
+        store.entries += entry("s1e2", 3_000_000, 3_000_000, finished = true, at = 9)
+        val (v, _) = load(series(5, s2Played = 3))
+        assertEquals("تماشای دوباره", v.uiState.value.primaryLabel)
         assertEquals(1, v.uiState.value.selectedSeason)
+        assertEquals(2, v.uiState.value.initialFocusEpisode)
+        store.entries.removeAll { it.streamId == "s1e2" }
+        val (v2, _) = load(series(5, s2Played = 3))
+        assertEquals(2, v2.uiState.value.selectedSeason)
+        assertEquals(3, v2.uiState.value.initialFocusEpisode)
+    }
+
+    // B1: a page cached longer ago than PAGE_MAX_AGE_MS (new episodes may be out) shows at once, then
+    // the current page replaces it.
+    @Test fun openingRevalidatesAnOlderCachedPage() = runTest(dispatcher) {
+        var t = 0L
+        val api = FakeApi(series(1))
+        val repo = TitleInfoRepository(api, { t }, fetchScope = CoroutineScope(dispatcher + SupervisorJob()))
+        vm(api, repo); advanceUntilIdle()
+        assertEquals(1, api.titleCalls)
+        t = TitleInfoRepository.PAGE_MAX_AGE_MS - 1
+        vm(api, repo); advanceUntilIdle()
+        assertEquals(1, api.titleCalls)                     // recent enough: served from the cache
+
+        t = TitleInfoRepository.PAGE_MAX_AGE_MS + 1
+        api.titleGate = CompletableDeferred()
+        api.d = series(1, s1Count = 6)
+        val v = vm(api, repo); runCurrent()
+        assertEquals(5, v.uiState.value.episodes.size)       // the old page, no skeleton
+        api.titleGate!!.complete(Unit); advanceUntilIdle()
+        assertEquals(2, api.titleCalls)
+        assertEquals(6, v.uiState.value.episodes.size)
     }
 
     @Test fun filmLabel() = runTest(dispatcher) {
@@ -275,6 +313,16 @@ class TitleViewModelTest {
         assertEquals(true, v.uiState.value.inWatchlist)
         v.toggleWatchlist(); advanceUntilIdle()
         assertEquals(2, api.watchlist.size)
+    }
+
+    // B5: a toggle that reached the site tells the «لیست من» grid to reload; a failed one does not.
+    @Test fun watchlistToggleIsAnnounced() = runTest(dispatcher) {
+        val (v, api, repo) = loadWithRepo(series(0).copy(inWatchlist = false))
+        v.toggleWatchlist(); advanceUntilIdle()
+        assertEquals(1, repo.watchlistChanges.value)
+        api.failWatchlist = true
+        v.toggleWatchlist(); advanceUntilIdle()
+        assertEquals(1, repo.watchlistChanges.value)
     }
 
     @Test fun watchlistFailureReverts() = runTest(dispatcher) {

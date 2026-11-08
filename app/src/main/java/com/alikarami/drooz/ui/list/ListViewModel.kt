@@ -37,12 +37,14 @@ data class ListUiState(
 /** A site list (`/archive/...`) as an infinite grid: pages load as focus nears the end. */
 class ListViewModel(
     private val api: SiteApi,
-    titleInfo: TitleInfoRepository,
+    private val titleInfo: TitleInfoRepository,
     private val path: String,
     title: String,
     dwellMs: Long = 300,
     /** Load the next page once focus is within this many items of the end (two rows of the 7-column grid). */
     private val prefetch: Int = 14,
+    /** «لیست من»: a title page that toggled the watchlist makes the grid reload when it shows again. */
+    private val reloadOnWatchlistChange: Boolean = false,
 ) : ViewModel() {
     private val _state = MutableStateFlow(ListUiState(title))
     val uiState: StateFlow<ListUiState> = _state
@@ -53,6 +55,7 @@ class ListViewModel(
     private var loadedPage = 0
     private var lastPage = 1
     private var job: Job? = null
+    private var seenWatchlist = titleInfo.watchlistChanges.value
     private val heroes = HeroController(viewModelScope, titleInfo, dwellMs) { h -> _state.update { it.copy(hero = h) } }
 
     /** Last focused grid index, so returning from a title page restores focus. */
@@ -67,6 +70,37 @@ class ListViewModel(
         heroes.focus(card.ref, card, card.posterHash)
         val s = _state.value
         if (index >= cards.size - prefetch && !s.pageError) loadNext()
+    }
+
+    /**
+     * The grid is showing again (Back from a title): after a watchlist toggle, page 1 replaces the grid
+     * (no skeleton; a failure keeps it). Focus stays at its index, which is now the card in its place.
+     */
+    fun onResume() {
+        if (!reloadOnWatchlistChange) return
+        val changes = titleInfo.watchlistChanges.value
+        if (changes == seenWatchlist) return
+        seenWatchlist = changes
+        if (loadedPage == 0) {
+            loadNext() // the first page never arrived: the usual path (skeleton or error screen)
+            return
+        }
+        job?.cancel()
+        job = viewModelScope.safeLaunch(onError = { /* keep the grid */ }) {
+            val page = api.list(path, 1)
+            cards.clear()
+            seen.clear()
+            cards += page.items.filter { seen.add(it.ref.kind to it.ref.postId) }
+            loadedPage = 1
+            lastPage = maxOf(page.lastPage, 1)
+            focusedIndex = focusedIndex.coerceAtMost(maxOf(cards.lastIndex, 0))
+            _state.update {
+                it.copy(
+                    items = cards.map { c -> c.toPosterCardUi() }, loading = false, loadingMore = false,
+                    error = null, pageError = false, endReached = loadedPage >= lastPage,
+                )
+            }
+        }
     }
 
     /** Retries whatever failed: the first page (screen error) or the next page (grid-end retry). */

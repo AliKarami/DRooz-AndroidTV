@@ -119,14 +119,14 @@ fun DroozNavHost(
                 when (item) {
                     RailItem.Search -> go(entry, Search)
                     RailItem.Home -> Unit // HomeScreen closes the rail
-                    RailItem.Series ->
-                        go(entry, ListRoute(context.getString(R.string.list_updated_series), "/archive/series/"))
+                    // Each page is headed like the rail item that opened it.
+                    RailItem.Series -> go(entry, ListRoute(context.getString(R.string.rail_series), "/archive/series/"))
                     RailItem.Films ->
-                        go(entry, ListRoute(context.getString(R.string.list_new_films), "/archive/category/new-films/"))
+                        go(entry, ListRoute(context.getString(R.string.rail_films), "/archive/category/new-films/"))
                     RailItem.MyList ->
                         go(entry, ListRoute(
-                            context.getString(R.string.title_my_list), "/user/watchlist/",
-                            context.getString(R.string.my_list_empty),
+                            context.getString(R.string.rail_my_list), "/user/watchlist/",
+                            context.getString(R.string.my_list_empty), watchlist = true,
                         ))
                     RailItem.Settings -> go(entry, Settings)
                 }
@@ -155,7 +155,7 @@ fun DroozNavHost(
         }
         composable<ListRoute> { entry ->
             val route = entry.toRoute<ListRoute>()
-            val vm: ListViewModel = viewModel(factory = ListViewModelFactory(graph, route.path, route.title))
+            val vm: ListViewModel = viewModel(factory = ListViewModelFactory(graph, route.path, route.title, route.watchlist))
             ListScreen(vm, onOpen = { openTitle(entry, it) }, emptyText = route.emptyText)
         }
         composable<Search> { entry ->

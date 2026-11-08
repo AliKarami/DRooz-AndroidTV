@@ -407,9 +407,13 @@ class HomeViewModelTest {
         WatchEntry(streamId, r.path, 1, 1, pos, dur, at, finished = false)
 
     // Not backgroundScope: advanceUntilIdle must also run the repository's fetches.
-    private fun cwVm(api: FakeApi, store: FakeWatchStore = FakeWatchStore(), prefs: FakeTitlePrefs = FakeTitlePrefs()) =
-        HomeViewModel(api, TitleInfoRepository(api, fetchScope = CoroutineScope(dispatcher + SupervisorJob())),
-            watchStore = store, titlePrefs = prefs)
+    private fun cwVm(
+        api: FakeApi,
+        store: FakeWatchStore = FakeWatchStore(),
+        prefs: FakeTitlePrefs = FakeTitlePrefs(),
+        clock: () -> Long = { 0L },
+    ) = HomeViewModel(api, TitleInfoRepository(api, clock, fetchScope = CoroutineScope(dispatcher + SupervisorJob())),
+        watchStore = store, titlePrefs = prefs, now = clock)
 
     private fun HomeViewModel.recent() = uiState.value.rows.first { it.key == "recent" }
 
@@ -529,5 +533,155 @@ class HomeViewModelTest {
         val api = FakeApi(home(), onTitle = { seriesDetail(it) })
         val vm = cwVm(api); advanceUntilIdle()
         assertEquals(HomeAction.Open(ref(11)), vm.activate("featured", ref(11)))
+    }
+    // B10: row titles are shown with the ZWNJ the rail uses («سریال‌ها»), whatever spacing the config has.
+    @Test fun rowTitlesJoinPluralsWithZwnj() = runTest(dispatcher) {
+        val vm = vm(FakeApi(home())); advanceUntilIdle()
+        assertEquals("فیلم‌های برگزیده", vm.uiState.value.rows.first { it.key == "featured" }.title)
+        assertEquals("ادامه تماشا", vm.recent().title)
+    }
+
+    // B1: «ادامه تماشا» decides what is next from a recent page: an older cached one is refetched on refresh
+    // (a new episode brings a finished series back), a recent one is not (B12: only what changed is asked).
+    @Test fun recentRow_refetchesOnlyOlderDetails() = runTest(dispatcher) {
+        val a = series(1)
+        var t = 0L
+        var newEpisode = false
+        val api = FakeApi(recentHome(a), onTitle = {
+            if (!newEpisode) seriesDetail(it, 1, 2)
+            else seriesDetail(it, 1, 2).let { d ->
+                d.copy(catalog = d.catalog.copy(main = listOf(Season(1, listOf(ep(1, true), ep(2, true), ep(3))))))
+            }
+        })
+        val vm = cwVm(api, clock = { t }); advanceUntilIdle()
+        assertTrue(vm.recent().items.isEmpty())             // fully watched
+        newEpisode = true
+        t = TitleInfoRepository.PAGE_MAX_AGE_MS - 1
+        vm.refresh(); advanceUntilIdle()
+        assertEquals(1, api.titleCalls.size)
+        t = TitleInfoRepository.PAGE_MAX_AGE_MS + 1
+        vm.refresh(); advanceUntilIdle()
+        assertEquals(2, api.titleCalls.size)
+        assertEquals("فصل ۱ · قسمت ۳", vm.recent().items.single().subtitle)
+    }
+
+    // B2: back on home after a long absence, the page and the loaded list rows are revalidated quietly.
+    @Test fun resumeAfterLongAbsenceRevalidatesQuietly() = runTest(dispatcher) {
+        var t = 0L
+        val api = FakeApi(home(), onList = { ListPage(listOf(card(ref(30))), 1, 1) })
+        var homeCalls = 0
+        val gate = CompletableDeferred<Unit>()
+        api.onHome = { homeCalls++; if (homeCalls > 1) gate.await(); home() }
+        val vm = cwVm(api, clock = { t }); advanceUntilIdle()
+        vm.loadRowIfNeeded("popular"); advanceUntilIdle()
+        t = HomeViewModel.HOME_MAX_AGE_MS - 1
+        vm.onResume(); advanceUntilIdle()
+        assertEquals(1, homeCalls)
+        assertEquals(1, api.listCalls.size)
+
+        t = HomeViewModel.HOME_MAX_AGE_MS + 1
+        vm.onResume(); runCurrent()
+        assertEquals(2, homeCalls)
+        assertEquals(2, api.listCalls.size)
+        val rows = vm.uiState.value.rows
+        assertTrue(rows.none { it.loading })                 // no skeleton
+        assertEquals(5, rows.first { it.key == "featured" }.items.size)
+        assertEquals(1, rows.first { it.key == "popular" }.items.size)
+        gate.complete(Unit); advanceUntilIdle()
+        vm.onResume(); advanceUntilIdle()
+        assertEquals(2, homeCalls)                           // fresh again
+    }
+
+    // B2: a quiet list-row revalidation that fails keeps the row's cards.
+    @Test fun failedQuietListRevalidationKeepsCards() = runTest(dispatcher) {
+        var t = 0L
+        var fail = false
+        val api = FakeApi(home(), onList = { if (fail) error("net") else ListPage(listOf(card(ref(30))), 1, 1) })
+        val vm = cwVm(api, clock = { t }); advanceUntilIdle()
+        vm.loadRowIfNeeded("popular"); advanceUntilIdle()
+        fail = true
+        t = HomeViewModel.HOME_MAX_AGE_MS + 1
+        vm.onResume(); advanceUntilIdle()
+        val popular = vm.uiState.value.rows.first { it.key == "popular" }
+        assertEquals(1, popular.items.size)
+        assertFalse(popular.error)
+    }
+
+    // B3: back from the player, the card shows the new local progress before the home page returns.
+    @Test fun resumeAfterPlayShowsLocalProgressBeforeHomeReturns() = runTest(dispatcher) {
+        val a = series(1)
+        val store = FakeWatchStore()
+        val api = FakeApi(recentHome(a), onTitle = { seriesDetail(it) })
+        val repo = TitleInfoRepository(api, fetchScope = CoroutineScope(dispatcher + SupervisorJob()))
+        val vm = HomeViewModel(api, repo, watchStore = store); advanceUntilIdle()
+        assertNull(vm.recent().items.single().progress)
+        val gate = CompletableDeferred<Unit>()
+        api.onHome = { gate.await(); recentHome(a) }
+        api.onTitle = { gate.await(); seriesDetail(it) }
+        store.entries += local(a, "s1e1", pos = 1_500_000)
+        repo.invalidate(a)
+        vm.onResume(); runCurrent()
+        assertEquals(0.5f, vm.recent().items.single().progress!!, 0.001f)
+        gate.complete(Unit); advanceUntilIdle()
+        assertEquals(0.5f, vm.recent().items.single().progress!!, 0.001f)
+    }
+
+    // B4: a failed home page marks its rows failed (inline retry), and local history still fills
+    // «ادامه تماشا»: list rows that load must not hide the failure.
+    @Test fun homeFailureMarksHomeRowsAndKeepsLocalRecent() = runTest(dispatcher) {
+        val c = series(3)
+        val store = FakeWatchStore(mutableListOf(local(c, "s1e1", pos = 600_000)))
+        val api = FakeApi(home(), onTitle = { seriesDetail(it) })
+        api.onHome = { error("offline") }
+        val vm = cwVm(api, store); advanceUntilIdle()
+        val rows = vm.uiState.value.rows
+        assertEquals("offline", vm.uiState.value.error)
+        assertTrue(rows.first { it.key == "featured" }.error)
+        assertTrue(rows.first { it.key == "new-films" }.error)
+        assertFalse(rows.first { it.key == "popular" }.error)
+        assertEquals(listOf(c), vm.recent().items.map { it.ref })
+        api.onHome = { home() }
+        vm.retryRow("featured"); advanceUntilIdle()
+        assertFalse(vm.uiState.value.rows.first { it.key == "featured" }.error)
+        assertEquals(5, vm.uiState.value.rows.first { it.key == "featured" }.items.size)
+    }
+
+    // B12: the focused hero's detail does not wait behind «ادامه تماشا» resolutions.
+    @Test fun heroFetchDoesNotQueueBehindRecent() = runTest(dispatcher) {
+        val gate = CompletableDeferred<Unit>()
+        val api = FakeApi(recentHome(series(1), series(2), series(3)), onTitle = {
+            if (it.kind == TitleKind.SERIES) { gate.await(); seriesDetail(it) } else detail(it, "Featured Detail")
+        })
+        val vm = cwVm(api); runCurrent()
+        vm.onFocus("featured", 0)
+        advanceTimeBy(301); runCurrent()
+        assertEquals("Featured Detail", vm.uiState.value.hero!!.title)
+        gate.complete(Unit); advanceUntilIdle()
+    }
+
+    // H2: a resolution that drops the focused «ادامه تماشا» card moves the hero to the card now in its place.
+    @Test fun droppedFocusedCardMovesHeroToNeighbour() = runTest(dispatcher) {
+        val a = series(1); val b = series(2)
+        val gate = CompletableDeferred<Unit>()
+        val api = FakeApi(recentHome(a, b), onTitle = { gate.await(); if (it == a) seriesDetail(it, 1, 2) else seriesDetail(it) })
+        val vm = cwVm(api); runCurrent()
+        vm.onFocus("recent", 0); runCurrent()
+        assertEquals(a, vm.uiState.value.hero!!.ref)
+        gate.complete(Unit); advanceUntilIdle()
+        assertEquals(listOf(b), vm.recent().items.map { it.ref })
+        assertEquals(b, vm.uiState.value.hero!!.ref)
+        assertEquals(0, vm.focusedIndex("recent"))
+    }
+
+    // H2: a row that is not the one focused last does not take the hero when it changes.
+    @Test fun otherRowChangeKeepsHero() = runTest(dispatcher) {
+        val a = series(1); val b = series(2)
+        val gate = CompletableDeferred<Unit>()
+        val api = FakeApi(recentHome(a, b), onTitle = { gate.await(); if (it == a) seriesDetail(it, 1, 2) else seriesDetail(it) })
+        val vm = cwVm(api); runCurrent()
+        vm.onFocus("recent", 0); runCurrent()
+        vm.onFocus("featured", 2); runCurrent()
+        gate.complete(Unit); advanceUntilIdle()
+        assertEquals(ref(12), vm.uiState.value.hero!!.ref)
     }
 }

@@ -26,14 +26,17 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Dp
@@ -104,10 +107,27 @@ fun PosterGrid(
         if (gridState.layoutInfo.visibleItemsInfo.none { it.index == entry }) gridState.scrollToItem(entry)
         if (entryRequester.requestFocusSoon()) entered = true
     }
+    // A reload (the watchlist after a toggle) can remove the focused card: focus then moves to the card now
+    // at its position instead of falling out of the grid. Plain holder: focus moves must not recompose.
+    val focused = remember { FocusedCard() }
+    val currentItems by rememberUpdatedState(items)
+    var refocusAt by remember { mutableIntStateOf(-1) }
+    val refocusRequester = remember { FocusRequester() }
+    LaunchedEffect(refocusAt) {
+        val at = refocusAt.takeIf { it >= 0 && items.isNotEmpty() } ?: return@LaunchedEffect
+        if (gridState.layoutInfo.visibleItemsInfo.none { it.index == at }) gridState.scrollToItem(at)
+        refocusRequester.requestFocusSoon()
+        refocusAt = -1
+    }
     LazyVerticalGrid(
         columns = GridCells.Fixed(GridColumns),
         state = gridState,
-        modifier = modifier.focusGroup(),
+        modifier = modifier.focusGroup().onFocusChanged {
+            val ref = focused.ref
+            if (!it.hasFocus && ref != null && currentItems.none { c -> c.ref == ref }) {
+                refocusAt = focused.index.coerceAtMost(currentItems.lastIndex)
+            }
+        },
         contentPadding = PaddingValues(start = GridContentStart, end = GridContentEnd, top = GridPadTop, bottom = 48.dp),
         horizontalArrangement = Arrangement.spacedBy(CardGap),
         verticalArrangement = Arrangement.spacedBy(RowGap),
@@ -118,10 +138,12 @@ fun PosterGrid(
                 modifier = (if (i == entry && !entered) Modifier.focusRequester(entryRequester) else Modifier)
                     .then(if (i == 0 && firstCard != null) Modifier.focusRequester(firstCard) else Modifier)
                     .then(if (i == items.lastIndex) Modifier.focusRequester(lastRequester) else Modifier)
+                    .then(if (i == refocusAt) Modifier.focusRequester(refocusRequester) else Modifier)
                     // Focus only scrolls a card that is partly off-screen; ask explicitly so the pivot
                     // spec pins every focused row to the top of the grid.
-                    .bringIntoViewOnFocus { onFocusIndex(i) },
+                    .bringIntoViewOnFocus { focused.ref = card.ref; focused.index = i; onFocusIndex(i) },
                 width = cellWidth,
+                subtitle = card.subtitle,
             )
         }
         if (loadingMore) {
@@ -143,6 +165,12 @@ fun PosterGrid(
             }
         }
     }
+}
+
+/** The grid's focused card, by identity and position. */
+private class FocusedCard {
+    var ref: TitleRef? = null
+    var index = 0
 }
 
 @Composable

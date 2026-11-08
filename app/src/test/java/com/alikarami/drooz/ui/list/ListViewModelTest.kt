@@ -188,4 +188,65 @@ class ListViewModelTest {
         assertFalse(vm.uiState.value.empty)
         assertEquals("offline", vm.uiState.value.error)
     }
+
+    // ── B5: «لیست من» follows toggles made on a title page ─────────────────────
+
+    private fun TestScope.watchlistVm(api: FakeApi): Pair<ListViewModel, TitleInfoRepository> {
+        val repo = TitleInfoRepository(api, fetchScope = backgroundScope)
+        return ListViewModel(api, repo, "/user/watchlist/", "لیست من", reloadOnWatchlistChange = true) to repo
+    }
+
+    @Test fun watchlistReloadsAfterAToggle() = runTest(dispatcher) {
+        var ids = listOf(1L, 2L, 3L)
+        var gate: CompletableDeferred<Unit>? = null
+        val api = FakeApi { _, p -> gate?.await(); ListPage(ids.map { card(it) }, p, 1) }
+        val (vm, repo) = watchlistVm(api); advanceUntilIdle()
+        vm.onFocusIndex(2)
+        vm.onResume(); advanceUntilIdle()
+        assertEquals(1, api.listCalls.size)                  // nothing toggled: no reload
+
+        ids = listOf(1L, 2L)
+        gate = CompletableDeferred()
+        repo.watchlistChanged()
+        vm.onResume(); runCurrent()
+        assertEquals(3, vm.uiState.value.items.size)         // the old grid stays until the new one arrives
+        assertFalse(vm.uiState.value.loading)
+        gate!!.complete(Unit); advanceUntilIdle()
+        assertEquals(listOf("/user/watchlist/" to 1, "/user/watchlist/" to 1), api.listCalls)
+        assertEquals(listOf("Title 1", "Title 2"), vm.uiState.value.items.map { it.title })
+        assertEquals(1, vm.focusedIndex)                     // the focused card is gone: its neighbour
+        vm.onResume(); advanceUntilIdle()
+        assertEquals(2, api.listCalls.size)                  // seen once
+    }
+
+    @Test fun watchlistReloadFailureKeepsGrid() = runTest(dispatcher) {
+        var fail = false
+        val api = FakeApi { _, p -> if (fail) error("net") else ListPage(listOf(card(1), card(2)), p, 1) }
+        val (vm, repo) = watchlistVm(api); advanceUntilIdle()
+        fail = true
+        repo.watchlistChanged()
+        vm.onResume(); advanceUntilIdle()
+        assertEquals(2, vm.uiState.value.items.size)
+        assertNull(vm.uiState.value.error)
+    }
+
+    @Test fun watchlistReloadToEmptyShowsEmpty() = runTest(dispatcher) {
+        var ids = listOf(1L)
+        val api = FakeApi { _, p -> ListPage(ids.map { card(it) }, p, 1) }
+        val (vm, repo) = watchlistVm(api); advanceUntilIdle()
+        ids = emptyList()
+        repo.watchlistChanged()
+        vm.onResume(); advanceUntilIdle()
+        assertTrue(vm.uiState.value.empty)
+    }
+
+    // Other lists ignore watchlist toggles.
+    @Test fun otherListsIgnoreToggles() = runTest(dispatcher) {
+        val api = FakeApi { _, p -> page(p, 5) }
+        val repo = TitleInfoRepository(api, fetchScope = backgroundScope)
+        val vm = ListViewModel(api, repo, path, "فیلم های جدید"); advanceUntilIdle()
+        repo.watchlistChanged()
+        vm.onResume(); advanceUntilIdle()
+        assertEquals(1, api.listCalls.size)
+    }
 }

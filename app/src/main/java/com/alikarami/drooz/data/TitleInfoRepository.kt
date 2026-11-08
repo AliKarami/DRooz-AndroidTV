@@ -15,7 +15,8 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 
 /**
- * Title details cache: TTL, in-flight dedupe, at most 2 concurrent fetches; failures are not cached.
+ * Title details cache: TTL, in-flight dedupe, at most 2 concurrent fetches (plus one for [get]'s priority
+ * callers); failures are not cached.
  * A play changes the page (played ✓, next episode): [invalidate] makes the next [get] refetch while
  * [lastKnown] still serves the old detail for an instant display. [clear] forgets everything at a
  * session change (AppViewModel).
@@ -40,8 +41,11 @@ class TitleInfoRepository(
     private val versions = HashMap<TitleRef, Int>()
     private var epoch = 0
     private val limiter = Semaphore(2)
+    /** Focus-driven hero fetches: one of their own, so they never wait behind a burst of background ones. */
+    private val priorityLimiter = Semaphore(1)
     private val played = MutableStateFlow<Map<TitleRef, String>>(emptyMap())
     private val _invalidations = MutableStateFlow(0)
+    private val _watchlistChanges = MutableStateFlow(0)
 
     /** Stream-page backdrop paths recorded after playback. */
     val playedBackdrops: StateFlow<Map<TitleRef, String>> = played
@@ -49,15 +53,23 @@ class TitleInfoRepository(
     /** Counts [invalidate] calls (plays): home revalidates «ادامه تماشا» when it changed. */
     val invalidations: StateFlow<Int> = _invalidations
 
-    suspend fun get(ref: TitleRef): TitleDetail {
+    /** Counts «لیست من» toggles ([watchlistChanged]): a showing watchlist grid reloads when it changed. */
+    val watchlistChanges: StateFlow<Int> = _watchlistChanges
+
+    /**
+     * [maxAgeMs]: a cached detail older than this is refetched (a page the user opens must show new
+     * episodes; the TTL suits glances like the hero). [priority]: fetched on its own permit (the focused hero).
+     */
+    suspend fun get(ref: TitleRef, maxAgeMs: Long = ttlMs, priority: Boolean = false): TitleDetail {
         val job = synchronized(lock) {
-            fresh(ref)?.let { return it }
+            fresh(ref, maxAgeMs)?.let { return it }
             inFlight.getOrPut(ref) {
                 val stamp = epoch to (versions[ref] ?: 0)
+                val permits = if (priority) priorityLimiter else limiter
                 scope.async {
                     val self = coroutineContext[Job]
                     try {
-                        val d = limiter.withPermit { api.title(ref) }
+                        val d = permits.withPermit { api.title(ref) }
                         synchronized(lock) { if (stamp == epoch to (versions[ref] ?: 0)) cache[ref] = Entry(d, now()) }
                         d
                     } finally {
@@ -90,6 +102,9 @@ class TitleInfoRepository(
         cache.computeIfPresent(ref) { _, e -> Entry(f(e.detail), e.at, e.stale) }
     }
 
+    /** The app toggled a title's «لیست من» state on the site. */
+    fun watchlistChanged() = _watchlistChanges.update { it + 1 }
+
     /** Session change: forget every title, fetch under way and played backdrop. */
     fun clear() {
         synchronized(lock) {
@@ -103,6 +118,11 @@ class TitleInfoRepository(
 
     fun remember(ref: TitleRef, backdropPath: String) = played.update { it + (ref to backdropPath) }
 
-    private fun fresh(ref: TitleRef): TitleDetail? =
-        cache[ref]?.takeIf { !it.stale && now() - it.at < ttlMs }?.detail
+    private fun fresh(ref: TitleRef, maxAgeMs: Long = ttlMs): TitleDetail? =
+        cache[ref]?.takeIf { !it.stale && now() - it.at < minOf(maxAgeMs, ttlMs) }?.detail
+
+    companion object {
+        /** How old a title page may be when the user opens it (or «ادامه تماشا» decides what is next). */
+        const val PAGE_MAX_AGE_MS = 15L * 60 * 1000
+    }
 }

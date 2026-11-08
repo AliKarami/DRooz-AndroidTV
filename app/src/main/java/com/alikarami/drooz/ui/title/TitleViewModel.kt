@@ -77,7 +77,8 @@ class TitleViewModel(
     init { load() }
 
     /**
-     * Shows the cached page at once (even one a play has invalidated: no skeleton), then the current one.
+     * Shows the cached page at once (even one a play has invalidated: no skeleton), then the current one:
+     * a cached page older than [TitleInfoRepository.PAGE_MAX_AGE_MS] is refetched (new episodes).
      * Once a page is showing, a failed refresh keeps it quietly.
      */
     fun load() {
@@ -86,7 +87,7 @@ class TitleViewModel(
         viewModelScope.safeLaunch(onError = { if (detail == null) { error = it.message ?: "error"; publish() } }) {
             readLocal()
             if (detail == null) titleInfo.lastKnown(ref)?.let { show(it) }
-            show(titleInfo.get(ref))
+            show(titleInfo.get(ref, maxAgeMs = TitleInfoRepository.PAGE_MAX_AGE_MS))
         }
     }
 
@@ -161,6 +162,7 @@ class TitleViewModel(
             watchlistInFlight = false
             val now = inWatchlist
             titleInfo.patch(ref) { it.copy(inWatchlist = now) }
+            titleInfo.watchlistChanged()
         }
     }
 
@@ -179,6 +181,13 @@ class TitleViewModel(
 
     private fun publish() = _state.update { build() }
 
+    /** The episode watched most recently on this device, else the last one with a ✓ (the site gives no times). */
+    private fun lastWatched(seasons: List<Season>): Episode? {
+        val all = seasons.flatMap { s -> s.episodes.sortedBy { it.number } }
+        return all.filter { it.streamId in local }.maxByOrNull { local.getValue(it.streamId).updatedAt }
+            ?: all.lastOrNull { episodeState(it, local[it.streamId]).watched }
+    }
+
     private fun build(): TitleUiState {
         val d = detail
         val seasons: List<Season> = d?.let { if (dub) it.catalog.dub else it.catalog.main }.orEmpty()
@@ -195,7 +204,10 @@ class TitleViewModel(
         }
         val primary = up?.episode
         val numbers = seasons.map { it.number }
-        val selected = seasonOverride?.takeIf { it in numbers } ?: primary?.season ?: numbers.firstOrNull() ?: 1
+        // Everything watched: the button starts over at S1E1, but the tabs open where the user left off.
+        val lastSeen = if (up is NextUp.Again) lastWatched(seasons) else null
+        val selected = seasonOverride?.takeIf { it in numbers } ?: lastSeen?.season ?: primary?.season
+            ?: numbers.firstOrNull() ?: 1
         val minutes = d?.card?.durationMin
         val eps = seasons.firstOrNull { it.number == selected }?.episodes.orEmpty().sortedBy { it.number }
         val states = eps.map { it to episodeState(it, local[it.streamId]) }
@@ -206,7 +218,8 @@ class TitleViewModel(
             seasons = numbers,
             selectedSeason = selected,
             episodes = states.map { (e, st) -> EpisodeUi(e, episodeLabel(e.season, e.number), minutes, st.watched, st.progress) },
-            initialFocusEpisode = primary?.takeIf { p -> eps.any { it.season == p.season && it.number == p.number } }?.number
+            initialFocusEpisode = lastSeen?.takeIf { it.season == selected }?.number
+                ?: primary?.takeIf { p -> eps.any { it.season == p.season && it.number == p.number } }?.number
                 ?: states.firstOrNull { !it.second.watched }?.first?.number,
             dubAvailable = d?.catalog?.dub?.isNotEmpty() == true,
             dubSelected = dub,

@@ -172,4 +172,41 @@ class TitleInfoRepositoryTest {
         repo.patch(ref(2)) { it.copy(inWatchlist = true) } // nothing cached: no-op
         assertNull(repo.lastKnown(ref(2)))
     }
+    // The title page asks for a recent page (new episodes): an older cached one is refetched, a recent
+    // one is served from the cache, and the default TTL still applies to everyone else.
+    @Test fun maxAgeRefetchesOlderPage() = runTest {
+        val api = FakeApi { detail(it) }
+        var t = 0L
+        val repo = TitleInfoRepository(api, { t }, 10_000, backgroundScope)
+        repo.get(ref(1)); t = 499
+        repo.get(ref(1), maxAgeMs = 500)
+        assertEquals(1, api.calls)
+        t = 500
+        repo.get(ref(1))
+        assertEquals(1, api.calls)
+        repo.get(ref(1), maxAgeMs = 500)
+        assertEquals(2, api.calls)
+    }
+
+    // A focus-driven hero fetch must not queue behind a burst of «ادامه تماشا» resolutions.
+    @Test fun priorityFetchSkipsTheQueue() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val api = FakeApi { if (it != ref(9)) gate.await(); detail(it) }
+        val repo = TitleInfoRepository(api, { 0 }, 1000, backgroundScope)
+        val queued = (1L..4L).map { async { repo.get(ref(it)) } }
+        runCurrent()
+        val hero = async { repo.get(ref(9), priority = true) }
+        runCurrent()
+        assertTrue(hero.isCompleted)
+        gate.complete(Unit)
+        queued.awaitAll()
+    }
+
+    // The title page toggled «لیست من»: a showing watchlist grid learns it must reload.
+    @Test fun watchlistChangesAreCounted() = runTest {
+        val repo = TitleInfoRepository(FakeApi { detail(it) }, { 0 }, 1000, backgroundScope)
+        assertEquals(0, repo.watchlistChanges.value)
+        repo.watchlistChanged()
+        assertEquals(1, repo.watchlistChanges.value)
+    }
 }

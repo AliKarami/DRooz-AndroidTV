@@ -47,7 +47,8 @@ private val DroozTypography = Typography(
     bodySmall = style(14, FontWeight.Normal),
     labelLarge = style(16, FontWeight.Medium),
     labelMedium = style(14, FontWeight.Medium),
-    labelSmall = style(12, FontWeight.Medium),
+    // Captions (card subtitles, minutes, chips) are read from 3 m away: nothing smaller than 14sp.
+    labelSmall = style(14, FontWeight.Medium),
 )
 
 /** Dark theme, Vazirmatn typography, whole app right-to-left. */

@@ -66,7 +66,9 @@ fun NavigationDrawerScope.HomeRail(selected: RailItem, onSelect: (RailItem) -> U
         modifier
             .fillMaxHeight()
             .background(if (hasFocus) RailOpenBackground else RailBackground)
-            .padding(horizontal = 12.dp)
+            // The screen-edge (start, RTL: right) side clears the TV's overscan margin (5% ≈ 48dp to the
+            // icons, which sit 16dp into their 56dp items); the content side needs none.
+            .padding(start = 32.dp)
             // Entering the rail from anywhere lands on the current destination, not the nearest icon. A focus
             // group, so moving between items is not seen as re-entering (that snapped Up/Down back to it).
             .focusProperties { enter = { selectedRequester } }

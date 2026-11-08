@@ -44,7 +44,7 @@ import com.alikarami.drooz.ui.theme.droozSurfaceScale
  */
 private const val AboveFocusedCard = 10f
 
-/** Poster (2:3, [width] wide) with the title underneath. */
+/** Poster (2:3, [width] wide) with the title underneath, and [subtitle] (new episode, year) under that. */
 @Composable
 fun PosterCard(
     title: String,
@@ -52,6 +52,7 @@ fun PosterCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     width: Dp = 160.dp,
+    subtitle: String? = null,
 ) {
     Column(modifier.width(width), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Surface(
@@ -69,6 +70,13 @@ fun PosterCard(
             title, MaterialTheme.typography.bodySmall.copy(textAlign = TextAlign.Right),
             Modifier.fillMaxWidth().zIndex(AboveFocusedCard), color = Color.White, maxLines = 2,
         )
+        if (subtitle != null) {
+            Text(
+                subtitle, Modifier.fillMaxWidth().zIndex(AboveFocusedCard),
+                style = MaterialTheme.typography.labelSmall.copy(textAlign = TextAlign.Right),
+                color = Color(0xFFCFD2DA), maxLines = 1,
+            )
+        }
     }
 }
 

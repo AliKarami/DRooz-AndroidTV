@@ -68,7 +68,10 @@ class PlaybackRulesTest {
         assertNull(nextEpisode(seasons, "nope"))
     }
 
-    @Test fun scrubAccelerates() = assertEquals(listOf(10_000L, 10_000L, 30_000L, 60_000L), listOf(0, 4, 5, 10).map(::scrubStepMs))
+    @Test fun scrubDistanceGrowsWithHoldTime() = assertEquals(
+        listOf(0L, 10_000L, 20_000L, 50_000L, 80_000L, 200_000L, 320_000L),
+        listOf(-5L, 1_000L, 2_000L, 3_000L, 4_000L, 6_000L, 7_000L).map(::scrubOffsetMs),
+    )
 
     @Test fun qualityOptionsUseSiteLabelsByHeight() = assertEquals(
         listOf(QualityOption(1080, "1080 [ 2.48 GB ]"), QualityOption(720, "720 [ 1.14 GB ]"), QualityOption(480, "480 [ 553 MB ]"), QualityOption(360, "360p")),

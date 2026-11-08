@@ -42,11 +42,13 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.alikarami.drooz.data.SubtitleChoice
 import com.alikarami.drooz.data.SubtitleStyle
+import com.alikarami.drooz.player.END_GUARD_MS
 import com.alikarami.drooz.player.PlayerUiState
 import com.alikarami.drooz.player.PlayerViewModel
 import com.alikarami.drooz.player.UpNext
 import com.alikarami.drooz.player.engine.ExoPlaybackEngine
 import com.alikarami.drooz.player.engine.VideoSize
+import com.alikarami.drooz.player.scrubOffsetMs
 import com.alikarami.drooz.ui.common.BusySpinner
 import com.alikarami.drooz.ui.common.requestFocusSoon
 import kotlinx.coroutines.delay
@@ -71,6 +73,8 @@ internal class OverlayController {
         private set
     /** The scrub head while a held LEFT/RIGHT moves it; null when not scrubbing. */
     var scrubMs by mutableStateOf<Long?>(null)
+    /** Where the current hold began (the scrub head moves from here by the hold time). */
+    var scrubOriginMs = 0L
     var seekBarFocused = false
     /** Bumped after a seek so the seek bar re-reads the engine at once. */
     var refresh by mutableIntStateOf(0)
@@ -163,9 +167,11 @@ internal fun PlayerOverlayHost(
                 showIfHidden(ControlsTarget.SEEK_BAR)
             }
             is KeyAction.Scrub -> {
+                if (c.scrubMs == null) c.scrubOriginMs = engine.positionMs
                 val duration = engine.durationMs
-                val next = max(0L, (c.scrubMs ?: engine.positionMs) + action.deltaMs)
-                c.scrubMs = if (duration > 0) min(next, duration) else next
+                val next = max(0L, c.scrubOriginMs + action.direction * scrubOffsetMs(action.heldMs))
+                // Short of the end, as the commit's seek will be (landing on the end ends the episode).
+                c.scrubMs = if (duration > 0) min(next, max(0L, duration - END_GUARD_MS)) else next
                 showIfHidden(ControlsTarget.SEEK_BAR)
             }
             KeyAction.CommitScrub -> {
@@ -174,6 +180,8 @@ internal fun PlayerOverlayHost(
                 c.refresh++
             }
             KeyAction.Back -> handleBack()
+            KeyAction.Next -> vm.playNext()
+            KeyAction.Stop -> vm.close()
             KeyAction.PlayAndShow -> {
                 vm.play()
                 showIfHidden(ControlsTarget.PLAY)
@@ -202,6 +210,7 @@ internal fun PlayerOverlayHost(
             n.keyCode, down, n.repeatCount, overlayForKeys,
             seekBarFocused = c.seekBarFocused && c.overlay == Overlay.CONTROLS,
             scrubbing = c.scrubMs != null,
+            heldMs = n.eventTime - n.downTime,
         )
         if (action == KeyAction.None) return !down && c.consumedDowns.remove(n.keyCode)
         perform(action)

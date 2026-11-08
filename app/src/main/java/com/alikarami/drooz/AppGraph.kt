@@ -61,14 +61,16 @@ class AppGraph(context: Context) {
     private val localTitlePrefs = DataStoreTitlePrefs(titlePrefsStore(appContext))
     private val fileWatchStore = FileWatchStore(appContext.filesDir.resolve("watch_state.json"))
     private val fileHiddenTitles = FileHiddenTitles(appContext.filesDir.resolve("hidden_titles.json"))
+    private val localRecentSearches = DataStoreRecentSearches(recentSearchesStore(appContext))
     val auth = AuthService(
         http, cookieJar, CredentialStore(dir.resolve("creds.bin"), KeystoreSecretBox()),
         owner = AccountOwner(dir.resolve("account.id")),
-        // Another account on this TV starts without the previous one's progress and title choices.
+        // Another account on this TV starts without the previous one's progress, title choices or searches.
         onAccountChanged = {
             runCatching { fileWatchStore.clear() }
             runCatching { fileHiddenTitles.clear() }
             runCatching { localTitlePrefs.clear() }
+            runCatching { localRecentSearches.clear() }
         },
     )
     val repository = SiteRepository(http, auth)
@@ -83,7 +85,7 @@ class AppGraph(context: Context) {
     val playerPrefs: PlayerPrefs = DataStorePlayerPrefs(playerPrefsStore(appContext))
     val watchStore: WatchStore = fileWatchStore
     val hiddenTitles: HiddenTitles = fileHiddenTitles
-    val recentSearches: RecentSearches = DataStoreRecentSearches(recentSearchesStore(appContext))
+    val recentSearches: RecentSearches = localRecentSearches
 
     /** For Media3: carries the site cookies (subtitles need them) and the browser UA. */
     val mediaClient: OkHttpClient = baseClient.newBuilder()

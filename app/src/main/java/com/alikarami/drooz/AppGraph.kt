@@ -12,7 +12,9 @@ import com.alikarami.drooz.data.SessionEvents
 import com.alikarami.drooz.data.SessionGuardedSiteApi
 import com.alikarami.drooz.data.DataStoreTitlePrefs
 import com.alikarami.drooz.data.DataStorePlayerPrefs
+import com.alikarami.drooz.data.FileHiddenTitles
 import com.alikarami.drooz.data.FileWatchStore
+import com.alikarami.drooz.data.HiddenTitles
 import com.alikarami.drooz.data.HomePageCache
 import com.alikarami.drooz.data.PlayerPrefs
 import com.alikarami.drooz.data.WatchStore
@@ -55,12 +57,14 @@ class AppGraph(context: Context) {
     val http = SiteHttp(SiteConfig.BASE_URL.toHttpUrl(), cookieJar, baseClient)
     private val localTitlePrefs = DataStoreTitlePrefs(titlePrefsStore(appContext))
     private val fileWatchStore = FileWatchStore(appContext.filesDir.resolve("watch_state.json"))
+    private val fileHiddenTitles = FileHiddenTitles(appContext.filesDir.resolve("hidden_titles.json"))
     val auth = AuthService(
         http, cookieJar, CredentialStore(dir.resolve("creds.bin"), KeystoreSecretBox()),
         owner = AccountOwner(dir.resolve("account.id")),
         // Another account on this TV starts without the previous one's progress and title choices.
         onAccountChanged = {
             runCatching { fileWatchStore.clear() }
+            runCatching { fileHiddenTitles.clear() }
             runCatching { localTitlePrefs.clear() }
         },
     )
@@ -70,10 +74,12 @@ class AppGraph(context: Context) {
     val siteApi: SiteApi = SessionGuardedSiteApi(SiteApiAdapter(repository), sessionEvents)
     val authApi: AuthApi = AuthApiAdapter(auth)
     val titleInfo = TitleInfoRepository(siteApi)
-    val homeCache = HomePageCache()
+    /** Last home page; also on disk (cache dir) for an instant cold start, deleted with the session. */
+    val homeCache = HomePageCache(file = appContext.cacheDir.resolve("home_page.json"))
     val titlePrefs: TitlePrefs = localTitlePrefs
     val playerPrefs: PlayerPrefs = DataStorePlayerPrefs(playerPrefsStore(appContext))
     val watchStore: WatchStore = fileWatchStore
+    val hiddenTitles: HiddenTitles = fileHiddenTitles
 
     /** For Media3: carries the site cookies (subtitles need them) and the browser UA. */
     val mediaClient: OkHttpClient = baseClient.newBuilder()

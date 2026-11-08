@@ -6,6 +6,7 @@ import com.alikarami.drooz.data.Backdrop
 import com.alikarami.drooz.data.BackdropResolver
 import com.alikarami.drooz.data.ContinueItem
 import com.alikarami.drooz.data.ContinueWatching
+import com.alikarami.drooz.data.HiddenTitles
 import com.alikarami.drooz.data.HomeRowConfig
 import com.alikarami.drooz.data.HomePageCache
 import com.alikarami.drooz.data.HomeRows
@@ -25,6 +26,7 @@ import com.alikarami.drooz.site.model.TitleRef
 import com.alikarami.drooz.ui.common.UiStrings
 import com.alikarami.drooz.ui.common.safeLaunch
 import com.alikarami.drooz.ui.common.toPersianDigits
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -93,7 +95,10 @@ class HomeViewModel(
     /** Null: «ادامه تماشا» is the server's recently streamed list as is (no local state, no resolving). */
     private val watchStore: WatchStore? = null,
     private val titlePrefs: TitlePrefs? = null,
+    /** Same clock as [WatchStore]'s updatedAt: a hide is compared with later plays. */
     private val now: () -> Long = System::currentTimeMillis,
+    /** Titles removed from «ادامه تماشا» on this TV; null: nothing can be removed. */
+    private val hiddenTitles: HiddenTitles? = null,
 ) : ViewModel() {
     companion object {
         /** Back on home after this long (TV apps stay in memory for days), the rows are revalidated. */
@@ -124,18 +129,28 @@ class HomeViewModel(
         _state.update { it.copy(hero = h) }
     }
     private var refreshJob: Job? = null
+    /** Cold start: reading the page an earlier run stored ([HomePageCache.stored]). */
+    private var staleJob: Job? = null
+    /** The home rows show a stored page the site has not confirmed in this run yet. */
+    private var staleShown = false
     private val listJobs = HashMap<String, Job>()
 
     // «ادامه تماشا»: the server list last applied (null before the first), local watch state, and the
     // details resolved so far, kept so [onResume] rebuilds the row without refetching.
     private var recentServer: List<PosterRef>? = null
     private var local: List<WatchEntry> = emptyList()
+    /** postId → when it was removed from the row ([removeFromContinue] or an earlier session). */
+    private var hidden: Map<Long, Long> = emptyMap()
     private val resolved = HashMap<TitleRef, TitleDetail>()
     private val dubs = HashMap<TitleRef, Boolean>()
     private val resolving = HashMap<TitleRef, Job>()
     private var recentJob: Job? = null
     /** A Play was handed out and home has not resumed since: a second OK is a double press. */
     private var playPending = false
+
+    private val _menuHint = MutableStateFlow(true)
+    /** Whether a focused «ادامه تماشا» card still hints at its long-press menu: until it is first opened. */
+    val menuHint: StateFlow<Boolean> = _menuHint
 
     init { loadHome(useCache = true) }
 
@@ -158,7 +173,9 @@ class HomeViewModel(
         // The player writes locally even when nothing reached the server: progress may have moved. Shown
         // at once, also while a revalidation is under way (the site takes seconds).
         recentKey?.let { key -> recentServer?.let { showRecent(key, it, refetch = false) } }
-        if (plays == seenPlays && !old) return
+        // A stored page whose revalidation failed (offline at launch) is asked again on every return.
+        val unconfirmed = staleShown && refreshJob?.isActive != true
+        if (plays == seenPlays && !old && !unconfirmed) return
         seenPlays = plays
         val showing = _state.value.rows.any { isHomeRow(it.key) && it.items.isNotEmpty() }
         loadHome(useCache = false, quiet = showing)
@@ -174,11 +191,22 @@ class HomeViewModel(
      * [useCache]: a fresh cached page (warm start) is shown at once, with no skeleton, and then revalidated
      * in the background; a failed revalidation keeps the cached rows quietly. [quiet]: the rows showing
      * stay as they are (no skeleton) until the new page replaces them; a failure keeps them.
+     * A cold start ([useCache], nothing in memory) fills the skeleton with the page an earlier run stored,
+     * if any, while the site is asked; a failure then keeps that page quietly too.
      */
     private fun loadHome(useCache: Boolean, quiet: Boolean = false) {
         refreshJob?.cancel()
-        val cached = homeCache?.takeIf { useCache }?.fresh()
+        staleJob?.cancel()
+        val cache = homeCache
+        val cached = cache?.takeIf { useCache }?.fresh()
         val keep = cached != null || quiet
+        staleJob = if (useCache && cached == null && cache != null) {
+            viewModelScope.safeLaunch(onError = { }) {
+                val stored = cache.stored() ?: return@safeLaunch
+                staleShown = true
+                applyHome(stored)
+            }
+        } else null
         if (cached != null) applyHome(cached)
         else if (!quiet) _state.update { s ->
             s.copy(
@@ -187,7 +215,7 @@ class HomeViewModel(
             )
         }
         refreshJob = viewModelScope.safeLaunch(onError = { e ->
-            if (!keep) {
+            if (!keep && !staleShown) {
                 // Failed, not empty: each home row offers its retry, even while list rows load fine.
                 _state.update { s ->
                     s.copy(rows = s.rows.map { if (isHomeRow(it.key)) it.copy(loading = false, error = true) else it },
@@ -197,10 +225,22 @@ class HomeViewModel(
                 if (recentServer == null && watchStore != null) recentKey?.let { showRecent(it, emptyList(), refetch = false) }
             }
         }) {
-            val page = api.home()
-            homeCache?.put(page)
+            val page = try {
+                api.home()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // Offline at once: a stored page still being read fills the rows instead of the error.
+                staleJob?.join()
+                throw e
+            }
+            // The fresh page wins over a stored one still being read.
+            staleJob?.cancel()
+            staleShown = false
+            cache?.put(page)
             loadedAt = now()
             applyHome(page)
+            cache?.persist(page)
         }
     }
 
@@ -234,9 +274,13 @@ class HomeViewModel(
         recentJob = viewModelScope.safeLaunch(onError = { }) {
             // A failing store just means no local state.
             local = runCatching { store.all() }.getOrNull().orEmpty()
+            // A failing store keeps what is known; a removal made meanwhile wins over the older read.
+            runCatching { hiddenTitles?.all() }.getOrNull()?.let { stored ->
+                hidden = stored + hidden.filter { (id, at) -> at > (stored[id] ?: Long.MIN_VALUE) }
+            }
             for ((ref, d) in resolved) dubs[ref] = dubFor(ref, d)
             renderRecent(key)
-            for ((ref, _) in ContinueWatching.order(server, local)) {
+            for ((ref, _) in ContinueWatching.order(server, local, hidden)) {
                 if (refetch || ref !in resolved) resolve(key, ref, again = refetch)
             }
         }
@@ -268,7 +312,7 @@ class HomeViewModel(
     private fun renderRecent(key: String) {
         val server = recentServer ?: return
         val byStream = local.associateBy { it.streamId }
-        val list = ContinueWatching.order(server, local).mapNotNull { (ref, hash) ->
+        val list = ContinueWatching.order(server, local, hidden).mapNotNull { (ref, hash) ->
             val d = resolved[ref] ?: return@mapNotNull Entry(ref, null, hash, ContinueWatching.pending(ref, hash))
             ContinueWatching.resolve(ref, hash ?: d.card.posterHash, d, byStream, dubs[ref] ?: false)
                 ?.let { Entry(ref, null, it.posterHash, it, d) }
@@ -288,6 +332,25 @@ class HomeViewModel(
         if (playPending) return null
         playPending = true
         return HomeAction.Play(PlayerArgs(e.ref, play.streamId, dubs[e.ref] ?: false))
+    }
+
+    /** The long-press menu on a «ادامه تماشا» card was opened: the hint has done its job. */
+    fun onMenuOpened() {
+        _menuHint.value = false
+    }
+
+    /**
+     * «حذف از ادامه تماشا»: the card leaves the row at once (focus and the hero move to the card now in
+     * its place, see [setItems]) and stays out until the title is played again on this TV.
+     */
+    fun removeFromContinue(ref: TitleRef) {
+        val key = recentKey ?: return
+        val at = now()
+        hidden = hidden + (ref.postId to at)
+        renderRecent(key)
+        val store = hiddenTitles ?: return
+        // A failed write only means the card comes back after a restart.
+        viewModelScope.safeLaunch(onError = { }) { store.hide(ref.postId, at) }
     }
 
     private fun isHomeRow(key: String) = configs[key]?.source !is RowSource.ListPath

@@ -44,6 +44,34 @@ class ContinueWatchingTest {
     }
 
     @Test
+    fun order_hiddenTitle_leftOutWhetherServerListedOrLocalOnly() {
+        val a = ref(1); val b = ref(2); val c = ref(3)
+        val local = listOf(entry("b", b, 1, 10, 20), entry("c", c, 1, 10, 30))
+        val hidden = mapOf(1L to 100L, 3L to 100L)
+        val r = ContinueWatching.order(listOf(PosterRef(a, "ha"), PosterRef(b, "hb")), local, hidden)
+        assertEquals(listOf(b to "hb"), r)
+    }
+
+    @Test
+    fun order_hiddenTitle_comesBackOnceAnyEntryIsNewerThanTheHide() {
+        val a = ref(1); val c = ref(3)
+        val local = listOf(
+            entry("a1", a, 1, 10, 100), entry("a2", a, 1, 10, 101),  // played again after the hide
+            entry("c1", c, 1, 10, 100),                               // same instant: still hidden
+        )
+        val r = ContinueWatching.order(listOf(PosterRef(a, "ha")), local, mapOf(1L to 100L, 3L to 100L))
+        assertEquals(listOf(a to "ha"), r)
+    }
+
+    @Test
+    fun order_hiddenLocalOnlyTitles_doNotTakeCapSlots() {
+        val local = (1L..15L).map { entry("e$it", ref(it), 1, 10, updatedAt = it) }
+        val hidden = (11L..15L).associateWith { 1_000L }
+        val r = ContinueWatching.order(emptyList(), local, hidden)
+        assertEquals((10L downTo 1L).map { ref(it) to null }, r)
+    }
+
+    @Test
     fun order_skipsUnparseableRefPath() {
         val c = ref(3)
         val bad = entry("x", c, 1, 10, 99).copy(refPath = "/nope/")

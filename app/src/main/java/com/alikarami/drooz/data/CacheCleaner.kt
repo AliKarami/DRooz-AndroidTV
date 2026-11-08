@@ -9,7 +9,7 @@ interface CacheCleaner {
     suspend fun clear()
 }
 
-/** Image disk + memory cache, home page cache, title cache. */
+/** Image disk + memory cache, home page cache (memory and its cold-start copy on disk), title cache. */
 class AppCacheCleaner(
     private val imageLoader: ImageLoader,
     private val homeCache: HomePageCache,

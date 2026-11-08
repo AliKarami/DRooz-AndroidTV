@@ -27,16 +27,30 @@ object ContinueWatching {
      * Titles in row order: server order, then local-only titles newest first; de-duplicated by postId.
      * Local-only titles are capped at [LOCAL_ONLY_MAX], and a local-only film whose newest entry is
      * finished is left out (it would only resolve to nothing).
+     * [hidden] (postId → when the user removed it from the row, see [HiddenTitles]) leaves a title out,
+     * server-listed or local-only, until one of its entries is newer than the hide (played again).
      */
-    fun order(server: List<PosterRef>, local: List<WatchEntry>): List<Pair<TitleRef, String?>> {
-        val result = LinkedHashMap<Long, Pair<TitleRef, String?>>()
-        server.forEach { result.putIfAbsent(it.ref.postId, it.ref to it.posterHash) }
-        local.mapNotNull { e -> TitleRef.fromPath(e.refPath)?.let { it to e } }
+    fun order(
+        server: List<PosterRef>,
+        local: List<WatchEntry>,
+        hidden: Map<Long, Long> = emptyMap(),
+    ): List<Pair<TitleRef, String?>> {
+        val newest = local.mapNotNull { e -> TitleRef.fromPath(e.refPath)?.let { it to e } }
             .groupBy({ it.first.postId }, { it })
             .values
             .map { group -> group.maxBy { it.second.updatedAt } }
-            .sortedByDescending { (_, newest) -> newest.updatedAt }
-            .filter { (ref, newest) -> ref.postId !in result && !(ref.kind == TitleKind.FILM && newest.isDone()) }
+        val lastPlayed = newest.associate { (ref, e) -> ref.postId to e.updatedAt }
+        fun isHidden(postId: Long): Boolean {
+            val at = hidden[postId] ?: return false
+            return (lastPlayed[postId] ?: Long.MIN_VALUE) <= at
+        }
+        val result = LinkedHashMap<Long, Pair<TitleRef, String?>>()
+        server.filterNot { isHidden(it.ref.postId) }.forEach { result.putIfAbsent(it.ref.postId, it.ref to it.posterHash) }
+        newest
+            .sortedByDescending { (_, e) -> e.updatedAt }
+            .filter { (ref, e) ->
+                ref.postId !in result && !isHidden(ref.postId) && !(ref.kind == TitleKind.FILM && e.isDone())
+            }
             .take(LOCAL_ONLY_MAX)
             .forEach { (ref, _) -> result[ref.postId] = ref to null }
         return result.values.toList()

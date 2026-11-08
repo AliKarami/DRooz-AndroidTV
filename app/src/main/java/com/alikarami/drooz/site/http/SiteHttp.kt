@@ -2,6 +2,7 @@ package com.alikarami.drooz.site.http
 
 import com.alikarami.drooz.site.SiteConfig
 import com.alikarami.drooz.site.SiteException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import okhttp3.Call
 import okhttp3.Callback
@@ -21,7 +22,9 @@ data class SiteResponse(val finalPath: String, val body: String)
  *
  * The site's server silently drops a share of requests (TLS completes, no response ever comes;
  * healthy responses arrive in < 1 s). GETs therefore use a short [timeoutMs] and are retried up to
- * [maxAttempts] times on timeouts and gateway errors. POSTs are never retried.
+ * [maxAttempts] times on timeouts and gateway errors, [retryDelayMs] apart; a 429 is retried once its
+ * `Retry-After` has passed (when that is short). [callTimeoutMs] bounds one whole GET, so a body that
+ * drips in cannot hold a screen past it. POSTs are never retried.
  */
 class SiteHttp(
     private val baseUrl: HttpUrl,
@@ -30,12 +33,15 @@ class SiteHttp(
     timeoutMs: Long = 8_000,
     private val maxAttempts: Int = 3,
     postTimeoutMs: Long = 30_000,
+    callTimeoutMs: Long = 20_000,
+    private val retryDelayMs: Long = 500,
 ) {
     private val client: OkHttpClient = client.newBuilder()
         .cookieJar(jar)
         .followRedirects(true)
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(timeoutMs, TimeUnit.MILLISECONDS)
+        .callTimeout(callTimeoutMs, TimeUnit.MILLISECONDS)
         .addInterceptor { chain ->
             chain.proceed(chain.request().newBuilder().header("User-Agent", SiteConfig.USER_AGENT).build())
         }
@@ -44,6 +50,7 @@ class SiteHttp(
     /** Login steps can legitimately take several seconds and must never be re-sent by OkHttp. */
     private val postClient = this.client.newBuilder()
         .readTimeout(postTimeoutMs, TimeUnit.MILLISECONDS)
+        .callTimeout(postTimeoutMs + POST_CALL_MARGIN_MS, TimeUnit.MILLISECONDS)
         .retryOnConnectionFailure(false)
         .build()
 
@@ -56,9 +63,9 @@ class SiteHttp(
             try {
                 return execute(request, requiresAuth)
             } catch (e: SiteException) {
-                val transient = e is SiteException.NetworkError ||
-                    (e is SiteException.HttpError && e.code in GATEWAY_ERRORS)
-                if (!transient || attempt >= attempts) throw e
+                val wait = retryWaitMs(e) ?: throw e
+                if (attempt >= attempts) throw e
+                delay(wait)
                 attempt++
             }
         }
@@ -113,8 +120,24 @@ class SiteHttp(
             SiteResponse(finalPath, body)
         }
 
+    /** How long to wait before retrying after [e]; null when [e] is not worth a retry. */
+    private fun retryWaitMs(e: SiteException): Long? = when {
+        e is SiteException.NetworkError -> retryDelayMs
+        e is SiteException.HttpError && e.code in GATEWAY_ERRORS -> retryDelayMs
+        e is SiteException.HttpError && e.code == TOO_MANY_REQUESTS -> {
+            val after = e.retryAfterSeconds?.times(1_000) ?: retryDelayMs
+            after.takeIf { it <= MAX_RETRY_AFTER_MS }?.coerceAtLeast(retryDelayMs)
+        }
+        else -> null
+    }
+
     private companion object {
         val GATEWAY_ERRORS = setOf(502, 503, 504)
+        const val TOO_MANY_REQUESTS = 429
+        /** A longer `Retry-After` is not waited out: the error is shown instead. */
+        const val MAX_RETRY_AFTER_MS = 5_000L
+        /** On top of the POST read timeout: connect and TLS. */
+        const val POST_CALL_MARGIN_MS = 15_000L
     }
 
     private fun checkStatus(r: Response, body: String) {
@@ -122,6 +145,6 @@ class SiteHttp(
         if ((r.code == 403 || r.code == 503) && (body.contains("cf-chl") || body.contains("Just a moment"))) {
             throw SiteException.Blocked()
         }
-        throw SiteException.HttpError(r.code)
+        throw SiteException.HttpError(r.code, r.header("Retry-After")?.trim()?.toLongOrNull())
     }
 }

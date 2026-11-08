@@ -118,6 +118,50 @@ class SiteHttpTest {
         assertEquals(3, server.requestCount)
     }
 
+    private fun timedHttp(callTimeoutMs: Long = 20_000, retryDelayMs: Long = 0) =
+        SiteHttp(server.url("/"), PersistentCookieJar(tmp.newFile(), siteHost = server.hostName),
+            timeoutMs = 300, maxAttempts = 3, callTimeoutMs = callTimeoutMs, retryDelayMs = retryDelayMs)
+
+    private fun elapsedMs(block: () -> Unit): Long {
+        val t0 = System.nanoTime()
+        block()
+        return (System.nanoTime() - t0) / 1_000_000
+    }
+
+    // A body that drips in (each byte inside the read timeout) is cut off by the whole-call limit (D9).
+    @Test fun drippingBodyIsCutOffByTheCallTimeout() {
+        repeat(3) {
+            server.enqueue(MockResponse.Builder().body("x".repeat(100)).throttleBody(1, 100, TimeUnit.MILLISECONDS).build())
+        }
+        val ms = elapsedMs {
+            assertThrows(SiteException.NetworkError::class.java) { runBlocking { timedHttp(callTimeoutMs = 500).get("/") } }
+        }
+        assertTrue("took $ms ms", ms < 5_000)
+    }
+
+    @Test fun retriesWaitBetweenAttempts() {
+        repeat(2) { server.enqueue(MockResponse.Builder().code(502).body("bad gateway").build()) }
+        server.enqueue(ok("third"))
+        val ms = elapsedMs { assertEquals("third", runBlocking { timedHttp(retryDelayMs = 300).get("/").body }) }
+        assertTrue("took $ms ms", ms >= 600)
+    }
+
+    @Test fun tooManyRequestsIsRetriedAfterRetryAfter() {
+        server.enqueue(MockResponse.Builder().code(429).addHeader("Retry-After", "1").body("slow down").build())
+        server.enqueue(ok("fine"))
+        val ms = elapsedMs { assertEquals("fine", runBlocking { timedHttp().get("/").body }) }
+        assertEquals(2, server.requestCount)
+        assertTrue("took $ms ms", ms >= 1_000)
+    }
+
+    @Test fun tooManyRequestsWithALongRetryAfterIsNotRetried() {
+        server.enqueue(MockResponse.Builder().code(429).addHeader("Retry-After", "3600").body("slow down").build())
+        server.enqueue(ok("must not be used"))
+        val e = assertThrows(SiteException.HttpError::class.java) { runBlocking { timedHttp().get("/") } }
+        assertEquals(429, e.code)
+        assertEquals(1, server.requestCount)
+    }
+
     @Test fun getWithRetryDisabledFailsAfterOneAttempt() {
         server.enqueue(hung())
         server.enqueue(ok("must not be used"))

@@ -399,7 +399,7 @@ class PlayerViewModelTest {
         val v = started(env)
         engine.positionMs = 600_000
         v.onStop()
-        now += STALE_STREAM_AFTER_MS
+        now += 11 * 60_000L
         val played = engine.played
         v.onStart()
         runCurrent()
@@ -410,15 +410,27 @@ class PlayerViewModelTest {
         assertEquals(PlayerPhase.Playing, v.state.value.phase)
     }
 
-    @Test fun backAfterShortAbsenceKeepsStream() = playerTest {
+    @Test fun backAfterShortAbsenceStillFetchesFreshStream() = playerTest {
+        // Seen on the TV: re-preparing the old master URL after a few seconds away returns a non-playlist body.
         val env = Env()
         val v = started(env)
+        engine.positionMs = 120_000
         v.onStop()
-        now += STALE_STREAM_AFTER_MS - 1
+        now += 5_000
         v.onStart()
         runCurrent()
-        assertEquals(1, env.api.opens.size)
+        assertEquals(2, env.api.opens.size)
+        assertEquals("https://cdn/master-2.m3u8" to 120_000L, engine.loads.last())
         assertFalse(engine.suspended)
+    }
+
+    @Test fun malformedPlaylistDuringPlaybackReopensStream() = playerTest {
+        val env = Env()
+        val v = started(env)
+        engine.emit(EngineEvent.Error(4002, "ERROR_CODE_PARSING_MANIFEST_MALFORMED", null))
+        runCurrent()
+        assertEquals(2, env.api.opens.size)
+        assertFalse(v.state.value.phase is PlayerPhase.Failed)
     }
 
     @Test fun serverErrorIsNetworkOtherErrorsGeneric() = playerTest {
@@ -1576,7 +1588,7 @@ class PlayerViewModelTest {
         runCurrent()
         assertEquals(1, engine.loads.size) // loaded paused behind the suspension
         env.api.gate = null
-        now += STALE_STREAM_AFTER_MS
+        now += 11 * 60_000L
         v.onStart()
         runCurrent()
         assertEquals(2, env.api.opens.size)

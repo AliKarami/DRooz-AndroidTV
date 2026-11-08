@@ -83,11 +83,11 @@ val SPEEDS = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f)
  * brings the player back before its Wi-Fi is up).
  */
 val OPEN_RETRY_DELAYS_MS = listOf(2_000L, 4_000L, 8_000L)
-/** Hidden at least this long, the player fetches a fresh stream on return: the old stream key may be dead. */
-const val STALE_STREAM_AFTER_MS = 10 * 60_000L
 
 /** HTTP statuses that mean the stream key expired / the CDN URL went stale: reopen the stream page. */
 private val RECOVERABLE_HTTP = setOf(403, 404, 410)
+/** A dead stream key can answer the playlist URL with a non-playlist body (HTTP 200): reopen like a 403. */
+private const val MALFORMED_PLAYLIST = "ERROR_CODE_PARSING_MANIFEST_MALFORMED"
 
 /** The files a choice needs; DUAL uses the separate FA and EN files, never the merged track. */
 internal fun subtitleKinds(choice: SubtitleChoice): List<SubtitleKind> = when (choice) {
@@ -207,7 +207,7 @@ class PlayerViewModel(
     private var reopenReady = false
     /** Reopens in a row, each within [REOPEN_MIN_INTERVAL_MS] of the one before. */
     private var quickReopens = 0
-    /** When the player was last hidden (onStop), for [STALE_STREAM_AFTER_MS]. */
+    /** When the player was last hidden (onStop); null while visible. */
     private var stoppedAt: Long? = null
     private var lastReportAt: Long? = null
     private var playedSinceSaveMs = 0L
@@ -508,7 +508,8 @@ class PlayerViewModel(
         durationMs()
         // Before the first Ready too (the stream key just expired, Wi-Fi not up yet after wake).
         val recoverable = session != null &&
-            (e.httpStatus in RECOVERABLE_HTTP || e.codeName.startsWith("ERROR_CODE_IO_"))
+            (e.httpStatus in RECOVERABLE_HTTP || e.codeName.startsWith("ERROR_CODE_IO_") ||
+                e.codeName == MALFORMED_PLAYLIST)
         if (recoverable && reopenAllowed()) {
             open(streamId, startAt = if (everReady) engine.positionMs else null, silent = true)
         } else {
@@ -958,12 +959,13 @@ class PlayerViewModel(
     fun onStart() {
         foreground = true
         val returning = stoppedAt != null
-        val hiddenMs = stoppedAt?.let { clock() - it } ?: 0L
         stoppedAt = null
         if (returning && _state.value.phase == PlayerPhase.Playing) _resumes.trySend(Unit)
-        // Whatever the phase: an open that finished while hidden (still Loading) holds an old key too.
-        // Not while an open is still in flight (no session yet) or after a failure (Retry reopens).
-        if (hiddenMs >= STALE_STREAM_AFTER_MS && session != null && !closed &&
+        // Back from hidden, the old master URL is not replayable (seen on the TV: seconds later it no longer
+        // returns a playlist), so a fresh stream is opened at the same spot. Whatever the phase: an open that
+        // finished while hidden holds an old key too. Not while an open is still in flight (no session yet) or
+        // after a failure (Retry reopens).
+        if (returning && session != null && !closed &&
             _state.value.phase !is PlayerPhase.Failed
         ) {
             val at = if (everReady) engine.positionMs else null

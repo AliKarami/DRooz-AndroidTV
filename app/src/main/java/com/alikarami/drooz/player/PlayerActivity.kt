@@ -1,5 +1,6 @@
 package com.alikarami.drooz.player
 
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
@@ -100,7 +101,11 @@ class PlayerActivity : ComponentActivity() {
             override fun playNext() = vm.playNext()
             override fun stop() = vm.close()
         }
-        val s = PlayerMediaSession(this, engine.exoPlayer, client ?: return, controls)
+        val reopen = PendingIntent.getActivity(
+            this, 0, Intent(intent).setClass(this, PlayerActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val s = PlayerMediaSession(this, engine.exoPlayer, client ?: return, controls, reopen)
         session = s
         sessionInfoJob = lifecycleScope.launch {
             vm.state.map(::sessionInfo).distinctUntilChanged().collect { s.update(it) }

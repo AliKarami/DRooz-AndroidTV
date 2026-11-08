@@ -2,6 +2,7 @@
 
 package com.alikarami.drooz.player.session
 
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.view.KeyEvent
@@ -27,11 +28,19 @@ private const val ARTWORK_MAX_PX = 1280
  * event of the keys it acts on, see isPlayerMediaKey); they act on their first down only, so a repeat
  * or a framework double-tap ("next") never fires.
  */
-class PlayerMediaSession(context: Context, player: Player, client: OkHttpClient, controls: SessionControls) {
+class PlayerMediaSession(
+    context: Context,
+    player: Player,
+    client: OkHttpClient,
+    controls: SessionControls,
+    /** Opened by the now-playing card: this player screen (singleTop, so it is brought back, not stacked). */
+    sessionActivity: PendingIntent,
+) {
     private val sessionPlayer = SessionPlayer(player, controls)
 
     private val session: MediaSession = MediaSession.Builder(context, sessionPlayer)
         .setId(SESSION_ID)
+        .setSessionActivity(sessionActivity)
         .setBitmapLoader(
             CacheBitmapLoader(
                 DataSourceBitmapLoader.Builder(context)

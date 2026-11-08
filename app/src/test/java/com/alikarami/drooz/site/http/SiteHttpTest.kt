@@ -141,12 +141,6 @@ class SiteHttpTest {
         assertEquals(1, server.requestCount)
     }
 
-    @Test fun finalUrlReturnsRedirectLocationWithoutFollowing() = runTest {
-        server.enqueue(MockResponse.Builder().code(302).addHeader("Location", "https://cdn.example/dl/file.mkv").build())
-        assertEquals("https://cdn.example/dl/file.mkv", http.getFinalUrl("/dln/x/1/2/file.mkv"))
-        assertEquals(1, server.requestCount)
-    }
-
     @Test fun cancellingTheCoroutineCancelsTheCall() = runBlocking {
         server.enqueue(MockResponse.Builder().body("x").headersDelay(5, TimeUnit.SECONDS).build())
         val job = launch(Dispatchers.Default) { http.get("/slow/") }

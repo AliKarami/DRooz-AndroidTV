@@ -41,8 +41,6 @@ class SiteHttp(
         }
         .build()
 
-    private val noRedirectClient = this.client.newBuilder().followRedirects(false).build()
-
     /** Login steps can legitimately take several seconds and must never be re-sent by OkHttp. */
     private val postClient = this.client.newBuilder()
         .readTimeout(postTimeoutMs, TimeUnit.MILLISECONDS)
@@ -72,18 +70,6 @@ class SiteHttp(
             .build()
         return execute(Request.Builder().url(resolve(path)).post(body).build(), requiresAuth = false, client = postClient)
     }
-
-    /** Returns the redirect target of [path] without downloading it (used for `/dln/` file links). */
-    suspend fun getFinalUrl(path: String): String =
-        call(noRedirectClient, Request.Builder().url(resolve(path)).build()) { r ->
-            if (r.isRedirect) {
-                val location = r.header("Location") ?: throw SiteException.ParseError("redirect location")
-                r.request.url.resolve(location)?.toString() ?: location
-            } else {
-                checkStatus(r, r.body.string())
-                r.request.url.toString()
-            }
-        }
 
     /**
      * Runs [request] asynchronously; cancelling the coroutine cancels the OkHttp call. [handle] runs on

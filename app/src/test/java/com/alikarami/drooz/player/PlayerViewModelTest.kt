@@ -1474,4 +1474,113 @@ class PlayerViewModelTest {
         v.playNext()
         assertEquals(1f, engine.gains.last())
     }
+
+    private val E403 = EngineEvent.Error(2004, "ERROR_CODE_IO_BAD_HTTP_STATUS", 403)
+    private val ENET = EngineEvent.Error(2001, "ERROR_CODE_IO_NETWORK_CONNECTION_FAILED", null)
+
+    @Test fun errorAfterARecoveryThatPlayedRecoversAgain() = playerTest {
+        val env = Env()
+        val v = started(env)
+        engine.emit(E403)
+        runCurrent()
+        assertEquals(2, env.api.opens.size)
+        engine.emit(EngineEvent.Ready)
+        runCurrent()
+        now += 30_000
+        engine.emit(E403)
+        runCurrent()
+        assertEquals(3, env.api.opens.size)
+        assertEquals(PlayerPhase.Playing, v.state.value.phase)
+    }
+
+    @Test fun quickRecoveriesAreBounded() = playerTest {
+        val env = Env()
+        val v = started(env)
+        repeat(MAX_QUICK_REOPENS + 1) {
+            now += 5_000
+            engine.emit(E403)
+            runCurrent()
+            engine.emit(EngineEvent.Ready)
+            runCurrent()
+        }
+        assertEquals(MAX_QUICK_REOPENS + 2, env.api.opens.size)
+        now += 5_000
+        engine.emit(E403)
+        runCurrent()
+        assertEquals(MAX_QUICK_REOPENS + 2, env.api.opens.size)
+        assertEquals(PlayerPhase.Failed(UiStrings.PLAYBACK_FAILED), v.state.value.phase)
+    }
+
+    @Test fun firstLoadStreamErrorReopensOnceSilently() = playerTest {
+        val env = Env()
+        val v = env.vm(scope = this)
+        runCurrent()
+        engine.emit(E403)
+        runCurrent()
+        assertEquals(2, env.api.opens.size)
+        assertEquals(2, engine.loads.size)
+        assertEquals(PlayerPhase.Loading, v.state.value.phase)
+        engine.emit(E403)
+        runCurrent()
+        assertEquals(2, env.api.opens.size)
+        assertEquals(PlayerPhase.Failed(UiStrings.PLAYBACK_FAILED), v.state.value.phase)
+    }
+
+    @Test fun networkStreamErrorShowsNetworkMessage() = playerTest {
+        val env = Env()
+        val v = env.vm(scope = this)
+        runCurrent()
+        engine.emit(ENET)
+        runCurrent()
+        engine.emit(ENET)
+        runCurrent()
+        assertEquals(PlayerPhase.Failed(UiStrings.PLAY_FAILED_NETWORK), v.state.value.phase)
+    }
+
+    @Test fun failedEngineErrorCancelsAPendingReopen() = playerTest {
+        val env = Env()
+        val v = started(env)
+        env.api.gate = CompletableDeferred()
+        engine.emit(E403)
+        runCurrent()
+        engine.emit(E403) // the reopen has not loaded yet: this one fails
+        env.api.gate!!.complete(Unit)
+        runCurrent()
+        assertEquals(1, engine.loads.size)
+        assertEquals(PlayerPhase.Failed(UiStrings.PLAYBACK_FAILED), v.state.value.phase)
+    }
+
+    @Test fun silentRecoveryIsFlaggedUntilReady() = playerTest {
+        val env = Env()
+        val v = started(env)
+        assertFalse(v.state.value.recovering)
+        env.api.gate = CompletableDeferred()
+        engine.emit(E403)
+        runCurrent()
+        assertTrue(v.state.value.recovering)
+        env.api.gate!!.complete(Unit)
+        runCurrent()
+        assertTrue(v.state.value.recovering)
+        engine.emit(EngineEvent.Ready)
+        runCurrent()
+        assertFalse(v.state.value.recovering)
+    }
+
+    @Test fun backAfterLongAbsenceDuringInitialOpenFetchesAFreshStream() = playerTest {
+        val env = Env()
+        env.api.gate = CompletableDeferred()
+        val v = env.vm(scope = this)
+        runCurrent()
+        v.onStop()
+        env.api.gate!!.complete(Unit)
+        runCurrent()
+        assertEquals(1, engine.loads.size) // loaded paused behind the suspension
+        env.api.gate = null
+        now += STALE_STREAM_AFTER_MS
+        v.onStart()
+        runCurrent()
+        assertEquals(2, env.api.opens.size)
+        assertEquals("https://cdn/master-2.m3u8", engine.loads.last().first)
+        assertFalse(engine.suspended)
+    }
 }

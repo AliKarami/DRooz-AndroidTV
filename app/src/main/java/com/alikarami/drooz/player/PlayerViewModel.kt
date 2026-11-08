@@ -62,6 +62,11 @@ const val TICK_MS = 100L
 const val SAVE_EVERY_MS = 10_000L
 const val STREAM_HEIGHT = 1080
 const val REOPEN_MIN_INTERVAL_MS = 60_000L
+/**
+ * Reopens within [REOPEN_MIN_INTERVAL_MS] of the previous one are allowed only after that one played
+ * again (reached Ready), and at most this many in a row: flaky Wi-Fi recovers, a broken stream fails.
+ */
+const val MAX_QUICK_REOPENS = 3
 const val ERROR_REPORT_MIN_INTERVAL_MS = 60_000L
 const val SUBTITLE_STEP_MS = 500L
 /** A user seek forward lands at most this far before the end (never on the end itself). */
@@ -121,6 +126,8 @@ data class PlayerUiState(
     val currentSeason: Int = 0,
     val currentStreamId: String = "",
     val hasNext: Boolean = false,
+    /** A silent reopen (recovery, fresh stream after a long absence) is loading: the spinner shows. */
+    val recovering: Boolean = false,
 )
 
 /**
@@ -174,6 +181,10 @@ class PlayerViewModel(
     /** A Ready was seen since the last [loadEngine]: errors before it are "setupError". */
     private var readySinceLoad = false
     private var lastReopenAt: Long? = null
+    /** The last silent reopen reached Ready (it played again). */
+    private var reopenReady = false
+    /** Reopens in a row, each within [REOPEN_MIN_INTERVAL_MS] of the one before. */
+    private var quickReopens = 0
     /** When the player was last hidden (onStop), for [STALE_STREAM_AFTER_MS]. */
     private var stoppedAt: Long? = null
     private var lastReportAt: Long? = null
@@ -267,6 +278,8 @@ class PlayerViewModel(
             streamId = id
             everReady = false
             lastReopenAt = null
+            reopenReady = false
+            quickReopens = 0
             upNextReached = false
             upNextDismissed = false
             upNextShownMs = 0L
@@ -282,7 +295,9 @@ class PlayerViewModel(
             }
             _cues.value = SubtitleCues()
         }
-        if (!silent) _state.update { it.copy(phase = PlayerPhase.Loading, currentStreamId = id) }
+        _state.update {
+            if (silent) it.copy(recovering = true) else it.copy(phase = PlayerPhase.Loading, currentStreamId = id, recovering = false)
+        }
         openJob = viewModelScope.launch {
             var attempt = 0
             while (true) {
@@ -407,7 +422,7 @@ class PlayerViewModel(
 
     private fun fail(message: String) {
         switching = false
-        if (!closed) _state.update { it.copy(phase = PlayerPhase.Failed(message)) }
+        if (!closed) _state.update { it.copy(phase = PlayerPhase.Failed(message), recovering = false) }
     }
 
     /** What the title page shows before the session's own image arrives. */
@@ -428,7 +443,8 @@ class PlayerViewModel(
                 readySinceLoad = true
                 everReady = true
                 switching = false
-                _state.update { it.copy(phase = PlayerPhase.Playing) }
+                if (lastReopenAt != null) reopenReady = true
+                _state.update { it.copy(phase = PlayerPhase.Playing, recovering = false) }
             }
             EngineEvent.Ended -> {
                 // A late Ended of the previous episode while switching: the new open is under way.
@@ -453,18 +469,43 @@ class PlayerViewModel(
     private fun onError(e: EngineEvent.Error) {
         report(e, streamId)
         if (BuildConfig.DEBUG) Log.w(TAG, "engine error ${e.codeName} http=${e.httpStatus}")
-        if (closed) return
+        if (closed || _state.value.phase is PlayerPhase.Failed) return
         durationMs()
-        val recoverable = everReady && session != null &&
+        // Before the first Ready too (the stream key just expired, Wi-Fi not up yet after wake).
+        val recoverable = session != null &&
             (e.httpStatus in RECOVERABLE_HTTP || e.codeName.startsWith("ERROR_CODE_IO_"))
-        val now = clock()
-        val reopenAllowed = lastReopenAt?.let { now - it >= REOPEN_MIN_INTERVAL_MS } ?: true
-        if (recoverable && reopenAllowed) {
-            lastReopenAt = now
-            open(streamId, startAt = engine.positionMs, silent = true)
+        if (recoverable && reopenAllowed()) {
+            open(streamId, startAt = if (everReady) engine.positionMs else null, silent = true)
         } else {
-            fail(UiStrings.PLAYBACK_FAILED)
+            // A reopen still opening would load the stream again under the Failed screen.
+            openJob?.cancel()
+            fail(if (e.codeName.startsWith("ERROR_CODE_IO_NETWORK")) UiStrings.PLAY_FAILED_NETWORK else UiStrings.PLAYBACK_FAILED)
         }
+    }
+
+    /**
+     * One reopen per [REOPEN_MIN_INTERVAL_MS]; sooner only after the last one played again, at most
+     * [MAX_QUICK_REOPENS] in a row. Records the reopen when allowed.
+     */
+    private fun reopenAllowed(): Boolean {
+        val now = clock()
+        val last = lastReopenAt
+        val allowed = when {
+            last == null || now - last >= REOPEN_MIN_INTERVAL_MS -> {
+                quickReopens = 0
+                true
+            }
+            reopenReady && quickReopens < MAX_QUICK_REOPENS -> {
+                quickReopens++
+                true
+            }
+            else -> false
+        }
+        if (allowed) {
+            lastReopenAt = now
+            reopenReady = false
+        }
+        return allowed
     }
 
     /** Fire-and-forget, at most once per [ERROR_REPORT_MIN_INTERVAL_MS]; never affects the phase. */
@@ -879,10 +920,12 @@ class PlayerViewModel(
         foreground = true
         val hiddenMs = stoppedAt?.let { clock() - it } ?: 0L
         stoppedAt = null
-        if (hiddenMs >= STALE_STREAM_AFTER_MS && everReady && session != null && !closed &&
-            _state.value.phase == PlayerPhase.Playing
+        // Whatever the phase: an open that finished while hidden (still Loading) holds an old key too.
+        // Not while an open is still in flight (no session yet) or after a failure (Retry reopens).
+        if (hiddenMs >= STALE_STREAM_AFTER_MS && session != null && !closed &&
+            _state.value.phase !is PlayerPhase.Failed
         ) {
-            val at = engine.positionMs
+            val at = if (everReady) engine.positionMs else null
             engine.resume(prepare = false)
             open(streamId, startAt = at, silent = true)
         } else {

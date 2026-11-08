@@ -125,8 +125,10 @@ internal fun PlayerOverlayHost(
     val root = remember { FocusRequester() }
     val playNow = remember { FocusRequester() }
     val isPlaying by engine.isPlaying.collectAsStateWithLifecycle()
+    // A silent reopen (engine idle while the stream page reloads) looks like a rebuffer, not a hang.
+    val busy = buffering || state.recovering
     // The user's intent, so a rebuffer does not flip the icon to ▶ (engine.isPlaying is false while buffering).
-    val playing = isPlaying || (buffering && engine.exoPlayer.playWhenReady)
+    val playing = isPlaying || (busy && engine.exoPlayer.playWhenReady)
     val upNext = state.upNext
     val upNextShown = upNext != null
     val scrubbing by remember { derivedStateOf { c.scrubMs != null } }
@@ -267,7 +269,7 @@ internal fun PlayerOverlayHost(
             leftInsetFraction = panel ?: 0f,
         )
 
-        if (buffering) {
+        if (busy) {
             BusySpinner(Modifier.align(Alignment.Center), size = 48.dp, stroke = 4.dp, color = Color.White)
         }
 

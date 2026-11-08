@@ -49,6 +49,6 @@ class FakeEngine : PlaybackEngine {
     override fun selectQuality(height: Int?) { qualitySelections += height }
     override fun selectAudio(index: Int) { audioSelections += index }
     override fun suspend() { suspended = true }
-    override fun resume() { suspended = false }
+    override fun resume(prepare: Boolean) { suspended = false }
     override fun release() { released = true }
 }

@@ -43,6 +43,9 @@ import org.junit.Test
 import java.io.IOException
 
 @OptIn(ExperimentalCoroutinesApi::class)
+/** Past every automatic open retry. */
+private val OPEN_RETRY_TOTAL_MS = OPEN_RETRY_DELAYS_MS.sum() + 1
+
 class PlayerViewModelTest {
     private val dispatcher = StandardTestDispatcher()
     private val stores = mutableListOf<ViewModelStore>()
@@ -356,24 +359,75 @@ class PlayerViewModelTest {
 
     @Test fun openFailureShowsNetworkMessageAndRetryWorks() = playerTest {
         val env = Env()
-        env.api.failures += SiteException.NetworkError(IOException("down"))
+        repeat(4) { env.api.failures += SiteException.NetworkError(IOException("down")) }
         val v = env.vm(scope = this)
         runCurrent()
+        advanceTimeBy(OPEN_RETRY_TOTAL_MS)
         assertEquals(PlayerPhase.Failed(UiStrings.PLAY_FAILED_NETWORK), v.state.value.phase)
         assertTrue(engine.loads.isEmpty())
         v.retry()
         assertEquals(PlayerPhase.Loading, v.state.value.phase)
         runCurrent()
-        assertEquals(2, env.api.opens.size)
+        assertEquals(5, env.api.opens.size)
         assertEquals(1, engine.loads.size)
+    }
+
+    @Test fun networkFailureWhileOpeningRetriesByItself() = playerTest {
+        val env = Env()
+        repeat(2) { env.api.failures += SiteException.NetworkError(IOException("wifi not up yet")) }
+        val v = env.vm(scope = this)
+        runCurrent()
+        assertEquals(PlayerPhase.Loading, v.state.value.phase)
+        advanceTimeBy(OPEN_RETRY_TOTAL_MS)
+        assertEquals(3, env.api.opens.size)
+        assertEquals(1, engine.loads.size)
+        assertFalse(v.state.value.phase is PlayerPhase.Failed)
+    }
+
+    @Test fun nonNetworkOpenFailureIsNotRetried() = playerTest {
+        val env = Env()
+        env.api.failures += SiteException.ParseError("stream")
+        val v = env.vm(scope = this)
+        runCurrent()
+        assertEquals(PlayerPhase.Failed(UiStrings.PLAY_FAILED), v.state.value.phase)
+        advanceTimeBy(OPEN_RETRY_TOTAL_MS)
+        assertEquals(1, env.api.opens.size)
+    }
+
+    @Test fun backAfterLongAbsenceReopensStreamAtPositionPaused() = playerTest {
+        val env = Env()
+        val v = started(env)
+        engine.positionMs = 600_000
+        v.onStop()
+        now += STALE_STREAM_AFTER_MS
+        val played = engine.played
+        v.onStart()
+        runCurrent()
+        assertEquals(2, env.api.opens.size)
+        assertEquals("https://cdn/master-2.m3u8" to 600_000L, engine.loads.last())
+        assertFalse(engine.suspended)
+        assertEquals(played, engine.played)
+        assertEquals(PlayerPhase.Playing, v.state.value.phase)
+    }
+
+    @Test fun backAfterShortAbsenceKeepsStream() = playerTest {
+        val env = Env()
+        val v = started(env)
+        v.onStop()
+        now += STALE_STREAM_AFTER_MS - 1
+        v.onStart()
+        runCurrent()
+        assertEquals(1, env.api.opens.size)
+        assertFalse(engine.suspended)
     }
 
     @Test fun serverErrorIsNetworkOtherErrorsGeneric() = playerTest {
         val env = Env()
-        env.api.failures += SiteException.HttpError(502)
+        repeat(4) { env.api.failures += SiteException.HttpError(502) }
         env.api.failures += SiteException.ParseError("stream")
         val v = env.vm(scope = this)
         runCurrent()
+        advanceTimeBy(OPEN_RETRY_TOTAL_MS)
         assertEquals(PlayerPhase.Failed(UiStrings.PLAY_FAILED_NETWORK), v.state.value.phase)
         v.retry()
         runCurrent()
@@ -530,9 +584,10 @@ class PlayerViewModelTest {
 
     @Test fun retryAfterStreamFailureDoesNotRefetchTitlePage() = playerTest {
         val env = Env()
-        env.api.failures += SiteException.NetworkError(IOException("down"))
+        repeat(4) { env.api.failures += SiteException.NetworkError(IOException("down")) }
         val v = env.vm(scope = this)
         runCurrent()
+        advanceTimeBy(OPEN_RETRY_TOTAL_MS)
         v.retry()
         runCurrent()
         assertEquals(1, engine.loads.size)
@@ -1153,7 +1208,7 @@ class PlayerViewModelTest {
     @Test fun failedSwitchAllowsPickingAnotherEpisode() = playerTest {
         val env = Env()
         val v = started(env)
-        env.api.failures += SiteException.HttpError(500)
+        env.api.failures += SiteException.ParseError("stream")
         v.playEpisode("s1e2")
         runCurrent()
         assertTrue(v.state.value.phase is PlayerPhase.Failed)

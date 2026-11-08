@@ -222,10 +222,10 @@ class ExoPlaybackEngine(context: Context, client: OkHttpClient) : PlaybackEngine
         exoPlayer.stop()
     }
 
-    override fun resume() {
+    override fun resume(prepare: Boolean) {
         if (released || !suspended) return
         suspended = false
-        if (exoPlayer.mediaItemCount > 0) exoPlayer.prepare()
+        if (prepare && exoPlayer.mediaItemCount > 0) exoPlayer.prepare()
     }
 
     override fun release() {

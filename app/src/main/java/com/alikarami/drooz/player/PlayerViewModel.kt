@@ -68,6 +68,14 @@ const val SUBTITLE_STEP_MS = 500L
 const val SUBTITLE_RETRY_MS = 5_000L
 val SPEEDS = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f)
 
+/**
+ * Waits before each automatic retry of a stream open that failed on the network (a TV waking from standby
+ * brings the player back before its Wi-Fi is up).
+ */
+val OPEN_RETRY_DELAYS_MS = listOf(2_000L, 4_000L, 8_000L)
+/** Hidden at least this long, the player fetches a fresh stream on return: the old stream key may be dead. */
+const val STALE_STREAM_AFTER_MS = 10 * 60_000L
+
 /** HTTP statuses that mean the stream key expired / the CDN URL went stale: reopen the stream page. */
 private val RECOVERABLE_HTTP = setOf(403, 404, 410)
 
@@ -164,6 +172,8 @@ class PlayerViewModel(
     /** A Ready was seen since the last [loadEngine]: errors before it are "setupError". */
     private var readySinceLoad = false
     private var lastReopenAt: Long? = null
+    /** When the player was last hidden (onStop), for [STALE_STREAM_AFTER_MS]. */
+    private var stoppedAt: Long? = null
     private var lastReportAt: Long? = null
     private var playedSinceSaveMs = 0L
     /** In the up-next window (or Ended): the episode counts as finished. */
@@ -270,50 +280,65 @@ class PlayerViewModel(
         }
         if (!silent) _state.update { it.copy(phase = PlayerPhase.Loading, currentStreamId = id) }
         openJob = viewModelScope.launch {
-            try {
-                // Same-stream reopen (recovery, retry): the episode is known; skip the title page round trip.
-                val ep = episode ?: resolveEpisode(id) ?: run {
-                    fail(UiStrings.PLAY_FAILED)
+            var attempt = 0
+            while (true) {
+                try {
+                    openOnce(id, startAt, silent)
                     return@launch
-                }
-                episode = ep
-                val s = api.openStream(ep, ref, if (dub) "dubbed-fa" else "original", STREAM_HEIGHT)
-                // Opening the stream marks it played on the site: the title page is stale.
-                titleInfo.invalidate(ref)
-                s.backdropPath?.let { titleInfo.remember(ref, it) }
-                session = s
-                gainSchedule = GainSchedule(s.gains, s.minGain, s.maxGain)
-                s.backdropPath?.let { p -> _state.update { it.copy(backdropUrl = SiteConfig.BASE_URL + p) } }
-                ensureSettings()
-                val saved = watch.get(id)
-                val available = availableSubtitles(s)
-                _state.update { it.copy(availableSubtitles = available) }
-                if (subtitlesResolvedFor != id) {
-                    subtitlesResolvedFor = id
-                    val choice = if (dub || audioDubbed) {
-                        if (SubtitleChoice.FA_DUB in available) SubtitleChoice.FA_DUB else SubtitleChoice.OFF
-                    } else {
-                        originalChoice(available)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: SiteException.NotLoggedIn) {
+                    // SessionGuardedSiteApi already routes the app to Login.
+                    closed = true
+                    _exits.trySend(Unit)
+                    return@launch
+                } catch (e: Throwable) {
+                    if (BuildConfig.DEBUG) Log.w(TAG, "open failed: $e")
+                    val wait = OPEN_RETRY_DELAYS_MS.getOrNull(attempt++)
+                    if (wait == null || openFailureMessage(e) != UiStrings.PLAY_FAILED_NETWORK) {
+                        fail(openFailureMessage(e))
+                        return@launch
                     }
-                    _state.update { it.copy(subtitle = choice, subtitleOffsetMs = saved?.subtitleOffsetMs ?: 0L) }
+                    delay(wait)
                 }
-                val start = startAt ?: saved?.let { resumePositionMs(it.positionMs, it.durationMs, it.finished) } ?: 0L
-                if (closed) return@launch
-                // Downloads run beside the engine load and never block or fail playback.
-                ensureSubtitles(_state.value.subtitle)
-                // A silent reload (same stream) keeps the user's play/pause; any other open plays.
-                loadEngine(s.masterUrl, start, play = if (silent) wantsPlay else true)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: SiteException.NotLoggedIn) {
-                // SessionGuardedSiteApi already routes the app to Login.
-                closed = true
-                _exits.trySend(Unit)
-            } catch (e: Throwable) {
-                if (BuildConfig.DEBUG) Log.w(TAG, "open failed: $e")
-                fail(openFailureMessage(e))
             }
         }
+    }
+
+    /** One try of [open]'s work; throws what the site or the network threw. */
+    private suspend fun openOnce(id: String, startAt: Long?, silent: Boolean) {
+        // Same-stream reopen (recovery, retry): the episode is known; skip the title page round trip.
+        val ep = episode ?: resolveEpisode(id) ?: run {
+            fail(UiStrings.PLAY_FAILED)
+            return
+        }
+        episode = ep
+        val s = api.openStream(ep, ref, if (dub) "dubbed-fa" else "original", STREAM_HEIGHT)
+        // Opening the stream marks it played on the site: the title page is stale.
+        titleInfo.invalidate(ref)
+        s.backdropPath?.let { titleInfo.remember(ref, it) }
+        session = s
+        gainSchedule = GainSchedule(s.gains, s.minGain, s.maxGain)
+        s.backdropPath?.let { p -> _state.update { it.copy(backdropUrl = SiteConfig.BASE_URL + p) } }
+        ensureSettings()
+        val saved = watch.get(id)
+        val available = availableSubtitles(s)
+        _state.update { it.copy(availableSubtitles = available) }
+        if (subtitlesResolvedFor != id) {
+            subtitlesResolvedFor = id
+            val choice = if (dub || audioDubbed) {
+                if (SubtitleChoice.FA_DUB in available) SubtitleChoice.FA_DUB else SubtitleChoice.OFF
+            } else {
+                originalChoice(available)
+            }
+            _state.update { it.copy(subtitle = choice, subtitleOffsetMs = saved?.subtitleOffsetMs ?: 0L) }
+        }
+        val start = startAt ?: saved?.let { resumePositionMs(it.positionMs, it.durationMs, it.finished) } ?: 0L
+        if (closed) return
+        // Downloads run beside the engine load and never block or fail playback.
+        ensureSubtitles(_state.value.subtitle)
+        // A silent reload (same stream) keeps the user's play/pause; any other open plays.
+        loadEngine(s.masterUrl, start, play = if (silent) wantsPlay else true)
     }
 
     /**
@@ -832,7 +857,17 @@ class PlayerViewModel(
     /** Back in the foreground: later loads may play again (nothing resumes by itself). */
     fun onStart() {
         foreground = true
-        engine.resume()
+        val hiddenMs = stoppedAt?.let { clock() - it } ?: 0L
+        stoppedAt = null
+        if (hiddenMs >= STALE_STREAM_AFTER_MS && everReady && session != null && !closed &&
+            _state.value.phase == PlayerPhase.Playing
+        ) {
+            val at = engine.positionMs
+            engine.resume(prepare = false)
+            open(streamId, startAt = at, silent = true)
+        } else {
+            engine.resume()
+        }
     }
 
     /**
@@ -841,6 +876,7 @@ class PlayerViewModel(
      */
     fun onStop() {
         foreground = false
+        stoppedAt = clock()
         save()
         wantsPlay = false
         engine.pause()

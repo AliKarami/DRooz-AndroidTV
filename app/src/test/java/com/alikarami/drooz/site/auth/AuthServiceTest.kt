@@ -4,6 +4,7 @@ import com.alikarami.drooz.site.http.PersistentCookieJar
 import com.alikarami.drooz.site.http.SiteHttp
 import com.alikarami.drooz.testutil.fixture
 import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.Dispatcher
@@ -194,32 +195,155 @@ class AuthServiceTest {
         assertNull(creds.load())
     }
 
+    /** Serves the login flow; a POST answers [post] (after [onPost], which may block). Records "METHOD path". */
+    private fun serve(onPost: (Int) -> Unit = {}, post: () -> MockResponse = { page("login_success.html", "cf=sess2") }): MutableList<String> {
+        val log = java.util.Collections.synchronizedList(mutableListOf<String>())
+        val posts = java.util.concurrent.atomic.AtomicInteger()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                log += "${request.method} ${request.url.encodedPath}"
+                return when {
+                    request.method == "POST" -> {
+                        onPost(posts.incrementAndGet())
+                        post()
+                    }
+                    request.url.encodedPath == "/user/login/" -> page("login_form.html", "sf=dev1")
+                    else -> MockResponse.Builder().body("ok").build()
+                }
+            }
+        }
+        return log
+    }
+
+    private fun await(latch: CountDownLatch) = assertTrue(latch.await(5, TimeUnit.SECONDS))
+
     // Home's view model can hit an expired session and relogin while Settings logs out: the
-    // relogin must not bring the stored credentials or a session cookie back.
+    // relogin must not bring the stored credentials or a session cookie back (D2).
     @Test fun reloginInFlightAcrossLogoutLeavesNoCredentialsOrSession() = runBlocking {
         creds.save(Credentials("testuser", "secret", null))
         val postArrived = CountDownLatch(1)
-        val logoutDone = CountDownLatch(1)
-        server.dispatcher = object : Dispatcher() {
-            override fun dispatch(request: RecordedRequest): MockResponse = when {
-                request.method == "POST" -> {
-                    postArrived.countDown()
-                    logoutDone.await(5, TimeUnit.SECONDS)
-                    page("login_success.html", "cf=sess2")
-                }
-                request.url.encodedPath == "/user/login/" -> page("login_form.html", "sf=dev1")
-                else -> MockResponse.Builder().body("ok").build()
-            }
-        }
+        val release = CountDownLatch(1)
+        val log = serve(onPost = { postArrived.countDown(); release.await(5, TimeUnit.SECONDS) })
         val relogin = async(Dispatchers.IO) { auth.relogin() }
-        assertTrue(postArrived.await(5, TimeUnit.SECONDS))
-        auth.logout()
-        logoutDone.countDown()
+        await(postArrived)
+        val logout = async(Dispatchers.IO) { auth.logout() }
+        // The logout drops the credentials at once, then waits for the login in flight to finish.
+        while (creds.load() != null) Thread.sleep(10)
+        release.countDown()
 
         assertFalse(relogin.await())
+        logout.await()
         assertNull(creds.load())
         assertNull(jar.cookie("cf"))
         assertFalse(auth.isLoggedIn)
+        assertEquals("dev1", jar.cookie("sf"))
+        // The site logout comes after the voided login, so it ends the session that login opened.
+        assertEquals("GET /user/logout/", log.last())
+    }
+
+    // A logout that lands between relogin's credential read and its login must void it (D2).
+    @Test fun logoutWhileReloginReadsCredentialsVoidsIt() = runBlocking {
+        val decrypting = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val slowBox = object : SecretBox {
+            override fun encrypt(plain: ByteArray) = box.encrypt(plain)
+            override fun decrypt(cipher: ByteArray): ByteArray {
+                decrypting.countDown()
+                release.await(5, TimeUnit.SECONDS)
+                return box.decrypt(cipher)
+            }
+        }
+        val slowCreds = CredentialStore(tmp.root.resolve("creds.bin"), slowBox)
+        slowCreds.save(Credentials("testuser", "secret", null))
+        val auth = AuthService(SiteHttp(server.url("/"), jar), jar, slowCreds)
+        val log = serve()
+
+        val relogin = async(Dispatchers.IO) { auth.relogin() }
+        await(decrypting)
+        auth.logout()
+        release.countDown()
+
+        assertFalse(relogin.await())
+        assertTrue(tmp.root.resolve("creds.bin").let { !it.exists() })
+        assertNull(jar.cookie("cf"))
+        assertTrue("no login after the logout: $log", log.none { it.startsWith("POST") })
+    }
+
+    // A manual login and a background relogin share one jar: they run one after the other (D2).
+    @Test fun loginAndReloginNeverInterleave() = runBlocking {
+        creds.save(Credentials("testuser", "secret", null))
+        val firstPost = CountDownLatch(1)
+        val log = serve(onPost = { n -> if (n == 1) { firstPost.countDown(); Thread.sleep(500) } })
+        val login = async(Dispatchers.IO) { auth.login("testuser", "secret", null) }
+        await(firstPost)
+        val relogin = async(Dispatchers.IO) { auth.relogin() }
+
+        assertEquals(LoginResult.Success, login.await())
+        assertTrue(relogin.await())
+        assertEquals(listOf("GET /user/login/", "POST /user/login/", "GET /json/device/",
+            "GET /user/login/", "POST /user/login/", "GET /json/device/"), log.toList())
+    }
+
+    // Leaving the screen mid-login must not strand a session cookie without its credentials (D7).
+    @Test fun cancellingALoginInFlightStillCompletesIt() = runBlocking {
+        val postArrived = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        serve(onPost = { postArrived.countDown(); release.await(5, TimeUnit.SECONDS) })
+        val job = launch(Dispatchers.IO) { auth.login("testuser", "secret", null) }
+        await(postArrived)
+        job.cancel()
+        release.countDown()
+        job.join()
+        assertEquals("sess2", jar.cookie("cf"))
+        assertEquals(Credentials("testuser", "secret", null), creds.load())
+    }
+
+    @Test fun logoutCompletesEvenWhenItsCallerIsCancelled() = runBlocking {
+        creds.save(Credentials("testuser", "secret", null))
+        val arrived = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                arrived.countDown()
+                release.await(5, TimeUnit.SECONDS)
+                return MockResponse.Builder().addHeader("Set-Cookie", "cf=late; Max-Age=1000; path=/").body("bye").build()
+            }
+        }
+        val job = launch(Dispatchers.IO) { auth.logout() }
+        await(arrived)
+        job.cancel()
+        release.countDown()
+        job.join()
+        assertNull(creds.load())
+        assertNull(jar.cookie("cf"))
+    }
+
+    private fun loggedIn() {
+        form()
+        server.enqueue(page("login_success.html", "sf=dev1", "cf=sess1"))
+        server.enqueue(MockResponse.Builder().body("ok").build())
+        runBlocking { assertEquals(LoginResult.Success, auth.login("testuser", "secret", null)) }
+    }
+
+    // A refused relogin leaves no dead session behind, so the next launch starts at Login instead of
+    // trying the same credentials again (D6); a wrong password also drops the stored credentials (D1).
+    @Test fun reloginRefusedForWrongPasswordDropsSessionAndCredentials() = runTest {
+        loggedIn()
+        form()
+        server.enqueue(page("login_wrong.html"))
+        assertFalse(auth.relogin())
+        assertFalse(auth.isLoggedIn)
+        assertNull(creds.load())
+        assertEquals("dev1", jar.cookie("sf"))
+    }
+
+    @Test fun reloginRefusedOtherwiseDropsSessionKeepsCredentials() = runTest {
+        loggedIn()
+        form()
+        server.enqueue(page("login_form.html"))
+        assertFalse(auth.relogin())
+        assertFalse(auth.isLoggedIn)
+        assertEquals(Credentials("testuser", "secret", null), creds.load())
         assertEquals("dev1", jar.cookie("sf"))
     }
 }

@@ -2,6 +2,9 @@ package com.alikarami.drooz.site.auth
 
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import com.alikarami.drooz.site.SiteConfig
 import com.alikarami.drooz.site.SiteException
@@ -39,11 +42,24 @@ class AuthService(
     private val logoutGeneration = AtomicInteger()
 
     /**
+     * Login, relogin and logout share the cookie jar and the stored credentials, so they run one at a time.
+     * Each runs to its end once started ([NonCancellable]): a caller that leaves mid-way must not strand a
+     * session cookie without its credentials, or a half-cleared session.
+     */
+    private val lock = Mutex()
+
+    /**
      * A login that was in flight when [logout] ran (e.g. a background relogin) saves nothing,
      * drops the session cookie it may have received, and returns [LoginResult.Failed].
      */
     suspend fun login(username: String, password: String, mobile: String?): LoginResult {
         val generation = logoutGeneration.get()
+        return lock.withLock { withContext(NonCancellable) { loginLocked(username, password, mobile, generation) } }
+    }
+
+    /** Caller holds [lock]. [generation]: the logout generation when the caller decided to log in. */
+    private suspend fun loginLocked(username: String, password: String, mobile: String?, generation: Int): LoginResult {
+        if (logoutGeneration.get() != generation) return LoginResult.Failed("ورود انجام نشد")
         // Like a browser, load the form first: the site pairs its `sf` session cookie with the
         // `recaptchaPass` token, and posting without one makes the mobile step fail (HTTP 502).
         val form = http.get(SiteConfig.LOGIN_PATH, requiresAuth = false)
@@ -76,18 +92,37 @@ class AuthService(
     /**
      * Renews an expired session with the stored credentials; the `sf` device cookie is kept.
      * Returns false only when the site refuses the login; network/HTTP failures propagate.
+     * A refusal drops the dead session cookie (so the next launch starts at Login rather than trying the
+     * same credentials again), and a wrong password also drops the stored credentials.
      */
     suspend fun relogin(): Boolean {
+        // Taken before the credentials are read: a logout from here on voids this relogin.
+        val generation = logoutGeneration.get()
         val c = creds.load() ?: return false
-        return login(c.username, c.password, c.mobile) == LoginResult.Success
+        return lock.withLock {
+            withContext(NonCancellable) {
+                val result = loginLocked(c.username, c.password, c.mobile, generation)
+                if (result != LoginResult.Success && logoutGeneration.get() == generation) {
+                    if (result == LoginResult.WrongCredentials) creds.clear()
+                    jar.clear(keep = setOf(DEVICE_COOKIE))
+                }
+                result == LoginResult.Success
+            }
+        }
     }
 
-    /** Credentials go first so an in-flight relogin cannot reuse them; the `sf` device cookie is kept. */
-    suspend fun logout() {
+    /**
+     * Credentials go first so a relogin starting now cannot reuse them; the rest waits for any login in
+     * flight (which then saves nothing) and clears again after it. The `sf` device cookie is kept.
+     */
+    suspend fun logout() = withContext(NonCancellable) {
         logoutGeneration.incrementAndGet()
         creds.clear()
-        runCatching { http.get(LOGOUT_PATH, requiresAuth = false, retry = false) }
-        jar.clear(keep = setOf(DEVICE_COOKIE))
+        lock.withLock {
+            creds.clear()
+            runCatching { http.get(LOGOUT_PATH, requiresAuth = false, retry = false) }
+            jar.clear(keep = setOf(DEVICE_COOKIE))
+        }
     }
 
     private suspend fun post(fields: List<Pair<String, String>>): LoginPage =

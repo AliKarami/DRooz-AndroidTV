@@ -192,6 +192,10 @@ class SiteHttpTest {
         val t0 = System.nanoTime()
         job.cancelAndJoin()
         assertTrue((System.nanoTime() - t0) < 1_000_000_000)
+        // The cancelled call leaves OkHttp's dispatcher once its failure callback has returned (a moment later
+        // on a loaded machine); it must be long before the 5 s response would have come.
+        val deadline = System.nanoTime() + 1_000_000_000
+        while (okHttpClient.dispatcher.runningCallsCount() != 0 && System.nanoTime() < deadline) delay(10)
         assertTrue(okHttpClient.dispatcher.runningCallsCount() == 0)
     }
 }

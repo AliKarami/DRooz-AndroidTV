@@ -26,11 +26,14 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TemporaryFolder
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class HomeViewModelTest {
     private val dispatcher = StandardTestDispatcher()
+    @get:Rule val tmp = TemporaryFolder()
 
     @Before fun setUp() = Dispatchers.setMain(dispatcher)
     @After fun tearDown() = Dispatchers.resetMain()
@@ -754,5 +757,70 @@ class HomeViewModelTest {
         assertTrue(vm.menuHint.value)
         vm.onMenuOpened()
         assertFalse(vm.menuHint.value)
+    }
+
+    // ── Cold start: the page an earlier run stored ────────────────────────
+
+    private val stored get() = java.io.File(tmp.root, "home_page.json")
+    /** A new process: nothing in memory, the file from the last run. Its own dispatcher, as Dispatchers.IO. */
+    private fun TestScope.diskCache() =
+        HomePageCache(ttlMs = 600_000, file = stored, io = StandardTestDispatcher(testScheduler)) { 0L }
+
+    @Test fun coldStart_showsStoredPageThenTheFreshOne() = runTest(dispatcher) {
+        diskCache().persist(home())
+        val api = FakeApi(home())
+        val fresh = CompletableDeferred<HomePage>()
+        api.onHome = { fresh.await() }
+        val vm = HomeViewModel(api, TitleInfoRepository(api, fetchScope = backgroundScope), homeCache = diskCache())
+        advanceUntilIdle()
+        val recent = vm.uiState.value.rows[0]
+        assertEquals(listOf("Shaun The Sheep", "Other One"), recent.items.map { it.title })
+        assertFalse(recent.loading)
+        assertEquals(5, vm.uiState.value.rows.first { it.key == "featured" }.items.size)
+
+        fresh.complete(home().copy(recentlyStreamed = listOf(PosterRef(ref(3, "brand-new"), "rp3"))))
+        advanceUntilIdle()
+        assertEquals(listOf("Brand New"), vm.uiState.value.rows[0].items.map { it.title })
+        // The fresh page is what the next cold start shows.
+        assertEquals(ref(3, "brand-new"), diskCache().stored()!!.recentlyStreamed.single().ref)
+    }
+
+    @Test fun coldStart_failedFetchKeepsStoredPageQuietly_andResumeRetries() = runTest(dispatcher) {
+        diskCache().persist(home())
+        val api = FakeApi(home())
+        var homeCalls = 0
+        api.onHome = { homeCalls++; throw com.alikarami.drooz.site.SiteException.NetworkError(RuntimeException("x")) }
+        val vm = HomeViewModel(api, TitleInfoRepository(api, fetchScope = backgroundScope), homeCache = diskCache())
+        advanceUntilIdle()
+        assertEquals(2, vm.uiState.value.rows[0].items.size)
+        assertNull(vm.uiState.value.error)
+        assertTrue(vm.uiState.value.rows.none { it.error })
+        // The site never confirmed it: back on home, it is asked again (quietly).
+        api.onHome = { homeCalls++; home().copy(recentlyStreamed = listOf(PosterRef(ref(3, "brand-new"), "rp3"))) }
+        vm.onResume(); advanceUntilIdle()
+        assertEquals(2, homeCalls)
+        assertEquals(listOf("Brand New"), vm.uiState.value.rows[0].items.map { it.title })
+        vm.onResume(); advanceUntilIdle()
+        assertEquals(2, homeCalls)
+    }
+
+    // A fetch that beats the disk read is never replaced by the older stored page.
+    @Test fun coldStart_freshPageWinsOverALateStoredOne() = runTest(dispatcher) {
+        diskCache().persist(home())
+        val api = FakeApi(home().copy(recentlyStreamed = listOf(PosterRef(ref(3, "brand-new"), "rp3"))))
+        val vm = HomeViewModel(api, TitleInfoRepository(api, fetchScope = backgroundScope), homeCache = diskCache())
+        advanceUntilIdle()
+        assertEquals(listOf("Brand New"), vm.uiState.value.rows[0].items.map { it.title })
+    }
+
+    @Test fun coldStart_withoutStoredPage_showsSkeletonThenError() = runTest(dispatcher) {
+        val api = FakeApi(home())
+        val gate = CompletableDeferred<Unit>()
+        api.onHome = { gate.await(); error("offline") }
+        val vm = HomeViewModel(api, TitleInfoRepository(api, fetchScope = backgroundScope), homeCache = diskCache())
+        runCurrent()
+        assertTrue(vm.uiState.value.rows[0].loading)
+        gate.complete(Unit); advanceUntilIdle()
+        assertEquals("offline", vm.uiState.value.error)
     }
 }

@@ -74,7 +74,8 @@ class AppGraph(context: Context) {
     val siteApi: SiteApi = SessionGuardedSiteApi(SiteApiAdapter(repository), sessionEvents)
     val authApi: AuthApi = AuthApiAdapter(auth)
     val titleInfo = TitleInfoRepository(siteApi)
-    val homeCache = HomePageCache()
+    /** Last home page; also on disk (cache dir) for an instant cold start, deleted with the session. */
+    val homeCache = HomePageCache(file = appContext.cacheDir.resolve("home_page.json"))
     val titlePrefs: TitlePrefs = localTitlePrefs
     val playerPrefs: PlayerPrefs = DataStorePlayerPrefs(playerPrefsStore(appContext))
     val watchStore: WatchStore = fileWatchStore

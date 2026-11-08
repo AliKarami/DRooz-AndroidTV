@@ -26,6 +26,7 @@ import com.alikarami.drooz.site.model.TitleRef
 import com.alikarami.drooz.ui.common.UiStrings
 import com.alikarami.drooz.ui.common.safeLaunch
 import com.alikarami.drooz.ui.common.toPersianDigits
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -128,6 +129,10 @@ class HomeViewModel(
         _state.update { it.copy(hero = h) }
     }
     private var refreshJob: Job? = null
+    /** Cold start: reading the page an earlier run stored ([HomePageCache.stored]). */
+    private var staleJob: Job? = null
+    /** The home rows show a stored page the site has not confirmed in this run yet. */
+    private var staleShown = false
     private val listJobs = HashMap<String, Job>()
 
     // «ادامه تماشا»: the server list last applied (null before the first), local watch state, and the
@@ -168,7 +173,9 @@ class HomeViewModel(
         // The player writes locally even when nothing reached the server: progress may have moved. Shown
         // at once, also while a revalidation is under way (the site takes seconds).
         recentKey?.let { key -> recentServer?.let { showRecent(key, it, refetch = false) } }
-        if (plays == seenPlays && !old) return
+        // A stored page whose revalidation failed (offline at launch) is asked again on every return.
+        val unconfirmed = staleShown && refreshJob?.isActive != true
+        if (plays == seenPlays && !old && !unconfirmed) return
         seenPlays = plays
         val showing = _state.value.rows.any { isHomeRow(it.key) && it.items.isNotEmpty() }
         loadHome(useCache = false, quiet = showing)
@@ -184,11 +191,22 @@ class HomeViewModel(
      * [useCache]: a fresh cached page (warm start) is shown at once, with no skeleton, and then revalidated
      * in the background; a failed revalidation keeps the cached rows quietly. [quiet]: the rows showing
      * stay as they are (no skeleton) until the new page replaces them; a failure keeps them.
+     * A cold start ([useCache], nothing in memory) fills the skeleton with the page an earlier run stored,
+     * if any, while the site is asked; a failure then keeps that page quietly too.
      */
     private fun loadHome(useCache: Boolean, quiet: Boolean = false) {
         refreshJob?.cancel()
-        val cached = homeCache?.takeIf { useCache }?.fresh()
+        staleJob?.cancel()
+        val cache = homeCache
+        val cached = cache?.takeIf { useCache }?.fresh()
         val keep = cached != null || quiet
+        staleJob = if (useCache && cached == null && cache != null) {
+            viewModelScope.safeLaunch(onError = { }) {
+                val stored = cache.stored() ?: return@safeLaunch
+                staleShown = true
+                applyHome(stored)
+            }
+        } else null
         if (cached != null) applyHome(cached)
         else if (!quiet) _state.update { s ->
             s.copy(
@@ -197,7 +215,7 @@ class HomeViewModel(
             )
         }
         refreshJob = viewModelScope.safeLaunch(onError = { e ->
-            if (!keep) {
+            if (!keep && !staleShown) {
                 // Failed, not empty: each home row offers its retry, even while list rows load fine.
                 _state.update { s ->
                     s.copy(rows = s.rows.map { if (isHomeRow(it.key)) it.copy(loading = false, error = true) else it },
@@ -207,10 +225,22 @@ class HomeViewModel(
                 if (recentServer == null && watchStore != null) recentKey?.let { showRecent(it, emptyList(), refetch = false) }
             }
         }) {
-            val page = api.home()
-            homeCache?.put(page)
+            val page = try {
+                api.home()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // Offline at once: a stored page still being read fills the rows instead of the error.
+                staleJob?.join()
+                throw e
+            }
+            // The fresh page wins over a stored one still being read.
+            staleJob?.cancel()
+            staleShown = false
+            cache?.put(page)
             loadedAt = now()
             applyHome(page)
+            cache?.persist(page)
         }
     }
 

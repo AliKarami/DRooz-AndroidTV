@@ -122,6 +122,28 @@ class AppViewModelTest {
         assertEquals(null, vm.takeDebugPlay())
     }
 
+    // The cold-start copy on disk goes with the session: logout, a lost session and every login delete it.
+    @Test fun storedHomePageIsDeletedWithTheSession() = runTest(dispatcher) {
+        val dir = kotlin.io.path.createTempDirectory("home").toFile()
+        try {
+            val file = java.io.File(dir, "home_page.json")
+            val events = SessionEvents()
+            val cache = HomePageCache(ttlMs = 600_000, file = file, io = dispatcher) { 0L }
+            val vm = AppViewModel(FakeAuth(true), events, homeCache = cache)
+            runCurrent()
+            val page = HomePage(emptyList(), emptyList(), emptyList())
+            for (end in listOf({ vm.onLoggedOut() }, { events.report(SiteException.NotLoggedIn()) }, { vm.onLoggedIn() })) {
+                cache.persist(page)
+                assertTrue(file.exists())
+                end(); runCurrent()
+                assertTrue(!file.exists())
+                assertNull(HomePageCache(file = file, io = dispatcher).stored())
+            }
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
     @Test fun notLoggedInRoutesToLogin() = runTest(dispatcher) {
         val events = SessionEvents()
         val vm = AppViewModel(FakeAuth(true), events)

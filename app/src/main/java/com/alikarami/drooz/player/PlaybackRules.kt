@@ -5,17 +5,25 @@ import com.alikarami.drooz.site.model.Season
 import kotlin.math.abs
 
 /**
+ * A snap that moves less than this is no move: the engine reports the sync sample it landed on in whole
+ * ms, a hair off the site's keyframe value, and a 1 ms seek lands on the same sample again.
+ */
+const val SNAP_MIN_MOVE_SEC = 0.5
+
+/**
  * Port of the site's seekControl plugin: snap a seek target to a keyframe, with edge guards. Unlike the
- * port, a seek always moves in its direction: with keyframes further apart than the step the port could
- * round back to the current one, and every press stayed put.
+ * port, a seek always moves in its direction by at least [SNAP_MIN_MOVE_SEC]: with keyframes further
+ * apart than the step the port could round back to the current one, and every press stayed put.
  */
 fun snapToKeyframe(targetSec: Double, currentSec: Double, iframes: List<Double>, durationSec: Double): Double {
     val snapped = portSnap(targetSec, currentSec, iframes, durationSec)
+    val ahead = currentSec + SNAP_MIN_MOVE_SEC
+    val behind = currentSec - SNAP_MIN_MOVE_SEC
     return when {
-        targetSec > currentSec && snapped <= currentSec ->
-            (iframes.firstOrNull { it > currentSec } ?: targetSec).coerceIn(0.0, durationSec)
-        targetSec < currentSec && snapped >= currentSec ->
-            (iframes.lastOrNull { it < currentSec } ?: targetSec).coerceIn(0.0, durationSec)
+        targetSec > currentSec && snapped < ahead ->
+            (iframes.firstOrNull { it >= ahead } ?: targetSec).coerceIn(0.0, durationSec)
+        targetSec < currentSec && snapped > behind ->
+            (iframes.lastOrNull { it <= behind } ?: targetSec).coerceIn(0.0, durationSec)
         else -> snapped
     }
 }

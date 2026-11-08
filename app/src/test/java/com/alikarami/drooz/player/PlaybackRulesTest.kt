@@ -29,6 +29,18 @@ class PlaybackRulesTest {
     @Test fun snapSparseBackwardFromBetweenKeyframes() = assertEquals(35.0, snapToKeyframe(37.0, 47.0, SPARSE, 8400.0), 0.0)
     @Test fun snapForwardPastLastKeyframeStillMovesClamped() =
         assertEquals(65.0, snapToKeyframe(70.0, 60.0, SPARSE, 65.0), 0.0)
+    // The engine reports a sync sample in whole ms, a hair off the site's value: a snap a few ms away is no move.
+    private val ODD = listOf(0.0, 35.035, 47.047, 60.06)
+    @Test fun snapForwardFromJustUnderKeyframeMovesPastIt() =
+        assertEquals(47.047, snapToKeyframe(45.034, 35.034, ODD, 8400.0), 0.0)
+    @Test fun snapBackwardFromJustUnderKeyframeMovesBack() =
+        assertEquals(35.035, snapToKeyframe(37.046, 47.046, ODD, 8400.0), 0.0)
+    @Test fun snapBackwardFromJustOverKeyframeMovesPastIt() =
+        assertEquals(35.035, snapToKeyframe(37.048, 47.048, ODD, 8400.0), 0.0)
+    @Test fun snapForwardFromJustOverKeyframeMoves() =
+        assertEquals(47.047, snapToKeyframe(45.036, 35.036, ODD, 8400.0), 0.0)
+    @Test fun snapBackwardFromJustOverFirstKeyframeLeavesIt() =
+        assertEquals(25.036, snapToKeyframe(25.036, 35.036, listOf(35.035, 47.047), 8400.0), 0.0)
     @Test fun snapWithoutKeyframesReturnsTarget() = assertEquals(123.4, snapToKeyframe(123.4, 113.4, emptyList(), 8400.0), 0.0)
 
     @Test fun resumeOnlyAfterThirtySecondsAndBeforeFinish() {

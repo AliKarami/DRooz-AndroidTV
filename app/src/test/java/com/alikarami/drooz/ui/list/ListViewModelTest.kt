@@ -4,6 +4,7 @@ import com.alikarami.drooz.data.Backdrop
 import com.alikarami.drooz.data.SiteApi
 import com.alikarami.drooz.data.TitleInfoRepository
 import com.alikarami.drooz.site.model.*
+import com.alikarami.drooz.ui.home.CardUi
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -39,7 +40,14 @@ class ListViewModelTest {
     override suspend fun subtitle(url: String): String = error("unused")
     override suspend fun reportStreamError(streamId: String, event: String, msg: String) {}
         val listCalls = mutableListOf<Pair<String, Int>>()
+        var menu: List<SiteCategory> = emptyList()
+        val menuCalls = mutableListOf<String>()
         override suspend fun list(path: String, page: Int): ListPage { listCalls += path to page; return onList(path, page) }
+        override suspend fun listWithCategories(path: String): CategorizedListPage {
+            menuCalls += path
+            listCalls += path to 1
+            return CategorizedListPage(onList(path, 1), menu)
+        }
         override suspend fun home() = error("unused")
         override suspend fun title(ref: TitleRef): TitleDetail = error("no detail")
         override suspend fun search(query: String) = error("unused")
@@ -272,5 +280,134 @@ class ListViewModelTest {
         repo.watchlistChanged()
         vm.onResume(); advanceUntilIdle()
         assertEquals(1, api.listCalls.size)
+    }
+
+    // ── Category chips on the Series / Films pages ─────────────────────────────
+
+    private val seriesPath = "/archive/series/"
+    private val seriesMenu = listOf(
+        SiteCategory("مینی سریال", "/archive/category/tv-mini-series/", CategoryKind.SERIES),
+        SiteCategory("فیلم های جدید", "/archive/category/new-films/", CategoryKind.FILM),
+        SiteCategory("سریال های بروز شده", seriesPath, CategoryKind.SERIES),
+        SiteCategory("سريال‌های دوبله فارسی", "/archive/category/dubbed-series/", CategoryKind.SERIES),
+        SiteCategory("متفرقه", "/archive/category/misc/", CategoryKind.BOTH),
+    )
+
+    private fun TestScope.seriesVm(api: FakeApi, kind: CategoryKind? = CategoryKind.SERIES) =
+        ListViewModel(api, TitleInfoRepository(api, fetchScope = backgroundScope), seriesPath, "سریال‌ها", categories = kind)
+
+    @Test fun chipsComeFromTheFirstPagesMenu() = runTest(dispatcher) {
+        val api = FakeApi { _, p -> page(p, 5) }.apply { menu = seriesMenu }
+        val vm = seriesVm(api); advanceUntilIdle()
+        val s = vm.uiState.value
+        assertEquals(listOf(seriesPath), api.menuCalls)
+        assertEquals(listOf(seriesPath to 1), api.listCalls)
+        // The default listing first (selected), then the page's kind and "both" in menu order, prefix trimmed.
+        assertEquals(
+            listOf(
+                CategoryChip("بروز شده", seriesPath),
+                CategoryChip("مینی سریال", "/archive/category/tv-mini-series/"),
+                CategoryChip("دوبله فارسی", "/archive/category/dubbed-series/"),
+                CategoryChip("متفرقه", "/archive/category/misc/"),
+            ),
+            s.chips,
+        )
+        assertEquals(0, s.selectedChip)
+        assertEquals("سریال‌ها", s.title)
+        assertEquals(20, s.items.size)
+    }
+
+    @Test fun noChipsWithoutACategoryKind() = runTest(dispatcher) {
+        val api = FakeApi { _, p -> page(p, 5) }.apply { menu = seriesMenu }
+        val vm = seriesVm(api, kind = null); advanceUntilIdle()
+        assertEquals(emptyList<String>(), api.menuCalls)
+        assertEquals(emptyList<CategoryChip>(), vm.uiState.value.chips)
+    }
+
+    @Test fun noChipsWhenTheMenuHasNothingElseForThePage() = runTest(dispatcher) {
+        val api = FakeApi { _, p -> page(p, 5) }.apply { menu = seriesMenu.filter { it.kind == CategoryKind.FILM } }
+        val vm = seriesVm(api); advanceUntilIdle()
+        assertEquals(emptyList<CategoryChip>(), vm.uiState.value.chips)
+        assertEquals(20, vm.uiState.value.items.size)
+        // An unreadable menu (none at all) is the same: the page works as before.
+        val bare = FakeApi { _, p -> page(p, 5) }
+        val vm2 = seriesVm(bare); advanceUntilIdle()
+        assertEquals(emptyList<CategoryChip>(), vm2.uiState.value.chips)
+        assertEquals(20, vm2.uiState.value.items.size)
+    }
+
+    @Test fun defaultMissingFromTheMenuIsLabelledWithThePageTitle() = runTest(dispatcher) {
+        val api = FakeApi { _, p -> page(p, 5) }.apply { menu = seriesMenu.filter { it.path != seriesPath } }
+        val vm = seriesVm(api); advanceUntilIdle()
+        assertEquals(CategoryChip("سریال‌ها", seriesPath), vm.uiState.value.chips.first())
+    }
+
+    @Test fun selectingAChipSwapsTheListingAndKeepsPaginating() = runTest(dispatcher) {
+        val mini = "/archive/category/tv-mini-series/"
+        val api = FakeApi { path, p -> if (path == mini) ListPage((0 until 20).map { card(9000L + p * 100 + it) }, p, 3) else page(p, 5) }
+            .apply { menu = seriesMenu }
+        val vm = seriesVm(api); advanceUntilIdle()
+        vm.onFocusIndex(5); runCurrent()
+        vm.selectChip(1)
+        val loading = vm.uiState.value
+        assertTrue(loading.loading)
+        assertEquals(emptyList<CardUi>(), loading.items)
+        assertNull(loading.hero)
+        assertEquals(1, loading.selectedChip)
+        assertEquals("سریال‌ها · مینی سریال", loading.title)
+        advanceUntilIdle()
+        assertEquals(mini to 1, api.listCalls.last())
+        assertEquals(ref(9100), vm.uiState.value.items.first().ref)
+        assertEquals(0, vm.focusedIndex)
+        vm.onFocusIndex(19); advanceUntilIdle()
+        assertEquals(mini to 2, api.listCalls.last())
+        assertEquals(40, vm.uiState.value.items.size)
+        // The menu is read once; chips stay.
+        assertEquals(1, api.menuCalls.size)
+        assertEquals(4, vm.uiState.value.chips.size)
+
+        vm.selectChip(0); advanceUntilIdle()
+        assertEquals(seriesPath to 1, api.listCalls.last())
+        assertEquals("سریال‌ها", vm.uiState.value.title)
+        assertEquals(ref(100), vm.uiState.value.items.first().ref)
+        assertEquals(1, api.menuCalls.size)
+    }
+
+    @Test fun reselectingTheSelectedChipDoesNothing() = runTest(dispatcher) {
+        val api = FakeApi { _, p -> page(p, 5) }.apply { menu = seriesMenu }
+        val vm = seriesVm(api); advanceUntilIdle()
+        vm.selectChip(0); vm.selectChip(9); advanceUntilIdle()
+        assertEquals(1, api.listCalls.size)
+        assertEquals(20, vm.uiState.value.items.size)
+    }
+
+    @Test fun aPageOfTheOldChipArrivingLateIsDropped() = runTest(dispatcher) {
+        val gate = CompletableDeferred<ListPage>()
+        val api = FakeApi { path, p -> if (path == seriesPath && p == 2) gate.await() else page(p, 5) }
+            .apply { menu = seriesMenu }
+        val vm = seriesVm(api); advanceUntilIdle()
+        vm.onFocusIndex(19); runCurrent()
+        assertTrue(vm.uiState.value.loadingMore)
+        vm.selectChip(2); advanceUntilIdle()
+        gate.complete(page(2, 5)); advanceUntilIdle()
+        val s = vm.uiState.value
+        assertEquals(20, s.items.size)
+        assertFalse(s.loadingMore)
+        assertEquals("/archive/category/dubbed-series/" to 1, api.listCalls.last())
+    }
+
+    @Test fun aFailedChipIsAScreenErrorThatRetriesThatChip() = runTest(dispatcher) {
+        var fail = true
+        val dubbed = "/archive/category/dubbed-series/"
+        val api = FakeApi { path, p -> if (path == dubbed && fail) error("net") else page(p, 5) }.apply { menu = seriesMenu }
+        val vm = seriesVm(api); advanceUntilIdle()
+        vm.selectChip(2); advanceUntilIdle()
+        assertEquals("net", vm.uiState.value.error)
+        assertEquals(4, vm.uiState.value.chips.size)
+        fail = false
+        vm.retry(); advanceUntilIdle()
+        assertEquals(dubbed to 1, api.listCalls.last())
+        assertNull(vm.uiState.value.error)
+        assertEquals(1, api.menuCalls.size)
     }
 }

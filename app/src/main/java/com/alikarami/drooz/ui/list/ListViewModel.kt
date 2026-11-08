@@ -4,8 +4,11 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.alikarami.drooz.data.SiteApi
 import com.alikarami.drooz.data.TitleInfoRepository
+import com.alikarami.drooz.site.model.CategoryKind
+import com.alikarami.drooz.site.model.SiteCategory
 import com.alikarami.drooz.site.model.TitleCard
 import com.alikarami.drooz.site.model.TitleKind
+import com.alikarami.drooz.site.parse.PersianText
 import com.alikarami.drooz.ui.common.safeLaunch
 import com.alikarami.drooz.ui.home.CardUi
 import com.alikarami.drooz.ui.home.HeroController
@@ -29,25 +32,54 @@ data class ListUiState(
     val pageError: Boolean = false,
     val endReached: Boolean = false,
     val hero: HeroUi? = null,
+    /** The Series / Films page's category row; empty means no row (other lists, or the menu wasn't read). */
+    val chips: List<CategoryChip> = emptyList(),
+    /** Index into [chips]; 0 is the page's default listing. */
+    val selectedChip: Int = 0,
 ) {
     /** Loaded with nothing to show and no error. */
     val empty: Boolean get() = !loading && error == null && items.isEmpty()
 }
 
-/** A site list (`/archive/...`) as an infinite grid: pages load as focus nears the end. */
+/** One site category in the Series / Films page's chip row. */
+data class CategoryChip(val label: String, val path: String)
+
+/**
+ * The chip row for a page of [kind] whose default listing is [defaultPath]: the default first, then the menu's
+ * categories of that kind (or both kinds) in menu order. Labels drop the «فیلم های» / «سریال های» prefix the
+ * page title already says. Empty when the menu offers nothing besides the default.
+ */
+internal fun categoryChips(menu: List<SiteCategory>, kind: CategoryKind, defaultPath: String, pageTitle: String): List<CategoryChip> {
+    val prefix = if (kind == CategoryKind.FILM) "فیلم های " else "سریال های "
+    fun label(c: SiteCategory) = PersianText.normalize(c.label).removePrefix(prefix).ifBlank { c.label }
+    val default = CategoryChip(menu.firstOrNull { it.path == defaultPath }?.let(::label) ?: pageTitle, defaultPath)
+    val rest = menu.filter { (it.kind == kind || it.kind == CategoryKind.BOTH) && it.path != defaultPath }
+        .map { CategoryChip(label(it), it.path) }
+    return if (rest.isEmpty()) emptyList() else listOf(default) + rest
+}
+
+/**
+ * A site list (`/archive/...`) as an infinite grid: pages load as focus nears the end. With [categories] (the
+ * Series or Films page) the first page also brings the site menu, shown as chips that swap the listing.
+ */
 class ListViewModel(
     private val api: SiteApi,
     private val titleInfo: TitleInfoRepository,
-    private val path: String,
-    title: String,
+    private val defaultPath: String,
+    private val pageTitle: String,
     dwellMs: Long = 300,
     /** Load the next page once focus is within this many items of the end (two rows of the 7-column grid). */
     private val prefetch: Int = 14,
     /** «لیست من»: a title page that toggled the watchlist makes the grid reload when it shows again. */
     private val reloadOnWatchlistChange: Boolean = false,
+    /** Which of the menu's categories this page offers as chips; null: no chip row. */
+    private val categories: CategoryKind? = null,
 ) : ViewModel() {
-    private val _state = MutableStateFlow(ListUiState(title))
+    private val _state = MutableStateFlow(ListUiState(pageTitle))
     val uiState: StateFlow<ListUiState> = _state
+
+    /** The listing on screen: [defaultPath], or the selected chip's. */
+    private var path = defaultPath
 
     private val cards = ArrayList<TitleCard>()
     /** Identity used to drop repeats: kind + postId, the same as the grid key (slugs can differ for one post). */
@@ -114,6 +146,31 @@ class ListViewModel(
         }
     }
 
+    /**
+     * Shows chip [index]'s listing from its first page (skeleton, then the grid; focus stays on the chips). A page
+     * of the previous listing still in flight is dropped. The title names the category unless it is the default.
+     */
+    fun selectChip(index: Int) {
+        val s = _state.value
+        val chip = s.chips.getOrNull(index) ?: return
+        if (index == s.selectedChip) return
+        job?.cancel()
+        path = chip.path
+        cards.clear()
+        seen.clear()
+        loadedPage = 0
+        lastPage = 1
+        focusedIndex = 0
+        heroes.clear()
+        _state.update {
+            it.copy(
+                title = if (index == 0) pageTitle else "$pageTitle · ${chip.label}",
+                selectedChip = index, items = emptyList(), hero = null, endReached = false,
+            )
+        }
+        loadNext()
+    }
+
     /** Retries whatever failed: the first page (screen error) or the next page (grid-end retry). */
     fun retry() {
         _state.update { it.copy(pageError = false) }
@@ -135,7 +192,16 @@ class ListViewModel(
             // the end: focus reached it while this page was in flight, and no further focus event will come.
             do {
                 val next = loadedPage + 1
-                val page = api.list(path, next)
+                val kind = categories
+                val page = if (next == 1 && kind != null && _state.value.chips.isEmpty() && path == defaultPath) {
+                    // The default listing's first page carries the site menu: the chip row comes with it.
+                    val withMenu = api.listWithCategories(path)
+                    val chips = categoryChips(withMenu.categories, kind, defaultPath, pageTitle)
+                    _state.update { it.copy(chips = chips, selectedChip = 0) }
+                    withMenu.page
+                } else {
+                    api.list(path, next)
+                }
                 loadedPage = next
                 lastPage = maxOf(page.lastPage, next)
                 val added = page.items.filter { seen.add(it.ref.kind to it.ref.postId) }

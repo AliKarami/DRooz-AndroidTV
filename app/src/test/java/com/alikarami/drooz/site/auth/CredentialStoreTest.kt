@@ -36,6 +36,22 @@ class CredentialStoreTest {
         assertNull(store.load())
     }
 
+    // A save that cannot complete leaves the previous credentials readable, never a truncated file (D5).
+    @Test fun failedSaveKeepsThePreviousCredentials() {
+        val file = tmp.root.resolve("creds.bin")
+        val store = CredentialStore(file, box)
+        store.save(Credentials("a", "b", null))
+        tmp.newFolder("creds.bin.tmp").resolve("child").writeText("x")
+        org.junit.Assert.assertThrows(java.io.IOException::class.java) { store.save(Credentials("c", "d", null)) }
+        assertEquals(Credentials("a", "b", null), store.load())
+    }
+
+    @Test fun saveLeavesNoTempFile() {
+        val store = CredentialStore(tmp.root.resolve("creds.bin"), box)
+        store.save(Credentials("a", "b", null))
+        assertFalse(tmp.root.resolve("creds.bin.tmp").exists())
+    }
+
     @Test fun corruptFileLoadsNull() {
         val file = tmp.root.resolve("creds.bin").apply { writeBytes(byteArrayOf(1, 2, 3)) }
         assertNull(CredentialStore(file, box).load())

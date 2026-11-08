@@ -2,9 +2,11 @@ package com.alikarami.drooz.data
 
 import android.content.Context
 import androidx.datastore.core.DataStore
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -41,7 +43,12 @@ interface PlayerPrefs {
 
 fun playerPrefsStore(context: Context): DataStore<Preferences> = context.applicationContext.playerPrefsDataStore
 
-private val Context.playerPrefsDataStore: DataStore<Preferences> by preferencesDataStore("player_prefs")
+private val Context.playerPrefsDataStore: DataStore<Preferences> by preferencesDataStore(
+    "player_prefs", corruptionHandler = prefsCorruptionHandler(),
+)
+
+/** A corrupt preferences file is replaced by empty preferences (defaults) instead of failing every read. */
+fun prefsCorruptionHandler(): ReplaceFileCorruptionHandler<Preferences> = ReplaceFileCorruptionHandler { emptyPreferences() }
 
 class DataStorePlayerPrefs(private val store: DataStore<Preferences>) : PlayerPrefs {
     private val subtitleKey = stringPreferencesKey("subtitle_choice")

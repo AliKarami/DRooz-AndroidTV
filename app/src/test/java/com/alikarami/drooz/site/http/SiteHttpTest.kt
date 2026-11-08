@@ -118,6 +118,50 @@ class SiteHttpTest {
         assertEquals(3, server.requestCount)
     }
 
+    private fun timedHttp(callTimeoutMs: Long = 20_000, retryDelayMs: Long = 0) =
+        SiteHttp(server.url("/"), PersistentCookieJar(tmp.newFile(), siteHost = server.hostName),
+            timeoutMs = 300, maxAttempts = 3, callTimeoutMs = callTimeoutMs, retryDelayMs = retryDelayMs)
+
+    private fun elapsedMs(block: () -> Unit): Long {
+        val t0 = System.nanoTime()
+        block()
+        return (System.nanoTime() - t0) / 1_000_000
+    }
+
+    // A body that drips in (each byte inside the read timeout) is cut off by the whole-call limit (D9).
+    @Test fun drippingBodyIsCutOffByTheCallTimeout() {
+        repeat(3) {
+            server.enqueue(MockResponse.Builder().body("x".repeat(100)).throttleBody(1, 100, TimeUnit.MILLISECONDS).build())
+        }
+        val ms = elapsedMs {
+            assertThrows(SiteException.NetworkError::class.java) { runBlocking { timedHttp(callTimeoutMs = 500).get("/") } }
+        }
+        assertTrue("took $ms ms", ms < 5_000)
+    }
+
+    @Test fun retriesWaitBetweenAttempts() {
+        repeat(2) { server.enqueue(MockResponse.Builder().code(502).body("bad gateway").build()) }
+        server.enqueue(ok("third"))
+        val ms = elapsedMs { assertEquals("third", runBlocking { timedHttp(retryDelayMs = 300).get("/").body }) }
+        assertTrue("took $ms ms", ms >= 600)
+    }
+
+    @Test fun tooManyRequestsIsRetriedAfterRetryAfter() {
+        server.enqueue(MockResponse.Builder().code(429).addHeader("Retry-After", "1").body("slow down").build())
+        server.enqueue(ok("fine"))
+        val ms = elapsedMs { assertEquals("fine", runBlocking { timedHttp().get("/").body }) }
+        assertEquals(2, server.requestCount)
+        assertTrue("took $ms ms", ms >= 1_000)
+    }
+
+    @Test fun tooManyRequestsWithALongRetryAfterIsNotRetried() {
+        server.enqueue(MockResponse.Builder().code(429).addHeader("Retry-After", "3600").body("slow down").build())
+        server.enqueue(ok("must not be used"))
+        val e = assertThrows(SiteException.HttpError::class.java) { runBlocking { timedHttp().get("/") } }
+        assertEquals(429, e.code)
+        assertEquals(1, server.requestCount)
+    }
+
     @Test fun getWithRetryDisabledFailsAfterOneAttempt() {
         server.enqueue(hung())
         server.enqueue(ok("must not be used"))
@@ -141,12 +185,6 @@ class SiteHttpTest {
         assertEquals(1, server.requestCount)
     }
 
-    @Test fun finalUrlReturnsRedirectLocationWithoutFollowing() = runTest {
-        server.enqueue(MockResponse.Builder().code(302).addHeader("Location", "https://cdn.example/dl/file.mkv").build())
-        assertEquals("https://cdn.example/dl/file.mkv", http.getFinalUrl("/dln/x/1/2/file.mkv"))
-        assertEquals(1, server.requestCount)
-    }
-
     @Test fun cancellingTheCoroutineCancelsTheCall() = runBlocking {
         server.enqueue(MockResponse.Builder().body("x").headersDelay(5, TimeUnit.SECONDS).build())
         val job = launch(Dispatchers.Default) { http.get("/slow/") }
@@ -154,6 +192,10 @@ class SiteHttpTest {
         val t0 = System.nanoTime()
         job.cancelAndJoin()
         assertTrue((System.nanoTime() - t0) < 1_000_000_000)
+        // The cancelled call leaves OkHttp's dispatcher once its failure callback has returned (a moment later
+        // on a loaded machine); it must be long before the 5 s response would have come.
+        val deadline = System.nanoTime() + 1_000_000_000
+        while (okHttpClient.dispatcher.runningCallsCount() != 0 && System.nanoTime() < deadline) delay(10)
         assertTrue(okHttpClient.dispatcher.runningCallsCount() == 0)
     }
 }

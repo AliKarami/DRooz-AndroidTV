@@ -51,4 +51,22 @@ class HomeParserTest {
         assertEquals("Sacha Baron Cohen", c.director)
         assertTrue(c.synopsis!!.startsWith("روزنامه‌نگار هیپ‌هاپ"))
     }
+
+    // A section heading written with ZWNJ / Arabic yeh still matches the configured row title.
+    @Test fun sectionTitlesAreNormalized() {
+        val html = fixture("home.html").replace("فیلم های برگزیده", "فیلم\u200cهاي برگزیده")
+            .replace("مشاهدات اخیر", "مشاهدات اخير")
+        val page = HomeParser.parse(html)
+        assertEquals("فیلم های برگزیده", page.sections.first().title)
+        assertEquals(home.recentlyStreamed, page.recentlyStreamed)
+    }
+
+    // Home is never legitimately empty: a page with nothing recognisable is a markup change (or an error
+    // page), reported as such instead of an empty home that would also be cached.
+    @Test fun pageWithNothingRecognisableIsAParseError() {
+        val e = org.junit.Assert.assertThrows(com.alikarami.drooz.site.SiteException.ParseError::class.java) {
+            HomeParser.parse("<html><body><h2>عنوان</h2><div>بدون کارت</div></body></html>")
+        }
+        assertEquals("home", e.what)
+    }
 }

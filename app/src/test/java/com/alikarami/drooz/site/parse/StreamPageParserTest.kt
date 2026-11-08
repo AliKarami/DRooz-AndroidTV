@@ -65,4 +65,19 @@ class StreamPageParserTest {
     }
 
     @Test fun farsiForDubKind() = assertEquals(SubtitleKind.FA_DUB, SubtitleKind.of("Farsi for Dub"))
+
+    // Odd numbers in the player script are skipped, never a NumberFormatException that kills playback.
+    @Test fun malformedNumbersAreSkipped() {
+        val odd = """
+            file: '/json/m3u8/1/2/T/master.m3u8',
+            qualityLabels: {'99999999999': 'huge', '720': '720p'},
+            var Gains = [[1.2.3,4],[.,1],[1.5,2]];
+            IFrames[99999999999] = [1,2];
+            IFrames[0] = [0,6.5];
+        """.trimIndent()
+        val s = StreamPageParser.parse(odd, "1")
+        assertEquals(mapOf(720 to "720p"), s.qualityLabels)
+        assertEquals(listOf(1.5 to 2.0), s.gains)
+        assertEquals(listOf(listOf(0.0, 6.5)), s.iframes)
+    }
 }

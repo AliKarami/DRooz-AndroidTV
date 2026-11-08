@@ -19,9 +19,11 @@ import com.alikarami.drooz.data.WatchStore
 import com.alikarami.drooz.data.playerPrefsStore
 import com.alikarami.drooz.data.TitleInfoRepository
 import com.alikarami.drooz.data.TitlePrefs
+import com.alikarami.drooz.data.titlePrefsStore
 import com.alikarami.drooz.site.SiteConfig
 import com.alikarami.drooz.ui.common.buildImageLoader
 import com.alikarami.drooz.site.SiteRepository
+import com.alikarami.drooz.site.auth.AccountOwner
 import com.alikarami.drooz.site.auth.AuthService
 import com.alikarami.drooz.site.auth.CredentialStore
 import com.alikarami.drooz.site.auth.KeystoreSecretBox
@@ -51,7 +53,17 @@ class AppGraph(context: Context) {
         .build()
 
     val http = SiteHttp(SiteConfig.BASE_URL.toHttpUrl(), cookieJar, baseClient)
-    val auth = AuthService(http, cookieJar, CredentialStore(dir.resolve("creds.bin"), KeystoreSecretBox()))
+    private val localTitlePrefs = DataStoreTitlePrefs(titlePrefsStore(appContext))
+    private val fileWatchStore = FileWatchStore(appContext.filesDir.resolve("watch_state.json"))
+    val auth = AuthService(
+        http, cookieJar, CredentialStore(dir.resolve("creds.bin"), KeystoreSecretBox()),
+        owner = AccountOwner(dir.resolve("account.id")),
+        // Another account on this TV starts without the previous one's progress and title choices.
+        onAccountChanged = {
+            runCatching { fileWatchStore.clear() }
+            runCatching { localTitlePrefs.clear() }
+        },
+    )
     val repository = SiteRepository(http, auth)
     /** Every screen's failures pass through here; a lost session sends the app to Login (see AppViewModel). */
     val sessionEvents = SessionEvents()
@@ -59,9 +71,9 @@ class AppGraph(context: Context) {
     val authApi: AuthApi = AuthApiAdapter(auth)
     val titleInfo = TitleInfoRepository(siteApi)
     val homeCache = HomePageCache()
-    val titlePrefs: TitlePrefs = DataStoreTitlePrefs(appContext)
+    val titlePrefs: TitlePrefs = localTitlePrefs
     val playerPrefs: PlayerPrefs = DataStorePlayerPrefs(playerPrefsStore(appContext))
-    val watchStore: WatchStore = FileWatchStore(appContext.filesDir.resolve("watch_state.json"))
+    val watchStore: WatchStore = fileWatchStore
 
     /** For Media3: carries the site cookies (subtitles need them) and the browser UA. */
     val mediaClient: OkHttpClient = baseClient.newBuilder()

@@ -1,5 +1,6 @@
 package com.alikarami.drooz.site.auth
 
+import com.alikarami.drooz.site.parse.PersianText
 import org.jsoup.Jsoup
 
 sealed interface LoginPage {
@@ -22,14 +23,16 @@ object LoginParser {
         val alert = (form ?: doc).select(if (form != null) ".alert" else ".alert-danger")
             .firstOrNull()?.text()?.trim()?.takeIf { it.isNotEmpty() }
 
-        if (alert != null && alert.contains(REDIRECTING)) return LoginPage.Redirecting
-        if (alert != null && alert.contains(WRONG)) return LoginPage.WrongCredentials
+        // Matched in normalized form; the raw text is what the user sees.
+        val key = alert?.let(PersianText::normalize)
+        if (key != null && key.contains(REDIRECTING)) return LoginPage.Redirecting
+        if (key != null && key.contains(WRONG)) return LoginPage.WrongCredentials
         if (form == null) return LoginPage.Unknown(alert)
 
         val names = form.select("input[name]").map { it.attr("name") }.toSet()
         val recaptcha = form.selectFirst("input[name=recaptchaPass]")?.attr("value").orEmpty()
         val mobile = form.selectFirst("input[name=mobile]")
-        if (mobile != null && recaptcha.isNotEmpty() && (alert == null || alert.contains(COMPLETE_MOBILE))) {
+        if (mobile != null && recaptcha.isNotEmpty() && (key == null || key.contains(COMPLETE_MOBILE))) {
             return LoginPage.NeedsMobile(recaptcha, mobile.attr("placeholder"))
         }
         if (alert == null && names == setOf("username", "password")) return LoginPage.Form

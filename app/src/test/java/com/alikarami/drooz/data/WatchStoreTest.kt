@@ -99,4 +99,16 @@ class WatchStoreTest {
         assertEquals("kept", java.io.File(target.parentFile, "w.json.corrupt/x").readText())
         assertEquals(listOf("a"), FileWatchStore(target) { now }.all().map { it.streamId })
     }
+
+    // Another account signed in on this TV: nothing of the previous one's progress remains (D8).
+    @Test fun clearForgetsEverythingAndPersists() = runTest {
+        val file = tmp.newFile("w.json")
+        val store = FileWatchStore(file) { now }
+        store.put(entry("a"))
+        store.clear()
+        assertEquals(emptyList<WatchEntry>(), store.all())
+        assertEquals(emptyList<WatchEntry>(), FileWatchStore(file) { now }.all())
+        store.put(entry("b"))
+        assertEquals(listOf("b"), FileWatchStore(file) { now }.all().map { it.streamId })
+    }
 }

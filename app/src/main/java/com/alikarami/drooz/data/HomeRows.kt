@@ -1,8 +1,15 @@
 package com.alikarami.drooz.data
 
+import com.alikarami.drooz.site.parse.PersianText
+
 sealed interface RowSource {
     data object Recent : RowSource
-    data class HomeSection(val title: String) : RowSource
+    /** [title] is kept normalized, the form HomeParser gives section titles, so the lookup is an exact match. */
+    data class HomeSection private constructor(val title: String) : RowSource {
+        companion object {
+            operator fun invoke(title: String) = HomeSection(PersianText.normalize(title))
+        }
+    }
     data class ListPath(val path: String) : RowSource
 }
 

@@ -13,9 +13,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.WindowInsets
@@ -251,8 +253,15 @@ fun LoginContent(
                 }
             }
 
-            Box(Modifier.fillMaxWidth().height(26.dp), contentAlignment = Alignment.CenterStart) {
-                state.error?.let { Text(it, style = MaterialTheme.typography.bodyLarge, color = ErrorColor, maxLines = 1) }
+            // One line's height when empty or short; a long site message (e.g. the device limit) gets a
+            // second line instead of being cut mid-sentence.
+            Box(Modifier.fillMaxWidth().heightIn(min = 26.dp), contentAlignment = Alignment.CenterStart) {
+                state.error?.let {
+                    Text(
+                        it, style = MaterialTheme.typography.bodyLarge, color = ErrorColor,
+                        maxLines = 2, overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
             SubmitButton(state.busy, ::submit, Modifier.fillMaxWidth().focusRequester(submitRequester))
             // The tip makes room for the mobile step (the form must fit the screen).

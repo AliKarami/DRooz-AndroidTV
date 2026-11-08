@@ -28,6 +28,8 @@ data class LoginUiState(
 object LoginStrings {
     const val WRONG_CREDENTIALS = "نام کاربری یا رمز عبور اشتباه است"
     const val NETWORK = "اتصال به سایت برقرار نشد؛ دوباره تلاش کنید"
+    const val BLOCKED = "سایت درخواست را موقتاً مسدود کرد؛ کمی بعد دوباره تلاش کنید"
+    fun httpError(code: Int) = "سایت با خطا پاسخ داد (کد $code)؛ کمی بعد دوباره تلاش کنید"
     const val EMPTY_FIELDS = "نام کاربری و رمز عبور را وارد کنید"
     const val EMPTY_MOBILE = "شماره موبایل را وارد کنید"
     const val FAILED = "ورود انجام نشد"
@@ -72,8 +74,11 @@ class LoginViewModel(private val auth: AuthApi) : ViewModel() {
         }
     }
 
+    /** Only a real connection failure is reported as one: a site error or a block is not the user's network. */
     private fun message(e: Throwable): String = when (e) {
-        is SiteException.NetworkError, is SiteException.HttpError, is SiteException.Blocked -> LoginStrings.NETWORK
+        is SiteException.NetworkError -> LoginStrings.NETWORK
+        is SiteException.HttpError -> LoginStrings.httpError(e.code)
+        is SiteException.Blocked -> LoginStrings.BLOCKED
         else -> LoginStrings.FAILED
     }
 }

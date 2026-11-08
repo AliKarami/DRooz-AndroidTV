@@ -72,6 +72,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import com.alikarami.drooz.player.PlayerArgs
 import androidx.tv.material3.ClickableSurfaceDefaults
+import androidx.tv.material3.ClickableSurfaceScale
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Surface
 import androidx.tv.material3.Text
@@ -361,12 +362,7 @@ private fun Info(
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
         }
-        card.synopsis?.takeIf { it.isNotBlank() }?.let {
-            Text(
-                it, style = MaterialTheme.typography.bodyMedium.copy(fontSize = 15.sp, lineHeight = 24.sp),
-                color = SecondaryText, maxLines = 4, overflow = TextOverflow.Ellipsis,
-            )
-        }
+        card.synopsis?.takeIf { it.isNotBlank() }?.let { Synopsis(it) }
         val directorLabel = if (isFilm) R.string.title_director else R.string.title_creator
         val context = LocalContext.current
         val people = creditsLine(card.director, card.stars) { context.getString(directorLabel, it) }
@@ -376,6 +372,43 @@ private fun Info(
         Buttons(state, vm, primaryRequester, downRequester, Modifier.padding(top = 8.dp))
     }
 }
+
+/**
+ * Four lines of synopsis. When they cut it off, the synopsis is a focus stop (Up from the buttons) and OK
+ * shows it in full; it folds back once focus leaves, so the buttons never move while they have focus.
+ */
+@OptIn(ExperimentalComposeUiApi::class)
+@Composable
+private fun Synopsis(text: String) {
+    var expanded by remember(text) { mutableStateOf(false) }
+    var cutOff by remember(text) { mutableStateOf(false) }
+    Surface(
+        onClick = { expanded = !expanded },
+        modifier = Modifier.fillMaxWidth()
+            .focusProperties { canFocus = cutOff || expanded }
+            .onFocusChanged { if (!it.hasFocus) expanded = false },
+        shape = ClickableSurfaceDefaults.shape(DroozCardShape),
+        scale = ClickableSurfaceScale.None,
+        colors = ClickableSurfaceDefaults.colors(
+            containerColor = Color.Transparent,
+            contentColor = SecondaryText,
+            focusedContainerColor = Color.White.copy(alpha = 0.12f),
+            focusedContentColor = Color.White,
+            pressedContainerColor = Color.White.copy(alpha = 0.12f),
+            pressedContentColor = Color.White,
+        ),
+    ) {
+        Text(
+            text, style = MaterialTheme.typography.bodyMedium.copy(fontSize = 15.sp, lineHeight = 24.sp),
+            maxLines = if (expanded) SYNOPSIS_FULL_LINES else SYNOPSIS_LINES, overflow = TextOverflow.Ellipsis,
+            onTextLayout = { if (!expanded) cutOff = it.hasVisualOverflow },
+        )
+    }
+}
+
+private const val SYNOPSIS_LINES = 4
+/** Room for any synopsis the site writes while the page still fits the screen. */
+private const val SYNOPSIS_FULL_LINES = 14
 
 /** IMDb, year, channel (series) or duration (film), genres, season count, then chips; overflow drops from the end. */
 @Composable

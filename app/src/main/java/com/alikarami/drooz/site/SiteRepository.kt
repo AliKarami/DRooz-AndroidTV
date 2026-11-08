@@ -75,8 +75,17 @@ class SiteRepository(
     private val reloginLock = Mutex()
 
     /**
+     * Set when the site refused a relogin, with the session token left after it (guarded by [reloginLock]).
+     * Until that token changes (a new login), nobody logs in again: every waiting or later caller would
+     * otherwise post the same refused credentials (account lockout, device slots).
+     */
+    private var refused = false
+    private var refusedToken: String? = null
+
+    /**
      * Runs [block]; on an expired session renews it once and retries. Concurrent expiries share a
-     * single login: a caller that finds the session already renewed by another just retries.
+     * single login: a caller that finds the session already renewed by another just retries, and one
+     * that finds it refused gives up without trying again.
      */
     private suspend fun <T> authed(block: suspend () -> T): T {
         val tokenBefore = auth.sessionToken
@@ -86,7 +95,14 @@ class SiteRepository(
         }
         val renewed = reloginLock.withLock {
             val current = auth.sessionToken
-            (current != null && current != tokenBefore) || auth.relogin()
+            when {
+                current != null && current != tokenBefore -> true
+                refused && current == refusedToken -> false
+                else -> auth.relogin().also { ok ->
+                    refused = !ok
+                    refusedToken = auth.sessionToken
+                }
+            }
         }
         if (!renewed) throw SiteException.NotLoggedIn()
         try {

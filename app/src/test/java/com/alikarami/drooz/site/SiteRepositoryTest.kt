@@ -207,6 +207,50 @@ class SiteRepositoryTest {
         assertEquals(1, requests().count { it.method == "POST" })
     }
 
+    /** Every page but the login flow redirects to the login form unless the request carries `cf=new`. */
+    private fun refusingSite(post: () -> MockResponse) {
+        server.dispatcher = object : mockwebserver3.Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val path = request.url.encodedPath
+                return when {
+                    request.method == "POST" -> post()
+                    path.startsWith("/json/device/") -> ok()
+                    path == "/user/login/" -> page("login_form.html")
+                    request.headers["Cookie"].orEmpty().contains("cf=new") -> page("home.html")
+                    else -> MockResponse.Builder().code(302).addHeader("Location", "/user/login/").build()
+                }
+            }
+        }
+    }
+
+    // A refused relogin (device limit, changed password, …) is not repeated by every waiting or later
+    // request: each would POST the credentials again (D1).
+    @Test fun refusedReloginIsTriedOnceForAllCallers() {
+        creds.save(Credentials("testuser", "secret", "09120000000"))
+        refusingSite { page("login_form.html") }
+        val failures = runBlocking(Dispatchers.IO) {
+            List(3) { async { runCatching { repo.home() }.exceptionOrNull() } }.awaitAll()
+        }
+        assertTrue(failures.all { it is SiteException.NotLoggedIn })
+        assertThrows(SiteException.NotLoggedIn::class.java) { runBlocking { repo.list("/archive/series/") } }
+        assertEquals(1, requests().count { it.method == "POST" })
+    }
+
+    @Test fun aNewLoginAfterARefusalRenewsAgain() {
+        val jar = PersistentCookieJar(tmp.newFile("cookies3"), siteHost = server.hostName)
+        val http = SiteHttp(server.url("/"), jar)
+        val auth = AuthService(http, jar, creds)
+        val repo = SiteRepository(http, auth)
+        creds.save(Credentials("testuser", "secret", null))
+        var accept = false
+        refusingSite { if (accept) page("login_success.html", "cf=new") else page("login_form.html") }
+        assertThrows(SiteException.NotLoggedIn::class.java) { runBlocking { repo.home() } }
+        accept = true
+        // The user signs in again from Login; the session works and a later expiry renews it once more.
+        assertEquals(com.alikarami.drooz.site.auth.LoginResult.Success, runBlocking { auth.login("testuser", "secret", null) })
+        assertEquals(6, runBlocking { repo.home() }.featured.size)
+    }
+
     @Test fun noStoredCredentialsThrowsNotLoggedIn() {
         expired()
         assertThrows(SiteException.NotLoggedIn::class.java) { runBlocking { repo.home() } }

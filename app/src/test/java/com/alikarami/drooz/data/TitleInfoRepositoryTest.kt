@@ -202,6 +202,36 @@ class TitleInfoRepositoryTest {
         queued.awaitAll()
     }
 
+    // After a play the «ادامه تماشا» burst queues every title in the row; focusing one of those cards must
+    // not wait behind the burst for the queued fetch of the same title, nor fetch it twice.
+    @Test fun priorityFetchOvertakesQueuedFetchOfSameTitle() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val api = FakeApi { if (it != ref(3)) gate.await(); detail(it) }
+        val repo = TitleInfoRepository(api, { 0 }, 1000, backgroundScope)
+        val queued = (1L..4L).map { async { repo.get(ref(it)) } }
+        runCurrent()
+        val hero = async { repo.get(ref(3), priority = true) }
+        runCurrent()
+        assertTrue(hero.isCompleted)
+        gate.complete(Unit)
+        queued.awaitAll()
+        assertEquals(4, api.calls)
+    }
+
+    // A slow hero fetch must not hold up the next card's while background permits sit idle.
+    @Test fun priorityFetchUsesAnyFreePermit() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val api = FakeApi { if (it == ref(1)) gate.await(); detail(it) }
+        val repo = TitleInfoRepository(api, { 0 }, 1000, backgroundScope)
+        val slow = async { repo.get(ref(1), priority = true) }
+        runCurrent()
+        val next = async { repo.get(ref(2), priority = true) }
+        runCurrent()
+        assertTrue(next.isCompleted)
+        gate.complete(Unit)
+        slow.await()
+    }
+
     // The title page toggled «لیست من»: a showing watchlist grid learns it must reload.
     @Test fun watchlistChangesAreCounted() = runTest {
         val repo = TitleInfoRepository(FakeApi { detail(it) }, { 0 }, 1000, backgroundScope)

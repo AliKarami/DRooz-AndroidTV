@@ -15,8 +15,8 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 
 /**
- * Title details cache: TTL, in-flight dedupe, at most 2 concurrent fetches (plus one for [get]'s priority
- * callers); failures are not cached.
+ * Title details cache: TTL, in-flight dedupe, at most 2 concurrent background fetches and 3 in all
+ * ([get]'s priority callers take any free permit); failures are not cached.
  * A play changes the page (played ✓, next episode): [invalidate] makes the next [get] refetch while
  * [lastKnown] still serves the old detail for an instant display. [clear] forgets everything at a
  * session change (AppViewModel).
@@ -32,17 +32,24 @@ class TitleInfoRepository(
 
     private class Entry(val detail: TitleDetail, val at: Long, val stale: Boolean = false)
 
+    /** A fetch under way; [started] once it holds a permit (until then a priority caller overtakes it). */
+    private class Fetch(val priority: Boolean) {
+        @Volatile var started = false
+        lateinit var job: Deferred<TitleDetail>
+    }
+
     // Every critical section is non-suspending, so a plain lock (usable from non-suspend callers) is enough.
     private val lock = Any()
     // Concurrent: peek() is called from UI code while fetches write from IO threads.
     private val cache = java.util.concurrent.ConcurrentHashMap<TitleRef, Entry>()
-    private val inFlight = HashMap<TitleRef, Deferred<TitleDetail>>()
+    private val inFlight = HashMap<TitleRef, Fetch>()
     /** Bumped per title by [invalidate] and for all by [clear]: a fetch only caches if its stamp still holds. */
     private val versions = HashMap<TitleRef, Int>()
     private var epoch = 0
-    private val limiter = Semaphore(2)
-    /** Focus-driven hero fetches: one of their own, so they never wait behind a burst of background ones. */
-    private val priorityLimiter = Semaphore(1)
+    /** Every fetch holds one of these; background ones first need one of [backgroundPermits]. */
+    private val permits = Semaphore(3)
+    /** At most 2 background fetches, so a focus-driven hero fetch always finds a free permit or the next one. */
+    private val backgroundPermits = Semaphore(2)
     private val played = MutableStateFlow<Map<TitleRef, String>>(emptyMap())
     private val _invalidations = MutableStateFlow(0)
     private val _watchlistChanges = MutableStateFlow(0)
@@ -58,28 +65,46 @@ class TitleInfoRepository(
 
     /**
      * [maxAgeMs]: a cached detail older than this is refetched (a page the user opens must show new
-     * episodes; the TTL suits glances like the hero). [priority]: fetched on its own permit (the focused hero).
+     * episodes; the TTL suits glances like the hero). [priority]: the focused hero; takes any free permit
+     * and does not wait behind a queued background fetch of the same title.
      */
     suspend fun get(ref: TitleRef, maxAgeMs: Long = ttlMs, priority: Boolean = false): TitleDetail {
         val job = synchronized(lock) {
             fresh(ref, maxAgeMs)?.let { return it }
-            inFlight.getOrPut(ref) {
-                val stamp = epoch to (versions[ref] ?: 0)
-                val permits = if (priority) priorityLimiter else limiter
-                scope.async {
-                    val self = coroutineContext[Job]
-                    try {
-                        val d = permits.withPermit { api.title(ref) }
-                        synchronized(lock) { if (stamp == epoch to (versions[ref] ?: 0)) cache[ref] = Entry(d, now()) }
-                        d
-                    } finally {
-                        synchronized(lock) { if (inFlight[ref] === self) inFlight.remove(ref) }
-                    }
-                }
-            }
+            val current = inFlight[ref]
+            if (current != null && (!priority || current.priority || current.started)) current.job
+            else start(ref, maxAgeMs, priority).job
         }
         return job.await()
     }
+
+    /** Under [lock]. A queued fetch overtaken by a newer one awaits that one once it gets its permit. */
+    private fun start(ref: TitleRef, maxAgeMs: Long, priority: Boolean): Fetch {
+        val stamp = epoch to (versions[ref] ?: 0)
+        val fetch = Fetch(priority)
+        inFlight[ref] = fetch
+        fetch.job = scope.async {
+            try {
+                val newer = withPermit(priority) {
+                    synchronized(lock) {
+                        // Overtaken while queued: the newer fetch may be done already, or still under way.
+                        fresh(ref, maxAgeMs)?.let { return@async it }
+                        inFlight[ref]?.takeIf { it !== fetch }.also { fetch.started = it == null }
+                    } ?: return@async api.title(ref).also { d ->
+                        synchronized(lock) { if (stamp == epoch to (versions[ref] ?: 0)) cache[ref] = Entry(d, now()) }
+                    }
+                }
+                newer.job.await()
+            } finally {
+                synchronized(lock) { if (inFlight[ref] === fetch) inFlight.remove(ref) }
+            }
+        }
+        return fetch
+    }
+
+    private suspend inline fun <T> withPermit(priority: Boolean, block: () -> T): T =
+        if (priority) permits.withPermit(block)
+        else backgroundPermits.withPermit { permits.withPermit(block) }
 
     /** A fresh, valid detail, or null. */
     fun peek(ref: TitleRef): TitleDetail? = fresh(ref)

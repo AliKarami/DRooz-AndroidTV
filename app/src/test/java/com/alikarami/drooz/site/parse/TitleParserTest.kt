@@ -109,4 +109,31 @@ class TitleParserTest {
         val ref = com.alikarami.drooz.site.model.TitleRef(com.alikarami.drooz.site.model.TitleKind.SERIES, 5735053, "pluribus")
         assertTrue(TitleParser.parse(html, ref).suggestions.isNotEmpty())
     }
+
+    // An episode without a stream id cannot be played (it would request /stream//{postId}/).
+    @Test fun episodesWithoutStreamIdAreDropped() {
+        val ep = """{"videos":[],"id":"7","audios":[],"subtitles":[]}"""
+        val noId = """{"videos":[],"audios":[],"subtitles":[]}"""
+        val blank = """{"videos":[],"id":" ","audios":[],"subtitles":[]}"""
+        val c = TitleParser.parseCatalog("""{"main":{"1":{"1":$ep,"2":$noId,"3":$blank}}}""")
+        assertEquals(listOf(1), c.main.single().episodes.map { it.number })
+    }
+
+    // The catalog is what makes a title playable: a header markup change must not hide it.
+    @Test fun missingHeaderFallsBackToAMinimalCard() {
+        val html = fixture("title_series_pluribus.html").replace("postMeta", "renamedMeta")
+        val t = TitleParser.parse(html, pluribusRef)
+        assertEquals("pluribus", t.card.title)
+        assertEquals(pluribusRef, t.card.ref)
+        assertEquals(9, t.catalog.main.single().episodes.size)
+    }
+
+    // Minified pages end the script right after the object, with or without the semicolon.
+    @Test fun streamJsonAtTheEndOfAScriptIsFound() {
+        val json = """{"main":{"1":{"1":{"videos":[],"id":"7","audios":[],"subtitles":[]}}}}"""
+        for (tail in listOf(";</script>", "</script>")) {
+            val t = TitleParser.parse("<html><script>var STREAM=$json$tail</html>", pluribusRef)
+            assertEquals("7", t.catalog.main.single().episodes.single().streamId)
+        }
+    }
 }

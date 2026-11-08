@@ -118,8 +118,11 @@ class HomeViewModelFactory(private val graph: AppGraph) : ViewModelProvider.Fact
     ) as T
 }
 
-/** Width of the collapsed rail; rows are clipped here so cards never slide under its icons. */
-private val RailWidth = 80.dp
+/**
+ * Width of the collapsed rail (see [HomeRail]: 56dp items plus its 32dp overscan-safe edge padding); rows
+ * are clipped here so cards never slide under its icons.
+ */
+private val RailWidth = 88.dp
 /** Distance from the rail-side (right) screen edge to the hero text and the first card. */
 private val ContentStart = 96.dp
 /** [ContentStart] measured inside the rows area, which already starts after the rail. */
@@ -162,19 +165,6 @@ fun HomeScreen(
     // Back on home after a play: «ادامه تماشا» is revalidated in place (focus stays on the same title).
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.onResume() }
 
-    BackHandler {
-        if (drawerState.currentValue == DrawerValue.Open) {
-            focusManager.moveFocus(FocusDirection.Left)
-            return@BackHandler
-        }
-        val now = SystemClock.uptimeMillis()
-        if (now - lastBack < EXIT_WINDOW_MS) onExit()
-        else {
-            lastBack = now
-            Toast.makeText(context, R.string.home_exit_hint, Toast.LENGTH_SHORT).show()
-        }
-    }
-
     val rows = remember(allRows) { allRows.filterNot { it.isHidden } }
     var entered by remember { mutableStateOf(false) }
     // Where focus lands on entry: the last focused row (coming back from a title) or the first row with cards.
@@ -208,6 +198,35 @@ fun HomeScreen(
                 ?: run { columnState.scrollToItem(index); snapshotFlow { placedSlot(key) }.filterNotNull().first() }
             slot.requestFocusSoon()
         }
+    }
+    BackHandler {
+        if (drawerState.currentValue == DrawerValue.Open) {
+            focusManager.moveFocus(FocusDirection.Left)
+            return@BackHandler
+        }
+        // Deep in the rows, Back first returns to the top row (Google TV style), so it never exits by accident.
+        val top = rows.firstOrNull()?.key
+        val current = focusedRowKey
+        if (top != null && current != null && current != top && rows.any { it.key == current }) {
+            focusRow(top)
+            return@BackHandler
+        }
+        val now = SystemClock.uptimeMillis()
+        if (now - lastBack < EXIT_WINDOW_MS) onExit()
+        else {
+            lastBack = now
+            Toast.makeText(context, R.string.home_exit_hint, Toast.LENGTH_SHORT).show()
+        }
+    }
+    // A refresh can hide the very row that has focus (its last «ادامه تماشا» card resolved to done):
+    // focus would fall out of the rows (the rail grabbed it), so it moves to the row now in that place.
+    val currentRows by rememberUpdatedState(rows)
+    val focusedRowIndex = remember { intArrayOf(0) }
+    var orphanedAt by remember { mutableStateOf<Int?>(null) }
+    LaunchedEffect(orphanedAt) {
+        val at = orphanedAt ?: return@LaunchedEffect
+        orphanedAt = null
+        rows.getOrNull(at.coerceAtMost(rows.lastIndex))?.let { focusRow(it.key) }
     }
     val homeFailed = error != null && rows.none { it.items.isNotEmpty() || it.loading }
     val homeErrorRequester = remember { FocusRequester() }
@@ -252,7 +271,12 @@ fun HomeScreen(
                 val rowSpec = remember(density, rtl) { PivotSpec(with(density) { RowStart.toPx() }, fromRight = rtl) }
                 CompositionLocalProvider(LocalBringIntoViewSpec provides columnSpec) {
                     LazyColumn(
-                        Modifier.fillMaxSize().padding(top = rowsTop, start = RailWidth),
+                        Modifier.fillMaxSize().padding(top = rowsTop, start = RailWidth).onFocusChanged {
+                            val owner = focusOwner.value
+                            if (!it.hasFocus && owner != null && currentRows.none { r -> r.key == owner }) {
+                                orphanedAt = focusedRowIndex[0]
+                            }
+                        },
                         state = columnState,
                         contentPadding = PaddingValues(bottom = 48.dp),
                     ) {
@@ -280,10 +304,11 @@ fun HomeScreen(
                                     drawerClosed = { drawerState.currentValue == DrawerValue.Closed },
                                     onFocus = { index ->
                                         focusedRowKey = row.key
+                                        focusedRowIndex[0] = rowIndex
                                         vm.onFocus(row.key, index)
-                                        // Start loading the next rows before the user reaches them.
-                                        rows.subList(rowIndex + 1, minOf(rowIndex + 3, rows.size))
-                                            .forEach { vm.loadRowIfNeeded(it.key) }
+                                        // Start loading the next rows before the user reaches them. (drop/take:
+                                        // the row list may have shrunk since this callback was composed.)
+                                        rows.drop(rowIndex + 1).take(2).forEach { vm.loadRowIfNeeded(it.key) }
                                     },
                                     onActivate = { ref ->
                                         when (val action = vm.activate(row.key, ref)) {
@@ -426,13 +451,21 @@ private fun CardsRow(
     var last by remember { mutableStateOf(row.items.getOrNull(start)?.ref) }
     val slotRef = last?.takeIf { ref -> row.items.any { it.ref == ref } } ?: row.items.firstOrNull()?.ref
     val currentReclaim by rememberUpdatedState(reclaim)
+    val currentItems by rememberUpdatedState(row.items)
+    // Focus left the row because its focused card was removed (not because the user moved away): it comes
+    // back even if the rail grabbed it in between (that also opened the drawer).
+    var lostFocus by remember { mutableStateOf(false) }
     // A refresh removed the last focused card: the slot moves to the card now in its place (HomeViewModel
-    // keeps that position), and if focus was on the removed card it follows, so the D-pad keeps working.
-    LaunchedEffect(row.items) {
-        val gone = last ?: return@LaunchedEffect
-        if (row.items.any { it.ref == gone }) return@LaunchedEffect
-        last = row.items.getOrNull(focusedIndex())?.ref ?: row.items.firstOrNull()?.ref
-        if (currentReclaim()) slot.requestFocusSoon()
+    // keeps that position, and moves the hero there), and if focus was on the removed card it follows,
+    // so the D-pad keeps working.
+    LaunchedEffect(row.items, lostFocus) {
+        val gone = last
+        if (gone != null && row.items.none { it.ref == gone }) {
+            last = row.items.getOrNull(focusedIndex())?.ref ?: row.items.firstOrNull()?.ref
+            if (!lostFocus && !currentReclaim()) return@LaunchedEffect
+        } else if (!lostFocus) return@LaunchedEffect
+        lostFocus = false
+        slot.requestFocusSoon()
     }
     // Cards keep the same callbacks and modifiers across recompositions, so a row update skips them.
     val currentOnFocus by rememberUpdatedState(onFocus)
@@ -443,7 +476,10 @@ private fun CardsRow(
         state = listState,
         // Entering the row by any route lands on [slot]. (focusRestorer mis-restored rows that had been
         // scrolled out of composition, picking an unrelated card.)
-        modifier = Modifier.fillMaxWidth().focusProperties { enter = { slot } }.focusGroup(),
+        modifier = Modifier.fillMaxWidth().focusProperties { enter = { slot } }.focusGroup().onFocusChanged {
+            val focusedRef = last
+            if (!it.hasFocus && focusedRef != null && currentItems.none { c -> c.ref == focusedRef }) lostFocus = true
+        },
         contentPadding = PaddingValues(start = RowStart, end = ContentEnd, top = RowPadV, bottom = RowPadV),
         horizontalArrangement = Arrangement.spacedBy(CardGap),
     ) {
@@ -469,7 +505,8 @@ private fun CardsRow(
                 LandscapeCard(card.title, card.subtitle, card.posterUrl, progress = card.progress, onClick = open,
                     modifier = m, onLongClick = longOpen)
             } else {
-                PosterCard(card.title, card.posterUrl, onClick = open, modifier = m, width = PosterWidth)
+                PosterCard(card.title, card.posterUrl, onClick = open, modifier = m, width = PosterWidth,
+                    subtitle = card.subtitle)
             }
         }
     }

@@ -74,4 +74,45 @@ class PersistentCookieJarTest {
         assertEquals("keep", jar.cookie("sf"))
         assertNull(jar.cookie("cf"))
     }
+
+    private fun line(name: String, value: String, domain: String) =
+        """{"name":"$name","value":"$value","domain":"$domain","path":"/","expiresAt":${Long.MAX_VALUE},""" +
+            """"secure":true,"httpOnly":true,"hostOnly":true}"""
+
+    // The jar is built in Application.onCreate: one bad line must not crash every launch (D3).
+    @Test
+    fun invalidStoredCookieIsSkippedAndTheRestKept() {
+        val file = tmp.newFile("cookies.jsonl")
+        file.writeText(listOf(line("sf", "dev1", server.hostName), line("cf", "x", ""), line(" bad", "x", server.hostName),
+            "{not json").joinToString("\n"))
+        val jar = PersistentCookieJar(file, siteHost = server.hostName)
+        assertEquals("dev1", jar.cookie("sf"))
+        assertNull(jar.cookie("cf"))
+    }
+
+    @Test
+    fun unreadableFileStartsEmpty() {
+        val dir = tmp.newFolder("cookies.jsonl")
+        dir.resolve("child").writeText("x")
+        assertNull(PersistentCookieJar(dir, siteHost = server.hostName).cookie("sf"))
+    }
+
+    // A disk error while saving must not fail the HTTP call that delivered the cookie (D5).
+    @Test
+    fun failedPersistKeepsTheCookieInMemory() {
+        val file = tmp.root.resolve("cookies.jsonl")
+        tmp.newFolder("cookies.jsonl.tmp").resolve("child").writeText("x")
+        val jar = PersistentCookieJar(file, siteHost = server.hostName)
+        call(jar, MockResponse.Builder().addHeader("Set-Cookie", "cf=s1; Max-Age=1000; path=/").build())
+        assertEquals("s1", jar.cookie("cf"))
+    }
+
+    @Test
+    fun persistLeavesNoTempFile() {
+        val file = tmp.root.resolve("cookies.jsonl")
+        val jar = PersistentCookieJar(file, siteHost = server.hostName)
+        call(jar, MockResponse.Builder().addHeader("Set-Cookie", "cf=s1; Max-Age=1000; path=/").build())
+        assertTrue(file.exists())
+        assertTrue(!tmp.root.resolve("cookies.jsonl.tmp").exists())
+    }
 }

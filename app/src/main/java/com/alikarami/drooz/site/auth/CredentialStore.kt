@@ -1,5 +1,6 @@
 package com.alikarami.drooz.site.auth
 
+import com.alikarami.drooz.site.writeAtomically
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.File
@@ -14,9 +15,9 @@ data class Credentials(val username: String, val password: String, val mobile: S
 
 /** Stores the login credentials encrypted with [box], so expired sessions can be renewed silently. */
 class CredentialStore(private val file: File, private val box: SecretBox) {
+    /** Atomic: a kill mid-save keeps the previous credentials, never a truncated file. */
     fun save(c: Credentials) {
-        file.parentFile?.mkdirs()
-        file.writeBytes(box.encrypt(Json.encodeToString(Credentials.serializer(), c).toByteArray()))
+        writeAtomically(file, box.encrypt(Json.encodeToString(Credentials.serializer(), c).toByteArray()))
     }
 
     fun load(): Credentials? = runCatching {

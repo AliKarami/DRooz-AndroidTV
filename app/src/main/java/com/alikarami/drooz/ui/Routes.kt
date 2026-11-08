@@ -29,5 +29,6 @@ data class Title(
     }
 }
 
-/** A site list (`/archive/...`) grid under [title]. */
-@Serializable data class ListRoute(val title: String, val path: String, val emptyText: String? = null)
+/** A site list (`/archive/...`) grid under [title]; [watchlist]: «لیست من», reloaded after a toggle. */
+@Serializable
+data class ListRoute(val title: String, val path: String, val emptyText: String? = null, val watchlist: Boolean = false)

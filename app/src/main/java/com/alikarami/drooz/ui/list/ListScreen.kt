@@ -26,6 +26,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
+import androidx.lifecycle.Lifecycle
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.alikarami.drooz.AppGraph
@@ -37,11 +39,15 @@ import com.alikarami.drooz.ui.home.HeroBackdrop
 import com.alikarami.drooz.ui.home.HeroInfo
 import com.alikarami.drooz.ui.theme.DroozColors
 
-class ListViewModelFactory(private val graph: AppGraph, private val path: String, private val title: String) :
-    ViewModelProvider.Factory {
+class ListViewModelFactory(
+    private val graph: AppGraph,
+    private val path: String,
+    private val title: String,
+    private val watchlist: Boolean = false,
+) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T =
-        ListViewModel(graph.siteApi, graph.titleInfo, path, title) as T
+        ListViewModel(graph.siteApi, graph.titleInfo, path, title, reloadOnWatchlistChange = watchlist) as T
 }
 
 /** The compact hero strip: the grid starts at this fraction of the screen height. */
@@ -55,6 +61,8 @@ private const val HeroFraction = 0.35f
 @Composable
 fun ListScreen(vm: ListViewModel, onOpen: (TitleRef) -> Unit, emptyText: String? = null) {
     val state by vm.uiState.collectAsStateWithLifecycle()
+    // Back from a title page that changed «لیست من»: the grid reloads in place.
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.onResume() }
     BoxWithConstraints(Modifier.fillMaxSize().background(DroozColors.Background)) {
         val gridTop = maxHeight * HeroFraction
         val cellWidth = gridCellWidth(maxWidth)

@@ -5,8 +5,10 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.first
+import java.io.IOException
 
 /** Per-title viewing choices that survive leaving the title and process death. */
 interface TitlePrefs {
@@ -18,20 +20,35 @@ interface TitlePrefs {
     suspend fun setDefaultDub(on: Boolean)
 }
 
-private val Context.titlePrefsStore: DataStore<Preferences> by preferencesDataStore("title_prefs")
+private val Context.titlePrefsDataStore: DataStore<Preferences> by preferencesDataStore(
+    "title_prefs", corruptionHandler = prefsCorruptionHandler(),
+)
 
-class DataStoreTitlePrefs(context: Context) : TitlePrefs {
-    private val store = context.applicationContext.titlePrefsStore
+fun titlePrefsStore(context: Context): DataStore<Preferences> = context.applicationContext.titlePrefsDataStore
+
+/** Reads never throw for a disk error: an unreadable store means "no choice made". */
+class DataStoreTitlePrefs(private val store: DataStore<Preferences>) : TitlePrefs {
     private fun key(postId: Long) = booleanPreferencesKey("dub_$postId")
 
-    override suspend fun dubSelected(postId: Long): Boolean? = store.data.first()[key(postId)]
+    private suspend fun read(): Preferences = try {
+        store.data.first()
+    } catch (_: IOException) {
+        emptyPreferences()
+    }
+
+    override suspend fun dubSelected(postId: Long): Boolean? = read()[key(postId)]
     override suspend fun setDubSelected(postId: Long, selected: Boolean) {
         store.edit { it[key(postId)] = selected }
     }
 
     private val defaultDubKey = booleanPreferencesKey("default_dub")
-    override suspend fun defaultDub(): Boolean = store.data.first()[defaultDubKey] ?: false
+    override suspend fun defaultDub(): Boolean = read()[defaultDubKey] ?: false
     override suspend fun setDefaultDub(on: Boolean) {
         store.edit { it[defaultDubKey] = on }
+    }
+
+    /** Forgets every choice (another account signed in on this TV). */
+    suspend fun clear() {
+        store.edit { it.clear() }
     }
 }

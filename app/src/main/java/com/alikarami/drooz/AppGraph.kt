@@ -19,6 +19,7 @@ import com.alikarami.drooz.data.WatchStore
 import com.alikarami.drooz.data.playerPrefsStore
 import com.alikarami.drooz.data.TitleInfoRepository
 import com.alikarami.drooz.data.TitlePrefs
+import com.alikarami.drooz.data.titlePrefsStore
 import com.alikarami.drooz.site.SiteConfig
 import com.alikarami.drooz.ui.common.buildImageLoader
 import com.alikarami.drooz.site.SiteRepository
@@ -59,7 +60,7 @@ class AppGraph(context: Context) {
     val authApi: AuthApi = AuthApiAdapter(auth)
     val titleInfo = TitleInfoRepository(siteApi)
     val homeCache = HomePageCache()
-    val titlePrefs: TitlePrefs = DataStoreTitlePrefs(appContext)
+    val titlePrefs: TitlePrefs = DataStoreTitlePrefs(titlePrefsStore(appContext))
     val playerPrefs: PlayerPrefs = DataStorePlayerPrefs(playerPrefsStore(appContext))
     val watchStore: WatchStore = FileWatchStore(appContext.filesDir.resolve("watch_state.json"))
 

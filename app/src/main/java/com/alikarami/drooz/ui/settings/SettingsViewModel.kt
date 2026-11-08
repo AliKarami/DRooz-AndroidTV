@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
@@ -56,7 +57,8 @@ class SettingsViewModel(
 
     private val local = MutableStateFlow(Local())
 
-    val uiState: StateFlow<SettingsUiState> = combine(playerPrefs.settings, local) { p, l ->
+    // An unreadable prefs file shows the defaults rather than crashing the screen.
+    val uiState: StateFlow<SettingsUiState> = combine(playerPrefs.settings.catch { emit(PlayerSettings()) }, local) { p, l ->
         SettingsUiState(p, l.defaultDub, l.username, version, l.cacheCleared, l.confirmLogout, l.busy)
     }.stateIn(
         viewModelScope, SharingStarted.Eagerly,

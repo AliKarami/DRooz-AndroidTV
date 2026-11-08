@@ -116,6 +116,21 @@ class SettingsViewModelTest {
         assertEquals("0.1.0", vm.uiState.value.version)
     }
 
+    // A preferences read that fails (corrupt or unreadable file) shows defaults, never crashes Settings (D4).
+    @Test fun playerPrefsReadFailureShowsDefaults() = runTest(dispatcher) {
+        val failing = object : PlayerPrefs {
+            override val settings = kotlinx.coroutines.flow.flow<PlayerSettings> { throw IOException("corrupt") }
+            override suspend fun update(transform: (PlayerSettings) -> PlayerSettings) = throw IOException("corrupt")
+        }
+        val vm = SettingsViewModel(failing, FakeTitlePrefs(), FakeAuth(), FakeCache(), "0.1.0")
+        backgroundScope.launch(dispatcher) { vm.uiState.collect {} }
+        runCurrent()
+        assertEquals(PlayerSettings(), vm.uiState.value.player)
+        vm.setAudioBoost(false)
+        runCurrent()
+        assertEquals("0.1.0", vm.uiState.value.version)
+    }
+
     @Test fun exposesUsernameAndVersion() = runTest(dispatcher) {
         val vm = started(Rig())
         assertEquals("ali", vm.uiState.value.username)

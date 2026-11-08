@@ -49,4 +49,40 @@ class PlayerPrefsTest {
         }
         assertEquals(PlayerSettings(), DataStorePlayerPrefs(store).settings.first())
     }
+
+    // A corrupt preferences file is replaced by empty preferences instead of failing every read (D4).
+    @Test fun corruptFileResetsToDefaults() = runTest {
+        val file = tmp.newFile("c.preferences_pb").apply { writeBytes(byteArrayOf(0x7f, 0x00, 0x13, 0x37, 0x42)) }
+        val store = PreferenceDataStoreFactory.create(corruptionHandler = prefsCorruptionHandler(), scope = backgroundScope) { file }
+        assertEquals(PlayerSettings(), DataStorePlayerPrefs(store).settings.first())
+        val prefs = DataStoreTitlePrefs(store)
+        prefs.setDefaultDub(true)
+        assertEquals(true, prefs.defaultDub())
+    }
+
+    private class FailingStore : androidx.datastore.core.DataStore<androidx.datastore.preferences.core.Preferences> {
+        override val data = kotlinx.coroutines.flow.flow<androidx.datastore.preferences.core.Preferences> {
+            throw java.io.IOException("disk")
+        }
+        override suspend fun updateData(
+            transform: suspend (androidx.datastore.preferences.core.Preferences) -> androidx.datastore.preferences.core.Preferences,
+        ) = throw java.io.IOException("disk")
+    }
+
+    // Title prefs are read on the way to playback: a read error means "no choice", never a crash (D4).
+    @Test fun titlePrefsReadErrorsGiveDefaults() = runTest {
+        val prefs = DataStoreTitlePrefs(FailingStore())
+        assertEquals(null, prefs.dubSelected(1))
+        assertEquals(false, prefs.defaultDub())
+    }
+
+    @Test fun titlePrefsRoundTripAndClear() = runTest {
+        val prefs = DataStoreTitlePrefs(PreferenceDataStoreFactory.create(scope = backgroundScope) { tmp.newFile("t.preferences_pb") })
+        prefs.setDubSelected(7, true)
+        prefs.setDefaultDub(true)
+        assertEquals(true, prefs.dubSelected(7))
+        prefs.clear()
+        assertEquals(null, prefs.dubSelected(7))
+        assertEquals(false, prefs.defaultDub())
+    }
 }

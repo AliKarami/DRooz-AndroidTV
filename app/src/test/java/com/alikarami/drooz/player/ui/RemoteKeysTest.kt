@@ -20,6 +20,8 @@ import android.view.KeyEvent.KEYCODE_MEDIA_PLAY
 import android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE
 import android.view.KeyEvent.KEYCODE_MEDIA_REWIND
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RemoteKeysTest {
@@ -128,5 +130,16 @@ class RemoteKeysTest {
     @Test fun menuShowsControlsWhenHidden() {
         assertEquals(KeyAction.ShowControls, mapKey(KEYCODE_MENU, true, 0, Overlay.NONE, false, false))
         assertEquals(KeyAction.None, mapKey(KEYCODE_MENU, true, 0, Overlay.CONTROLS, false, false))
+    }
+
+    @Test fun playerMediaKeysAreOwnedWholeOthersAreNot() {
+        // Every event of these (repeats, ups) stays in the player: one that fell through would reach the
+        // media session as a second press.
+        for (k in listOf(
+            KEYCODE_MEDIA_PLAY_PAUSE, KEYCODE_MEDIA_PLAY, KEYCODE_MEDIA_PAUSE, KEYCODE_MEDIA_NEXT, KEYCODE_MEDIA_STOP,
+            KEYCODE_MEDIA_FAST_FORWARD, KEYCODE_MEDIA_REWIND, KEYCODE_MEDIA_SKIP_FORWARD, KEYCODE_MEDIA_SKIP_BACKWARD,
+        )) assertTrue("$k", isPlayerMediaKey(k))
+        assertFalse(isPlayerMediaKey(KEYCODE_DPAD_CENTER))
+        assertFalse(isPlayerMediaKey(KEYCODE_BACK))
     }
 }

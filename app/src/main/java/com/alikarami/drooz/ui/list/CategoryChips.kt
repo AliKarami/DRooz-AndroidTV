@@ -48,7 +48,7 @@ fun CategoryChipRow(chips: List<CategoryChip>, selected: Int, onSelect: (Int) ->
         verticalAlignment = Alignment.CenterVertically,
     ) {
         chips.forEachIndexed { i, chip ->
-            CategoryChipItem(
+            ChipButton(
                 chip.label, i == selected, onClick = { onSelect(i) },
                 modifier = if (i == selected) Modifier.focusRequester(selectedRequester) else Modifier,
             )
@@ -58,7 +58,7 @@ fun CategoryChipRow(chips: List<CategoryChip>, selected: Int, onSelect: (Int) ->
 
 /** Translucent pill; the selected one is red; focused is white with black text (as the title page's pills). */
 @Composable
-private fun CategoryChipItem(label: String, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+fun ChipButton(label: String, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val rest = if (selected) DroozColors.Accent else Color.White.copy(alpha = 0.12f)
     Surface(
         onClick = onClick,

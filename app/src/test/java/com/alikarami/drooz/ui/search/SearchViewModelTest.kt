@@ -1,11 +1,16 @@
 package com.alikarami.drooz.ui.search
 
+import com.alikarami.drooz.data.RecentSearches
 import com.alikarami.drooz.data.SiteApi
 import com.alikarami.drooz.data.TitleInfoRepository
+import com.alikarami.drooz.data.withRecentQuery
 import com.alikarami.drooz.site.model.*
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
@@ -201,5 +206,76 @@ class SearchViewModelTest {
         assertEquals(ResultsJump.Wait, vm.uiState.value.resultsJump())
         advanceUntilIdle()
         assertEquals(ResultsJump.Focus, vm.uiState.value.resultsJump())
+    }
+
+    // ── «جستجوهای اخیر» ─────────────────────────────────────────────────────────
+
+    private class FakeRecent(initial: List<String> = emptyList()) : RecentSearches {
+        val flow = MutableStateFlow(initial)
+        override val queries: Flow<List<String>> = flow
+        override suspend fun add(query: String) { flow.value = withRecentQuery(flow.value, query) }
+        override suspend fun clear() { flow.value = emptyList() }
+    }
+
+    private fun TestScope.vm(api: FakeApi, recent: RecentSearches) =
+        SearchViewModel(api, TitleInfoRepository(api, fetchScope = backgroundScope), recent = recent)
+
+    @Test fun showsTheStoredRecentQueries() = runTest(dispatcher) {
+        val recent = FakeRecent(listOf("Dune", "Pluribus"))
+        val vm = vm(FakeApi { emptyList() }, recent); runCurrent()
+        assertEquals(listOf("Dune", "Pluribus"), vm.uiState.value.recent)
+        recent.flow.value = listOf("Severance")
+        runCurrent()
+        assertEquals(listOf("Severance"), vm.uiState.value.recent)
+    }
+
+    @Test fun openingAResultSavesTheQueryItAnswered() = runTest(dispatcher) {
+        val recent = FakeRecent()
+        val vm = vm(FakeApi { q -> listOf(card(1, q)) }, recent)
+        vm.onQueryChange("plu"); advanceUntilIdle()
+        vm.onQueryChange("pluribus  "); advanceUntilIdle()
+        // Typing (and the searches it ran) saves nothing.
+        assertEquals(emptyList<String>(), recent.flow.value)
+        vm.onResultOpened(); advanceUntilIdle()
+        assertEquals(listOf("pluribus"), recent.flow.value)
+        assertEquals(listOf("pluribus"), vm.uiState.value.recent)
+    }
+
+    @Test fun openingWithoutAnAnsweredQuerySavesNothing() = runTest(dispatcher) {
+        val recent = FakeRecent()
+        val vm = vm(FakeApi { q -> listOf(card(1, q)) }, recent)
+        vm.onResultOpened(); advanceUntilIdle()
+        assertEquals(emptyList<String>(), recent.flow.value)
+    }
+
+    @Test fun aRecentQueryRunsAtOnce() = runTest(dispatcher) {
+        val api = FakeApi { q -> listOf(card(1, q)) }
+        val vm = vm(api, FakeRecent(listOf("Dune")))
+        vm.runRecent("Dune"); runCurrent()
+        assertEquals(listOf("Dune"), api.calls)
+        assertEquals("Dune", vm.uiState.value.query)
+        assertEquals("Dune", vm.uiState.value.searchedFor)
+        assertEquals(ResultsJump.Focus, vm.uiState.value.resultsJump())
+    }
+
+    @Test fun clearForgetsTheHistory() = runTest(dispatcher) {
+        val recent = FakeRecent(listOf("Dune", "Pluribus"))
+        val vm = vm(FakeApi { emptyList() }, recent); runCurrent()
+        vm.clearRecent(); advanceUntilIdle()
+        assertEquals(emptyList<String>(), recent.flow.value)
+        assertEquals(emptyList<String>(), vm.uiState.value.recent)
+    }
+
+    @Test fun storeFailuresNeverBreakSearch() = runTest(dispatcher) {
+        val broken = object : RecentSearches {
+            override val queries: Flow<List<String>> = flow { throw java.io.IOException("disk") }
+            override suspend fun add(query: String) = throw java.io.IOException("disk")
+            override suspend fun clear() = throw java.io.IOException("disk")
+        }
+        val vm = vm(FakeApi { q -> listOf(card(1, q)) }, broken)
+        vm.onQueryChange("dune"); advanceUntilIdle()
+        vm.onResultOpened(); vm.clearRecent(); advanceUntilIdle()
+        assertEquals(emptyList<String>(), vm.uiState.value.recent)
+        assertEquals(1, vm.uiState.value.items.size)
     }
 }

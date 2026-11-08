@@ -84,6 +84,21 @@ class LoginViewModelTest {
         assertFalse(vm.uiState.value.busy)
     }
 
+    // A server-side failure or a Cloudflare block is not the user's network: say so (D15).
+    @Test fun httpErrorMessageNamesTheCode() = runTest(dispatcher) {
+        val vm = LoginViewModel(FakeAuth { throw SiteException.HttpError(502) })
+        vm.fill()
+        vm.submit(); advanceUntilIdle()
+        assertEquals("سایت با خطا پاسخ داد (کد 502)؛ کمی بعد دوباره تلاش کنید", vm.uiState.value.error)
+    }
+
+    @Test fun blockedMessage() = runTest(dispatcher) {
+        val vm = LoginViewModel(FakeAuth { throw SiteException.Blocked() })
+        vm.fill()
+        vm.submit(); advanceUntilIdle()
+        assertEquals("سایت درخواست را موقتاً مسدود کرد؛ کمی بعد دوباره تلاش کنید", vm.uiState.value.error)
+    }
+
     @Test fun successEmitsLoggedIn() = runTest(dispatcher) {
         val auth = FakeAuth { LoginResult.Success }
         auth.gate = CompletableDeferred()

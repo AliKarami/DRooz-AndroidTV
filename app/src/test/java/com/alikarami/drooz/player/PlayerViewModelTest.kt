@@ -1622,4 +1622,31 @@ class PlayerViewModelTest {
         runCurrent()
         assertTrue(v.keepScreenOn.value)
     }
+
+    @Test fun subtitleThatFailsForGoodIsFlaggedUntilARetryWorks() = playerTest {
+        val env = Env().withSubtitles()
+        env.api.subtitleFailure = SiteException.NetworkError(IOException("down"))
+        val v = started(env)
+        assertTrue(v.state.value.subtitleErrors.isEmpty()) // the automatic retry is still pending
+        advanceTimeBy(SUBTITLE_RETRY_MS * 2); runCurrent()
+        assertEquals(setOf(SubtitleKind.FA), v.state.value.subtitleErrors)
+        env.api.subtitleFailure = null
+        v.setSubtitle(SubtitleChoice.FA)
+        runCurrent()
+        assertTrue(v.state.value.subtitleErrors.isEmpty())
+    }
+
+    @Test fun episodeSwitchDropsThePreviousEpisodesSubtitles() = playerTest {
+        val env = Env().withSubtitles()
+        val v = started(env)
+        assertEquals(listOf(FA_URL), env.api.subtitleCalls)
+        v.playEpisode("s1e2")
+        runCurrent()
+        engine.emit(EngineEvent.Ready)
+        runCurrent()
+        v.playEpisode("s1e1")
+        runCurrent()
+        // Evicted on the switch away, so coming back downloads it again.
+        assertEquals(listOf(FA_URL, FA_URL, FA_URL), env.api.subtitleCalls)
+    }
 }

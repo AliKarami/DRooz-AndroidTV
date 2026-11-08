@@ -89,6 +89,15 @@ const val STALE_STREAM_AFTER_MS = 10 * 60_000L
 /** HTTP statuses that mean the stream key expired / the CDN URL went stale: reopen the stream page. */
 private val RECOVERABLE_HTTP = setOf(403, 404, 410)
 
+/** The files a choice needs; DUAL uses the separate FA and EN files, never the merged track. */
+internal fun subtitleKinds(choice: SubtitleChoice): List<SubtitleKind> = when (choice) {
+    SubtitleChoice.FA -> listOf(SubtitleKind.FA)
+    SubtitleChoice.EN -> listOf(SubtitleKind.EN)
+    SubtitleChoice.DUAL -> listOf(SubtitleKind.FA, SubtitleKind.EN)
+    SubtitleChoice.FA_DUB -> listOf(SubtitleKind.FA_DUB)
+    SubtitleChoice.OFF -> emptyList()
+}
+
 sealed interface PlayerPhase {
     data object Loading : PlayerPhase
     /** Includes paused and buffering. */
@@ -131,6 +140,8 @@ data class PlayerUiState(
     val hasNext: Boolean = false,
     /** A silent reopen (recovery, fresh stream after a long absence) is loading: the spinner shows. */
     val recovering: Boolean = false,
+    /** Subtitle files of this stream that failed even after the automatic retry (the panel offers a retry). */
+    val subtitleErrors: Set<SubtitleKind> = emptySet(),
 )
 
 /**
@@ -302,9 +313,16 @@ class PlayerViewModel(
             // The engine keeps the last gain until the next boost tick: the new episode starts at unity.
             engine.setGain(1f)
             _state.update {
-                it.copy(subtitleOffsetMs = 0, availableSubtitles = emptyList(), upNext = null, hasNext = nextEpisode(seasons, id) != null)
+                it.copy(
+                    subtitleOffsetMs = 0, availableSubtitles = emptyList(), upNext = null,
+                    hasNext = nextEpisode(seasons, id) != null, subtitleErrors = emptySet(),
+                )
             }
             _cues.value = SubtitleCues()
+            // Only the current stream's files are kept: a binge would otherwise hold every episode's cues.
+            timelines.keys.removeAll { it.first != id }
+            requestedSubtitles.removeAll { it.first != id }
+            autoRetriedSubtitles.removeAll { it.first != id }
         }
         _state.update {
             if (silent) it.copy(recovering = true) else it.copy(phase = PlayerPhase.Loading, currentStreamId = id, recovering = false)
@@ -649,15 +667,6 @@ class PlayerViewModel(
     private fun originalChoice(available: List<SubtitleChoice>): SubtitleChoice =
         listOf(globalChoice, SubtitleChoice.FA, SubtitleChoice.EN).firstOrNull { it in available } ?: SubtitleChoice.OFF
 
-    /** The files a choice needs; DUAL uses the separate FA and EN files, never the merged track. */
-    private fun kindsFor(choice: SubtitleChoice): List<SubtitleKind> = when (choice) {
-        SubtitleChoice.FA -> listOf(SubtitleKind.FA)
-        SubtitleChoice.EN -> listOf(SubtitleKind.EN)
-        SubtitleChoice.DUAL -> listOf(SubtitleKind.FA, SubtitleKind.EN)
-        SubtitleChoice.FA_DUB -> listOf(SubtitleKind.FA_DUB)
-        SubtitleChoice.OFF -> emptyList()
-    }
-
     /**
      * Starts the downloads [choice] needs, once per stream id and kind. A failure leaves that side blank,
      * retries once by itself after [SUBTITLE_RETRY_MS] and again on the next request (choice change, reopen).
@@ -665,16 +674,20 @@ class PlayerViewModel(
     private fun ensureSubtitles(choice: SubtitleChoice) {
         val s = session ?: return
         val id = streamId
-        for (kind in kindsFor(choice)) {
+        for (kind in subtitleKinds(choice)) {
             val url = s.subtitles.firstOrNull { it.kind == kind }?.url ?: continue
             val key = id to kind
             if (!requestedSubtitles.add(key)) continue
+            setSubtitleError(kind, false)
             viewModelScope.launch {
                 try {
                     val body = api.subtitle(url)
                     val timeline = withContext(parseDispatcher) { SubtitleTimeline(SrtParser.parse(body)) }
-                    timelines[key] = timeline
-                    if (id == streamId) updateCues()
+                    // A download that outlived its episode is dropped (that episode's files were evicted).
+                    if (id == streamId) {
+                        timelines[key] = timeline
+                        updateCues()
+                    }
                 } catch (e: CancellationException) {
                     requestedSubtitles.remove(key)
                     throw e
@@ -684,10 +697,19 @@ class PlayerViewModel(
                     if (autoRetriedSubtitles.add(key)) {
                         delay(SUBTITLE_RETRY_MS)
                         // Only while the same stream is current and its choice still needs this file.
-                        if (id == streamId && kind in kindsFor(_state.value.subtitle)) ensureSubtitles(_state.value.subtitle)
+                        if (id == streamId && kind in subtitleKinds(_state.value.subtitle)) ensureSubtitles(_state.value.subtitle)
+                    } else if (id == streamId) {
+                        setSubtitleError(kind, true)
                     }
                 }
             }
+        }
+    }
+
+    private fun setSubtitleError(kind: SubtitleKind, failed: Boolean) {
+        _state.update {
+            if ((kind in it.subtitleErrors) == failed) it
+            else it.copy(subtitleErrors = if (failed) it.subtitleErrors + kind else it.subtitleErrors - kind)
         }
     }
 

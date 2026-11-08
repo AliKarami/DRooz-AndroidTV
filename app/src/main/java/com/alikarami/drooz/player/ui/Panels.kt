@@ -65,6 +65,7 @@ import com.alikarami.drooz.player.PlayerViewModel
 import com.alikarami.drooz.player.SPEEDS
 import com.alikarami.drooz.player.SUBTITLE_STEP_MS
 import com.alikarami.drooz.player.UpNext
+import com.alikarami.drooz.player.subtitleKinds
 import com.alikarami.drooz.ui.common.DroozImage
 import com.alikarami.drooz.ui.common.ImageSizes
 import com.alikarami.drooz.ui.common.UiStrings
@@ -82,6 +83,8 @@ import kotlin.math.roundToInt
 const val SUBTITLE_PANEL_FRACTION = 0.3f
 const val SMALL_PANEL_FRACTION = 0.24f
 private val PanelBackground = Color(0xF5121218) // rgba(18,18,24,.96)
+/** Trailing text of the chosen subtitle row when its file failed to download. */
+private const val SUBTITLE_FAILED_RETRY = "دریافت نشد · تلاش دوباره"
 private val RowShape = RoundedCornerShape(8.dp)
 
 fun panelFraction(overlay: Overlay): Float? = when (overlay) {
@@ -253,9 +256,12 @@ internal fun SubtitleAudioPanel(state: PlayerUiState, vm: PlayerViewModel, focus
         if (available.isNotEmpty()) {
             GroupHeader(stringResource(R.string.player_group_subtitle))
             available.forEach { c ->
+                // The chosen file failed to download: say so; OK on the row asks again.
+                val failed = c == state.subtitle && subtitleKinds(c).any { it in state.subtitleErrors }
                 PanelOption(
                     subtitleChoiceLabel(c), c == state.subtitle, { vm.setSubtitle(c) },
                     if (c == focusChoice) Modifier.focusRequester(first) else Modifier,
+                    trailing = if (failed) SUBTITLE_FAILED_RETRY else null,
                 )
             }
         }

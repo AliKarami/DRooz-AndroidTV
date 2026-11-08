@@ -18,6 +18,9 @@ object UiStrings {
     fun remaining(min: Int): String = "$min دقیقه باقی‌مانده".toPersianDigits()
     fun continueFilm(remainingMin: Int): String = "ادامه (${remaining(remainingMin)})"
     fun minutes(n: Int): String = "$n دقیقه".toPersianDigits()
+    /** «سریال های» → «سریال‌های»: the site spaces the plural suffix; Persian typography (and the rail) joins it. */
+    fun joinPlurals(text: String): String = PLURAL.replace(text, "$1\u200C$2")
+    private val PLURAL = Regex("""(\S) (ها|های|هایی)(?=\s|$)""")
 
     // ---- player ----
     /**

@@ -47,7 +47,8 @@ class HeroController(
         if (cached != null) return
         dwellJob = scope.safeLaunch(onError = { /* keep the list-data hero */ }) {
             delay(dwellMs)
-            val detail = titleInfo.get(ref)
+            // Its own permit: the hero follows the user's focus, «ادامه تماشا» resolutions can wait.
+            val detail = titleInfo.get(ref, priority = true)
             if (focusedRef == ref) onHero(hero(ref, card, posterHash, detail))
         }
     }

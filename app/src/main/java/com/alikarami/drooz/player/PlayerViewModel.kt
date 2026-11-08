@@ -49,9 +49,12 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -163,6 +166,14 @@ class PlayerViewModel(
     private val _exits = Channel<Unit>(Channel.BUFFERED)
     /** The activity finishes on each emission. */
     val exits: Flow<Unit> = _exits.receiveAsFlow()
+
+    /** The activity keeps the screen on only while this is true: a paused film lets the screensaver start. */
+    val keepScreenOn: StateFlow<Boolean> = combine(engine.isPlaying, engine.buffering) { playing, buffering -> playing || buffering }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    private val _resumes = Channel<Unit>(Channel.CONFLATED)
+    /** Back in the foreground while playing (paused): the overlay shows the controls, so it reads as paused. */
+    val resumes: Flow<Unit> = _resumes.receiveAsFlow()
 
     private var streamId: String = args.streamId
     private var episode: Episode? = null
@@ -445,6 +456,12 @@ class PlayerViewModel(
                 switching = false
                 if (lastReopenAt != null) reopenReady = true
                 _state.update { it.copy(phase = PlayerPhase.Playing, recovering = false) }
+            }
+            EngineEvent.PausedBySystem -> {
+                // As if the user paused: the next OK plays (wantsPlay would otherwise still say playing).
+                if (!wantsPlay) return
+                wantsPlay = false
+                save()
             }
             EngineEvent.Ended -> {
                 // A late Ended of the previous episode while switching: the new open is under way.
@@ -918,8 +935,10 @@ class PlayerViewModel(
     /** Back in the foreground: later loads may play again (nothing resumes by itself). */
     fun onStart() {
         foreground = true
+        val returning = stoppedAt != null
         val hiddenMs = stoppedAt?.let { clock() - it } ?: 0L
         stoppedAt = null
+        if (returning && _state.value.phase == PlayerPhase.Playing) _resumes.trySend(Unit)
         // Whatever the phase: an open that finished while hidden (still Loading) holds an old key too.
         // Not while an open is still in flight (no session yet) or after a failure (Retry reopens).
         if (hiddenMs >= STALE_STREAM_AFTER_MS && session != null && !closed &&

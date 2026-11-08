@@ -4,6 +4,7 @@ package com.alikarami.drooz.player.engine
 
 import android.content.Context
 import android.util.Log
+import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.Format
 import androidx.media3.common.MediaItem
@@ -57,6 +58,12 @@ class ExoPlaybackEngine(context: Context, client: OkHttpClient) : PlaybackEngine
     /** Public only so the activity can attach the video surface. */
     val exoPlayer: ExoPlayer = ExoPlayer.Builder(appContext, renderersFactory)
         .setMediaSourceFactory(DefaultMediaSourceFactory(OkHttpDataSource.Factory(client)))
+        // Ducks / pauses for the Assistant and other apps; pauses when headphones or a BT speaker go away.
+        .setAudioAttributes(
+            AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(),
+            /* handleAudioFocus = */ true,
+        )
+        .setHandleAudioBecomingNoisy(true)
         .build()
         .apply {
             setSeekParameters(SeekParameters.CLOSEST_SYNC)
@@ -108,6 +115,14 @@ class ExoPlaybackEngine(context: Context, client: OkHttpClient) : PlaybackEngine
                 }
                 Player.STATE_ENDED -> _events.tryEmit(EngineEvent.Ended)
                 else -> Unit
+            }
+        }
+
+        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            if (!playWhenReady && (reason == Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS ||
+                    reason == Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_BECOMING_NOISY)
+            ) {
+                _events.tryEmit(EngineEvent.PausedBySystem)
             }
         }
 

@@ -1583,4 +1583,43 @@ class PlayerViewModelTest {
         assertEquals("https://cdn/master-2.m3u8", engine.loads.last().first)
         assertFalse(engine.suspended)
     }
+
+    @Test fun systemPauseIsTheUsersPauseToo() = playerTest {
+        val v = started(Env())
+        engine.durationMs = HOUR
+        engine.positionMs = 300_000
+        engine.isPlaying.value = false // the engine paused itself (audio focus lost / headphones out)
+        engine.emit(EngineEvent.PausedBySystem)
+        runCurrent()
+        assertEquals(300_000L, watch.map["s1e1"]!!.positionMs)
+        val played = engine.played
+        v.togglePlay() // one press plays again (it used to pause the paused player first)
+        assertEquals(played + 1, engine.played)
+    }
+
+    @Test fun returningToThePlayerSignalsTheOverlay() = playerTest {
+        val v = started(Env())
+        val signals = mutableListOf<Unit>()
+        backgroundScope.launch { v.resumes.collect { signals += it } }
+        v.onStart() // the first start (or one without a stop) is not a return
+        runCurrent()
+        assertTrue(signals.isEmpty())
+        v.onStop()
+        v.onStart()
+        runCurrent()
+        assertEquals(1, signals.size)
+    }
+
+    @Test fun screenStaysOnOnlyWhilePlayingOrBuffering() = playerTest {
+        val v = started(Env())
+        backgroundScope.launch { v.keepScreenOn.collect {} }
+        runCurrent()
+        assertTrue(v.keepScreenOn.value)
+        v.togglePlay()
+        runCurrent()
+        assertFalse(v.keepScreenOn.value) // a long pause lets the TV's screensaver start
+        engine.buffering.value = true
+        runCurrent()
+        assertTrue(v.keepScreenOn.value)
+    }
 }

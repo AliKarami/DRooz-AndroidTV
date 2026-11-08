@@ -21,8 +21,11 @@ import kotlinx.serialization.json.jsonObject
 import org.jsoup.Jsoup
 
 object TitleParser {
-    /** The object ends at the first `}` followed by `;`, a line end or `</script>` (minified pages). */
-    private val STREAM = Regex("""var STREAM\s*=\s*(\{.*?\})\s*;?\s*(?:\n|</script>)""", RegexOption.DOT_MATCHES_ALL)
+    /**
+     * The object ends at the first `}` followed by `;` and a line end, or by `</script>` with or without the
+     * `;` (minified pages). A bare `}` at a line end is a nested one (pretty-printed pages).
+     */
+    private val STREAM = Regex("""var STREAM\s*=\s*(\{.*?\})\s*(?:;\s*\n|;?\s*</script>)""", RegexOption.DOT_MATCHES_ALL)
     private val TRAILER = Regex("""/img/590-331/trailer/[^'"\s]+""")
     private const val SUGGESTIONS = "آثار پیشنهادی"
     private const val WATCH_BUTTON = "button.watchlist[value2=watch]"

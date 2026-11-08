@@ -136,4 +136,26 @@ class TitleParserTest {
             assertEquals("7", t.catalog.main.single().episodes.single().streamId)
         }
     }
+
+    // A pretty-printed STREAM has nested `}` at line ends: the object only ends at `};` + line end (M4).
+    @Test fun prettyPrintedStreamJsonIsFound() {
+        val html = """
+            <html><script>
+            var STREAM = {
+              "main": {
+                "1": {
+                  "1": {
+                    "videos": [],
+                    "id": "7",
+                    "audios": [],
+                    "subtitles": []
+                  }
+                }
+              }
+            };
+            var OTHER = {"a": 1};
+            </script></html>
+        """.trimIndent()
+        assertEquals("7", TitleParser.parse(html, pluribusRef).catalog.main.single().episodes.single().streamId)
+    }
 }

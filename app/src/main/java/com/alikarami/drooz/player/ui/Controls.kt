@@ -326,18 +326,21 @@ private fun SeekRow(engine: PlaybackEngine, controller: OverlayController, reque
                     .weight(1f)
                     .height(24.dp)
                     .drawBehind {
+                        // Focused: a thicker, brighter track and a larger knob with a glow, as clear as
+                        // the focused icons (the old 2 dp / 3 dp change was hard to see across a room).
                         val e = emphasis.value
-                        val h = (4 + 2 * e).dp.toPx()
+                        val h = (4 + 4 * e).dp.toPx()
                         val top = size.height / 2 - h / 2
                         val w = size.width
                         val r = CornerRadius(h / 2)
-                        drawRoundRect(Color.White.copy(alpha = 0.25f), Offset(0f, top), Size(w, h), r)
-                        drawRoundRect(Color.White.copy(alpha = 0.35f), Offset(0f, top), Size(w * fraction(buffered), h), r)
+                        drawRoundRect(Color.White.copy(alpha = 0.25f + 0.15f * e), Offset(0f, top), Size(w, h), r)
+                        drawRoundRect(Color.White.copy(alpha = 0.35f + 0.15f * e), Offset(0f, top), Size(w * fraction(buffered), h), r)
                         drawRoundRect(DroozColors.Accent, Offset(0f, top), Size(w * fraction(pos), h), r)
                         val x = w * fraction(controller.scrubMs ?: pos)
-                        val knob = (6 + 3 * e).dp.toPx()
+                        val knob = (6 + 5 * e).dp.toPx()
                         val c = Offset(x, size.height / 2)
-                        drawCircle(Color.White.copy(alpha = 0.9f), knob + 2.5.dp.toPx(), c)
+                        if (e > 0f) drawCircle(Color.White.copy(alpha = 0.3f * e), knob + 10.dp.toPx() * e, c)
+                        drawCircle(Color.White.copy(alpha = 0.9f + 0.1f * e), knob + 2.5.dp.toPx() + 1.5.dp.toPx() * e, c)
                         drawCircle(DroozColors.Accent, knob, c)
                     },
             ) {

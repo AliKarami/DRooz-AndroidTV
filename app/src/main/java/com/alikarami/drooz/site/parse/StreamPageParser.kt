@@ -27,15 +27,20 @@ object StreamPageParser {
             backdropPath = IMAGE.find(html)?.groupValues?.get(1),
             subtitles = TRACK.findAll(html).map { SubtitleTrack(it.groupValues[2], absolute(it.groupValues[1])) }.toList(),
             qualityLabels = QUALITY_BLOCK.find(html)?.groupValues?.get(1)
-                ?.let { block -> QUALITY.findAll(block).associate { it.groupValues[1].toInt() to it.groupValues[2] } }
+                ?.let { block -> QUALITY.findAll(block).mapNotNull { m -> m.groupValues[1].toIntOrNull()?.let { it to m.groupValues[2] } }.toMap() }
                 .orEmpty(),
             gains = GAINS.find(html)?.groupValues?.get(1)
-                ?.let { block -> PAIR.findAll(block).map { it.groupValues[1].toDouble() to it.groupValues[2].toDouble() }.toList() }
+                ?.let { block -> PAIR.findAll(block).mapNotNull { m ->
+                    val t = m.groupValues[1].toDoubleOrNull() ?: return@mapNotNull null
+                    m.groupValues[2].toDoubleOrNull()?.let { t to it }
+                }.toList() }
                 .orEmpty(),
             minGain = MIN_GAIN.find(html)?.groupValues?.get(1)?.toDoubleOrNull(),
             maxGain = MAX_GAIN.find(html)?.groupValues?.get(1)?.toDoubleOrNull(),
             iframes = IFRAMES.findAll(html)
-                .map { m -> m.groupValues[1].toInt() to m.groupValues[2].split(',').mapNotNull { it.trim().toDoubleOrNull() } }
+                .mapNotNull { m ->
+                    m.groupValues[1].toIntOrNull()?.let { it to m.groupValues[2].split(',').mapNotNull { v -> v.trim().toDoubleOrNull() } }
+                }
                 .sortedBy { it.first }
                 .map { it.second }
                 .toList(),

@@ -11,12 +11,15 @@ object PersianText {
     private val MINUTES = Regex("""(\d+)\s*دقیقه""")
     private val CRITICS = Regex("""منتقدین\s*:\s*(\d+)""")
 
+    private val THOUSANDS = Regex("""(?<=\d)[٬،,](?=\d)""")
+
+    /** Persian/Arabic digits to ASCII, `٫` to `.`; thousands separators between digits are dropped. */
     fun digits(s: String): String = buildString(s.length) {
         for (c in s) {
             val p = PERSIAN.indexOf(c).takeIf { it >= 0 } ?: ARABIC.indexOf(c).takeIf { it >= 0 }
             append(if (p != null) '0' + p else if (c == '٫') '.' else c)
         }
-    }
+    }.replace(THOUSANDS, "")
 
     fun rating(s: String): Rating? {
         val t = digits(s)

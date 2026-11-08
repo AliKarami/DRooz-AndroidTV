@@ -894,12 +894,13 @@ class PlayerViewModel(
         _state.update { it.copy(upNext = null) }
     }
 
+    /** Never plays while hidden: the engine is suspended (a media-session command can still arrive). */
     fun togglePlay() {
         if (wantsPlay) {
             wantsPlay = false
             engine.pause()
             save()
-        } else {
+        } else if (foreground) {
             wantsPlay = true
             engine.play()
         }

@@ -331,6 +331,23 @@ class PlayerViewModelTest {
         assertEquals(played, engine.played) // coming back does not start by itself
     }
 
+    @Test fun playWhileHiddenIsIgnored() = playerTest {
+        // A media-session command (Assistant, another device) never starts a hidden, suspended player.
+        val v = Env().vm(scope = this)
+        runCurrent()
+        engine.emit(EngineEvent.Ready)
+        runCurrent()
+        v.onStop()
+        val played = engine.played
+        v.play()
+        v.togglePlay()
+        assertEquals(played, engine.played)
+        assertFalse(engine.isPlaying.value)
+        v.onStart()
+        runCurrent()
+        assertEquals(played, engine.played) // and the return reopen stays paused
+    }
+
     @Test fun nothingSavedBeforePlaybackStarted() = playerTest {
         val v = Env().vm(scope = this)
         runCurrent()

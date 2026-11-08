@@ -14,7 +14,6 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.alikarami.drooz.DroozApp
 import com.alikarami.drooz.player.engine.ExoPlaybackEngine
 import com.alikarami.drooz.player.session.PlayerMediaSession
-import com.alikarami.drooz.player.session.SessionControls
 import com.alikarami.drooz.player.session.sessionInfo
 import com.alikarami.drooz.player.ui.PlayerScreen
 import com.alikarami.drooz.ui.theme.DroozTheme
@@ -92,20 +91,11 @@ class PlayerActivity : ComponentActivity() {
     private fun startSession(vm: PlayerViewModel) {
         if (session != null) return
         val engine = vm.engine as ExoPlaybackEngine
-        val controls = object : SessionControls {
-            override fun togglePlay() = vm.togglePlay()
-            override fun play() = vm.play()
-            override fun pause() = vm.pause()
-            override fun seekBy(deltaMs: Long) = vm.seekBy(deltaMs)
-            override fun seekTo(ms: Long) = vm.seekTo(ms)
-            override fun playNext() = vm.playNext()
-            override fun stop() = vm.close()
-        }
         val reopen = PendingIntent.getActivity(
             this, 0, Intent(intent).setClass(this, PlayerActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        val s = PlayerMediaSession(this, engine.exoPlayer, client ?: return, controls, reopen)
+        val s = PlayerMediaSession(this, engine.exoPlayer, client ?: return, vm.sessionControls, reopen)
         session = s
         sessionInfoJob = lifecycleScope.launch {
             vm.state.map(::sessionInfo).distinctUntilChanged().collect { s.update(it) }

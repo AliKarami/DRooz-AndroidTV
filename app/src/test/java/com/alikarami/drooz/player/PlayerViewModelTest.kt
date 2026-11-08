@@ -17,6 +17,7 @@ import com.alikarami.drooz.player.audio.AudioOption
 import com.alikarami.drooz.player.audio.GAIN_TICK_MS
 import com.alikarami.drooz.player.engine.EngineEvent
 import com.alikarami.drooz.player.engine.EngineTracks
+import com.alikarami.drooz.player.session.SessionControls
 import com.alikarami.drooz.site.SiteConfig
 import com.alikarami.drooz.site.SiteException
 import com.alikarami.drooz.site.model.*
@@ -599,6 +600,60 @@ class PlayerViewModelTest {
         assertEquals(1, engine.played)
         v.play()
         assertEquals(2, engine.played)
+    }
+
+    // The media session's commands reach the overlay while it shows (controls, seek bar, scrub), like
+    // the remote's keys; without it they act on the view model directly.
+    @Test fun sessionControls_goThroughTheAttachedOverlay_elseDirect() = playerTest {
+        val v = started(Env())
+        engine.durationMs = 3_600_000
+        engine.positionMs = 50_000
+        val calls = mutableListOf<String>()
+        val overlay = object : SessionControls {
+            override fun togglePlay() { calls += "toggle" }
+            override fun play() { calls += "play" }
+            override fun pause() { calls += "pause" }
+            override fun seekBy(deltaMs: Long) { calls += "by $deltaMs" }
+            override fun seekTo(ms: Long) { calls += "to $ms" }
+            override fun playNext() { calls += "next" }
+            override fun stop() { calls += "stop" }
+        }
+        v.attachOverlay(overlay)
+        v.sessionControls.pause()
+        v.sessionControls.seekTo(70_000)
+        v.sessionControls.seekBy(-10_000)
+        assertEquals(listOf("pause", "to 70000", "by -10000"), calls)
+        assertEquals(0, engine.paused)
+        assertTrue(engine.seeks.isEmpty())
+
+        v.detachOverlay(overlay)
+        v.sessionControls.pause()
+        runCurrent()
+        assertEquals(1, engine.paused)
+        assertEquals(3, calls.size)
+    }
+
+    // A recreated screen attaches its overlay before the old one detaches: the old detach must not drop it.
+    @Test fun detachingAStaleOverlay_keepsTheCurrentOne() = playerTest {
+        val v = started(Env())
+        var current = 0
+        fun overlay(onPause: () -> Unit) = object : SessionControls {
+            override fun togglePlay() = Unit
+            override fun play() = Unit
+            override fun pause() = onPause()
+            override fun seekBy(deltaMs: Long) = Unit
+            override fun seekTo(ms: Long) = Unit
+            override fun playNext() = Unit
+            override fun stop() = Unit
+        }
+        val old = overlay { }
+        val new = overlay { current++ }
+        v.attachOverlay(old)
+        v.attachOverlay(new)
+        v.detachOverlay(old)
+        v.sessionControls.pause()
+        assertEquals(1, current)
+        assertEquals(0, engine.paused)
     }
 
     @Test fun togglePlayPausesWhileBuffering() = playerTest {

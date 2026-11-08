@@ -52,6 +52,8 @@ private fun portSnap(targetSec: Double, currentSec: Double, iframes: List<Double
 }
 
 const val RESUME_MIN_MS = 30_000L
+/** A resume starts this much before the saved position, so the scene picks up where the viewer left it. */
+const val RESUME_REWIND_MS = 3_000L
 const val FINISHED_FRACTION = 0.9
 
 fun isFinished(positionMs: Long, durationMs: Long): Boolean =
@@ -59,6 +61,10 @@ fun isFinished(positionMs: Long, durationMs: Long): Boolean =
 
 fun resumePositionMs(savedMs: Long, durationMs: Long, finished: Boolean): Long =
     if (savedMs > RESUME_MIN_MS && !finished && !isFinished(savedMs, durationMs)) savedMs else 0L
+
+/** Where a resume from the watch store loads: [resumePositionMs] less [RESUME_REWIND_MS]; a start from 0 stays 0. */
+fun resumeStartMs(savedMs: Long, durationMs: Long, finished: Boolean): Long =
+    resumePositionMs(savedMs, durationMs, finished).let { if (it > 0) (it - RESUME_REWIND_MS).coerceAtLeast(0L) else 0L }
 
 const val UP_NEXT_LEAD_MS = 40_000L
 const val UP_NEXT_COUNTDOWN_S = 8

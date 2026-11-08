@@ -381,7 +381,9 @@ class PlayerViewModel(
             }
             _state.update { it.copy(subtitle = choice, subtitleOffsetMs = saved?.subtitleOffsetMs ?: 0L) }
         }
-        val start = startAt ?: saved?.let { resumePositionMs(it.positionMs, it.durationMs, it.finished) } ?: 0L
+        // From the watch store: rewound a little (the same start again on a reopen before anything played,
+        // nothing is saved until Ready). A known position (recovery, return from hidden) loads exactly.
+        val start = startAt ?: saved?.let { resumeStartMs(it.positionMs, it.durationMs, it.finished) } ?: 0L
         if (closed) return
         // Downloads run beside the engine load and never block or fail playback.
         ensureSubtitles(_state.value.subtitle)

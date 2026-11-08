@@ -27,4 +27,10 @@ class LoginParserTest {
             "<input name='username'><input name='password'><input name='captcha'></form>"
         assertEquals(LoginPage.Unknown("کد امنیتی را وارد کنید"), LoginParser.parse(html))
     }
+
+    @Test fun wrongPasswordWithArabicYehIsRecognised() {
+        val html = "<form><div class=\"alert alert-danger\">نام كاربري يا رمز\u200cعبور اشتباه است</div>" +
+            "<input name=\"username\"><input name=\"password\"></form>"
+        assertEquals(LoginPage.WrongCredentials, LoginParser.parse(html))
+    }
 }

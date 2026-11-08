@@ -103,4 +103,10 @@ class TitleParserTest {
         val unmarked = html.replace(watchButton, watchButton.replace("btn-gray ", ""))
         assertEquals(null, TitleParser.parse(unmarked, pluribusRef).inWatchlist)
     }
+
+    @Test fun suggestionsHeadingWithArabicYehIsFound() {
+        val html = fixture("title_series_pluribus.html").replace("آثار پیشنهادی", "آثار پيشنهادی")
+        val ref = com.alikarami.drooz.site.model.TitleRef(com.alikarami.drooz.site.model.TitleKind.SERIES, 5735053, "pluribus")
+        assertTrue(TitleParser.parse(html, ref).suggestions.isNotEmpty())
+    }
 }

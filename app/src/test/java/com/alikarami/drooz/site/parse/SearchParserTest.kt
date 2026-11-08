@@ -15,4 +15,9 @@ class SearchParserTest {
     }
 
     @Test fun noResults() = assertEquals(emptyList<Any>(), SearchParser.parse("<html><body><h2>فیلم و سریال</h2></body></html>"))
+
+    @Test fun resultsHeadingWithArabicYehIsFound() {
+        val html = fixture("search_pluribus.html").replace("فیلم و سریال", "فيلم و سريال")
+        assertEquals(1, SearchParser.parse(html).size)
+    }
 }

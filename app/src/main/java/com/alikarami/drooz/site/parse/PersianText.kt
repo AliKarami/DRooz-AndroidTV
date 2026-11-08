@@ -21,6 +21,22 @@ object PersianText {
         }
     }.replace(THOUSANDS, "")
 
+    private val SPACES = Regex("""\s+""")
+
+    /**
+     * The form site text is compared in: Arabic ي/ى/ك become Persian ی/ک, ZWNJ and NBSP become a space,
+     * bidi marks and tatweel are dropped, and runs of spaces collapse. Used on both sides of a match.
+     */
+    fun normalize(s: String): String = buildString(s.length) {
+        for (c in s) when (c) {
+            'ي', 'ى' -> append('ی')
+            'ك' -> append('ک')
+            '\u200c', '\u00a0', '\u202f', '\u2009' -> append(' ')
+            '\u200d', '\u200e', '\u200f', '\u0640', '\ufeff' -> Unit
+            else -> append(c)
+        }
+    }.replace(SPACES, " ").trim()
+
     fun rating(s: String): Rating? {
         val t = digits(s)
         val score = SCORE.find(t)?.groupValues?.get(1)?.toDoubleOrNull() ?: return null

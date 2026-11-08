@@ -9,7 +9,7 @@ object SearchParser {
 
     fun parse(html: String): List<TitleCard> {
         val doc = Jsoup.parse(html)
-        val h2 = doc.select("h2").firstOrNull { it.text().contains(RESULTS_HEADING) } ?: return emptyList()
+        val h2 = doc.select("h2").firstOrNull { PersianText.normalize(it.text()).contains(RESULTS_HEADING) } ?: return emptyList()
         val block = h2.parent()?.parent() ?: return emptyList()
         return block.select("div.rtl").mapNotNull(CardParser::parse).distinctBy { it.ref }
     }

@@ -51,4 +51,13 @@ class HomeParserTest {
         assertEquals("Sacha Baron Cohen", c.director)
         assertTrue(c.synopsis!!.startsWith("روزنامه‌نگار هیپ‌هاپ"))
     }
+
+    // A section heading written with ZWNJ / Arabic yeh still matches the configured row title.
+    @Test fun sectionTitlesAreNormalized() {
+        val html = fixture("home.html").replace("فیلم های برگزیده", "فیلم\u200cهاي برگزیده")
+            .replace("مشاهدات اخیر", "مشاهدات اخير")
+        val page = HomeParser.parse(html)
+        assertEquals("فیلم های برگزیده", page.sections.first().title)
+        assertEquals(home.recentlyStreamed, page.recentlyStreamed)
+    }
 }

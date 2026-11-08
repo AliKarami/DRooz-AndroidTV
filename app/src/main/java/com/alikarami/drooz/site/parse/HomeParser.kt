@@ -27,7 +27,8 @@ object HomeParser {
         for (h2 in doc.select("h2")) {
             val header = h2.parent() ?: continue
             val content = header.nextElementSibling() ?: continue
-            val title = h2.text().trim()
+            // Normalized, so a ZWNJ or an Arabic yeh in the heading still matches the configured row.
+            val title = PersianText.normalize(h2.text())
             if (title.contains(RECENTLY_STREAMED)) {
                 recent = posters(content)
                 continue

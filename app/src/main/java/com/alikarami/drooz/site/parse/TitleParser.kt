@@ -39,7 +39,7 @@ object TitleParser {
             val title = heading.text().trim().trimEnd(':', ' ')
             box.select("div.col-12.px-0").map { "$title: ${it.text().trim()}" }
         }
-        val suggestionLinks = doc.select("h2").firstOrNull { it.text().contains(SUGGESTIONS) }
+        val suggestionLinks = doc.select("h2").firstOrNull { PersianText.normalize(it.text()).contains(SUGGESTIONS) }
             ?.parent()?.parent()
             ?.select("a[href*=/post/]")
             .orEmpty()

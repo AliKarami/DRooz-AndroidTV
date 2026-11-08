@@ -22,4 +22,12 @@ class HomeRowsTest {
         )
         assertEquals(RowSource.Recent, HomeRows.rows[0].source)
     }
+
+    // Home sections are looked up by title; both sides use the same normalized form (B11).
+    @Test fun sectionTitlesAreNormalized() {
+        val titles = HomeRows.rows.mapNotNull { (it.source as? RowSource.HomeSection)?.title }
+        assertEquals(3, titles.size)
+        titles.forEach { assertEquals(com.alikarami.drooz.site.parse.PersianText.normalize(it), it) }
+        assertEquals(RowSource.HomeSection("فیلم های برگزیده"), RowSource.HomeSection("فيلم\u200cهاي برگزيده"))
+    }
 }

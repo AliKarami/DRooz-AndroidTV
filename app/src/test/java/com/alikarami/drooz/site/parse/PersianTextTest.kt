@@ -21,4 +21,11 @@ class PersianTextTest {
     }
     @Test fun digitsKeepsCommasBetweenWords() = assertEquals("درام، جنایی، 2", PersianText.digits("درام، جنایی، ۲"))
     @Test fun critics() = assertEquals(38, PersianText.criticsScore("امتیاز منتقدین : 38 / 100"))
+
+    // The site's editors mix Arabic ي/ك with Persian ی/ک, and ZWNJ, NBSP or a space between word parts.
+    @Test fun normalize() {
+        assertEquals("فیلم های برگزیده", PersianText.normalize("فيلم\u200cهاي\u00a0 برگزيده "))
+        assertEquals("کودک", PersianText.normalize("كودك"))
+        assertEquals("abc", PersianText.normalize("abc"))
+    }
 }

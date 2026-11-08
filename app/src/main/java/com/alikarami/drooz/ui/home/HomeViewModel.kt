@@ -6,6 +6,7 @@ import com.alikarami.drooz.data.Backdrop
 import com.alikarami.drooz.data.BackdropResolver
 import com.alikarami.drooz.data.ContinueItem
 import com.alikarami.drooz.data.ContinueWatching
+import com.alikarami.drooz.data.HiddenTitles
 import com.alikarami.drooz.data.HomeRowConfig
 import com.alikarami.drooz.data.HomePageCache
 import com.alikarami.drooz.data.HomeRows
@@ -93,7 +94,10 @@ class HomeViewModel(
     /** Null: «ادامه تماشا» is the server's recently streamed list as is (no local state, no resolving). */
     private val watchStore: WatchStore? = null,
     private val titlePrefs: TitlePrefs? = null,
+    /** Same clock as [WatchStore]'s updatedAt: a hide is compared with later plays. */
     private val now: () -> Long = System::currentTimeMillis,
+    /** Titles removed from «ادامه تماشا» on this TV; null: nothing can be removed. */
+    private val hiddenTitles: HiddenTitles? = null,
 ) : ViewModel() {
     companion object {
         /** Back on home after this long (TV apps stay in memory for days), the rows are revalidated. */
@@ -130,12 +134,18 @@ class HomeViewModel(
     // details resolved so far, kept so [onResume] rebuilds the row without refetching.
     private var recentServer: List<PosterRef>? = null
     private var local: List<WatchEntry> = emptyList()
+    /** postId → when it was removed from the row ([removeFromContinue] or an earlier session). */
+    private var hidden: Map<Long, Long> = emptyMap()
     private val resolved = HashMap<TitleRef, TitleDetail>()
     private val dubs = HashMap<TitleRef, Boolean>()
     private val resolving = HashMap<TitleRef, Job>()
     private var recentJob: Job? = null
     /** A Play was handed out and home has not resumed since: a second OK is a double press. */
     private var playPending = false
+
+    private val _menuHint = MutableStateFlow(true)
+    /** Whether a focused «ادامه تماشا» card still hints at its long-press menu: until it is first opened. */
+    val menuHint: StateFlow<Boolean> = _menuHint
 
     init { loadHome(useCache = true) }
 
@@ -234,9 +244,13 @@ class HomeViewModel(
         recentJob = viewModelScope.safeLaunch(onError = { }) {
             // A failing store just means no local state.
             local = runCatching { store.all() }.getOrNull().orEmpty()
+            // A failing store keeps what is known; a removal made meanwhile wins over the older read.
+            runCatching { hiddenTitles?.all() }.getOrNull()?.let { stored ->
+                hidden = stored + hidden.filter { (id, at) -> at > (stored[id] ?: Long.MIN_VALUE) }
+            }
             for ((ref, d) in resolved) dubs[ref] = dubFor(ref, d)
             renderRecent(key)
-            for ((ref, _) in ContinueWatching.order(server, local)) {
+            for ((ref, _) in ContinueWatching.order(server, local, hidden)) {
                 if (refetch || ref !in resolved) resolve(key, ref, again = refetch)
             }
         }
@@ -268,7 +282,7 @@ class HomeViewModel(
     private fun renderRecent(key: String) {
         val server = recentServer ?: return
         val byStream = local.associateBy { it.streamId }
-        val list = ContinueWatching.order(server, local).mapNotNull { (ref, hash) ->
+        val list = ContinueWatching.order(server, local, hidden).mapNotNull { (ref, hash) ->
             val d = resolved[ref] ?: return@mapNotNull Entry(ref, null, hash, ContinueWatching.pending(ref, hash))
             ContinueWatching.resolve(ref, hash ?: d.card.posterHash, d, byStream, dubs[ref] ?: false)
                 ?.let { Entry(ref, null, it.posterHash, it, d) }
@@ -288,6 +302,25 @@ class HomeViewModel(
         if (playPending) return null
         playPending = true
         return HomeAction.Play(PlayerArgs(e.ref, play.streamId, dubs[e.ref] ?: false))
+    }
+
+    /** The long-press menu on a «ادامه تماشا» card was opened: the hint has done its job. */
+    fun onMenuOpened() {
+        _menuHint.value = false
+    }
+
+    /**
+     * «حذف از ادامه تماشا»: the card leaves the row at once (focus and the hero move to the card now in
+     * its place, see [setItems]) and stays out until the title is played again on this TV.
+     */
+    fun removeFromContinue(ref: TitleRef) {
+        val key = recentKey ?: return
+        val at = now()
+        hidden = hidden + (ref.postId to at)
+        renderRecent(key)
+        val store = hiddenTitles ?: return
+        // A failed write only means the card comes back after a restart.
+        viewModelScope.safeLaunch(onError = { }) { store.hide(ref.postId, at) }
     }
 
     private fun isHomeRow(key: String) = configs[key]?.source !is RowSource.ListPath

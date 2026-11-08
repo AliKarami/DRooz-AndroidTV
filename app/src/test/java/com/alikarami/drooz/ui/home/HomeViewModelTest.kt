@@ -1,6 +1,7 @@
 package com.alikarami.drooz.ui.home
 
 import com.alikarami.drooz.data.Backdrop
+import com.alikarami.drooz.data.HiddenTitles
 import com.alikarami.drooz.data.HomePageCache
 import com.alikarami.drooz.data.SiteApi
 import com.alikarami.drooz.data.TitleInfoRepository
@@ -412,8 +413,14 @@ class HomeViewModelTest {
         store: FakeWatchStore = FakeWatchStore(),
         prefs: FakeTitlePrefs = FakeTitlePrefs(),
         clock: () -> Long = { 0L },
+        hidden: FakeHiddenTitles? = null,
     ) = HomeViewModel(api, TitleInfoRepository(api, clock, fetchScope = CoroutineScope(dispatcher + SupervisorJob())),
-        watchStore = store, titlePrefs = prefs, now = clock)
+        watchStore = store, titlePrefs = prefs, now = clock, hiddenTitles = hidden)
+
+    private class FakeHiddenTitles(val map: MutableMap<Long, Long> = mutableMapOf(), var failure: Exception? = null) : HiddenTitles {
+        override suspend fun all(): Map<Long, Long> { failure?.let { throw it }; return map.toMap() }
+        override suspend fun hide(postId: Long, at: Long) { failure?.let { throw it }; map[postId] = at }
+    }
 
     private fun HomeViewModel.recent() = uiState.value.rows.first { it.key == "recent" }
 
@@ -683,5 +690,69 @@ class HomeViewModelTest {
         vm.onFocus("featured", 2); runCurrent()
         gate.complete(Unit); advanceUntilIdle()
         assertEquals(ref(12), vm.uiState.value.hero!!.ref)
+    }
+
+    // ── Removing a title from «ادامه تماشا» ───────────────────────────────
+
+    @Test fun removeFromContinue_dropsCardAtOnce_focusAndHeroMoveToNeighbour() = runTest(dispatcher) {
+        val a = series(1); val b = series(2); val c = series(3)
+        val hidden = FakeHiddenTitles()
+        val api = FakeApi(recentHome(a, b, c), onTitle = { seriesDetail(it) })
+        val vm = cwVm(api, clock = { 500L }, hidden = hidden); advanceUntilIdle()
+        vm.onFocus("recent", 1); runCurrent()
+        vm.removeFromContinue(b)
+        assertEquals(listOf(a, c), vm.recent().items.map { it.ref })    // before the store write runs
+        assertEquals(1, vm.focusedIndex("recent"))
+        assertEquals(c, vm.uiState.value.hero!!.ref)
+        advanceUntilIdle()
+        assertEquals(mapOf(2L to 500L), hidden.map)
+        assertNull(vm.activate("recent", b))
+    }
+
+    @Test fun removeFromContinue_lastCard_focusMovesBack() = runTest(dispatcher) {
+        val a = series(1); val b = series(2)
+        val api = FakeApi(recentHome(a, b), onTitle = { seriesDetail(it) })
+        val vm = cwVm(api, hidden = FakeHiddenTitles()); advanceUntilIdle()
+        vm.onFocus("recent", 1); runCurrent()
+        vm.removeFromContinue(b); advanceUntilIdle()
+        assertEquals(listOf(a), vm.recent().items.map { it.ref })
+        assertEquals(0, vm.focusedIndex("recent"))
+    }
+
+    @Test fun hiddenTitle_staysOutAcrossRefreshes_untilPlayedAgain() = runTest(dispatcher) {
+        val a = series(1); val b = series(2)
+        val store = FakeWatchStore(mutableListOf(local(a, "s1e1", pos = 600_000, at = 50)))
+        val hidden = FakeHiddenTitles(mutableMapOf(1L to 100L))
+        val api = FakeApi(recentHome(a, b), onTitle = { seriesDetail(it) })
+        val repo = TitleInfoRepository(api, fetchScope = CoroutineScope(dispatcher + SupervisorJob()))
+        val vm = HomeViewModel(api, repo, watchStore = store, hiddenTitles = hidden); advanceUntilIdle()
+        assertEquals(listOf(b), vm.recent().items.map { it.ref })
+        vm.refresh(); advanceUntilIdle()
+        assertEquals(listOf(b), vm.recent().items.map { it.ref })
+
+        store.entries += local(a, "s1e2", pos = 600_000, at = 101)          // played again after the hide
+        repo.invalidate(a)
+        vm.onResume(); advanceUntilIdle()
+        assertEquals(listOf(a, b), vm.recent().items.map { it.ref })
+    }
+
+    // A failing hidden store must neither drop the row nor undo a removal made this session.
+    @Test fun failingHiddenStore_keepsRowAndSessionRemoval() = runTest(dispatcher) {
+        val a = series(1); val b = series(2)
+        val hidden = FakeHiddenTitles(failure = java.io.IOException("disk"))
+        val api = FakeApi(recentHome(a, b), onTitle = { seriesDetail(it) })
+        val vm = cwVm(api, hidden = hidden); advanceUntilIdle()
+        assertEquals(listOf(a, b), vm.recent().items.map { it.ref })
+        vm.removeFromContinue(a); advanceUntilIdle()
+        vm.refresh(); advanceUntilIdle()
+        assertEquals(listOf(b), vm.recent().items.map { it.ref })
+    }
+
+    // The long-press hint shows until the menu has been opened once in this session.
+    @Test fun menuHint_untilMenuOpened() = runTest(dispatcher) {
+        val vm = cwVm(FakeApi(home()), hidden = FakeHiddenTitles()); advanceUntilIdle()
+        assertTrue(vm.menuHint.value)
+        vm.onMenuOpened()
+        assertFalse(vm.menuHint.value)
     }
 }

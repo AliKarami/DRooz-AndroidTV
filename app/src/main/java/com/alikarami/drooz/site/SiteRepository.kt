@@ -2,6 +2,7 @@ package com.alikarami.drooz.site
 
 import com.alikarami.drooz.site.auth.AuthService
 import com.alikarami.drooz.site.http.SiteHttp
+import com.alikarami.drooz.site.model.CategorizedListPage
 import com.alikarami.drooz.site.model.Episode
 import com.alikarami.drooz.site.model.HomePage
 import com.alikarami.drooz.site.model.ListPage
@@ -9,6 +10,7 @@ import com.alikarami.drooz.site.model.StreamSession
 import com.alikarami.drooz.site.model.TitleCard
 import com.alikarami.drooz.site.model.TitleDetail
 import com.alikarami.drooz.site.model.TitleRef
+import com.alikarami.drooz.site.parse.CategoryMenuParser
 import com.alikarami.drooz.site.parse.HomeParser
 import com.alikarami.drooz.site.parse.ListParser
 import com.alikarami.drooz.site.parse.SearchParser
@@ -19,6 +21,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import org.jsoup.Jsoup
 import java.net.URLEncoder
 
 /**
@@ -44,6 +47,16 @@ class SiteRepository(
             "$base$page/" + if (query.isNotEmpty()) "?$query" else ""
         }
         http.get(target).body.let { parse { ListParser.parse(it) } }
+    }
+
+    /** Page 1 of [path] and the navigation menu's categories, from one request; a menu that can't be read gives none. */
+    suspend fun listWithCategories(path: String): CategorizedListPage = authed {
+        http.get(path).body.let { body ->
+            parse {
+                val doc = Jsoup.parse(body)
+                CategorizedListPage(ListParser.parse(doc), runCatching { CategoryMenuParser.parse(doc) }.getOrDefault(emptyList()))
+            }
+        }
     }
 
     suspend fun search(query: String): List<TitleCard> = authed {

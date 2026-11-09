@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/logo.png" alt="DL Rooz" width="420">
+
 # DRooz for Android TV
 
 **Your DLRooz movies and series, made for the big screen.**
@@ -15,7 +17,10 @@ A fast, good-looking TV app for [DLRooz](https://robin.robert-redford.net/): bro
 ## Why you'll like it
 
 - **Feels like a real streaming app.** Big artwork, a hero banner that follows what you're looking at, and smooth remote navigation. It's not a website squeezed onto a TV.
-- **One press to keep watching.** «ادامه تماشا» knows the next episode and where you stopped. Press OK and it plays.
+- **One press to keep watching.** «ادامه تماشا» knows the next episode and where you stopped. Press OK and it plays. Hold OK to see details or remove a title from the row.
+- **Opens instantly.** Home appears right away and refreshes in the background.
+- **Find things fast.** Category chips on the Series and Films pages (dubbed, anime, Iranian, kids…), and search remembers what you looked for.
+- **Works with your remote and voice.** "Hey Google, pause", the Google TV now-playing card and TV-remote media keys all control the player.
 - **Subtitles done right.** Farsi, English, or **both at once**. Pick the size, colour and background, and fix out-of-sync subtitles in half-second steps.
 - **Everything the site's player has.** Quality picker, 5.1 surround sound, Persian dub, Audio Boost for quiet dialogue, playback speed, and next-episode autoplay.
 - **Persian first.** Menus are fully right-to-left in Persian; titles keep their original names.
@@ -35,7 +40,15 @@ A fast, good-looking TV app for [DLRooz](https://robin.robert-redford.net/): bro
   </tr>
   <tr>
     <td align="center">Series pages with every season</td>
-    <td align="center">Browse new and updated titles</td>
+    <td align="center">Browse by category: dubbed, anime, Iranian and more</td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/menu.jpg" alt="Hold OK on a Continue Watching card for details or to remove it"></td>
+    <td><img src="docs/screenshots/search.jpg" alt="Search with recent searches"></td>
+  </tr>
+  <tr>
+    <td align="center">Hold OK to remove a title from «ادامه تماشا»</td>
+    <td align="center">Recent searches, one press away</td>
   </tr>
   <tr>
     <td colspan="2" align="center"><img src="docs/screenshots/settings.jpg" alt="Subtitle settings with live preview" width="49%"><br>Subtitle style with a live preview</td>

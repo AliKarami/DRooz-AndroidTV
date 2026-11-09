@@ -141,6 +141,17 @@ private val PosterWidth = 120.dp
 private const val EXIT_WINDOW_MS = 2_000L
 
 private val RowUi.isHidden get() = requested && !loading && !error && items.isEmpty()
+
+/**
+ * The row focus enters on: the remembered one (coming back from a title), else the first with cards — but
+ * not past an earlier row still loading. On a cold start the stored page fills the later rows at once while
+ * «ادامه تماشا» is still reading local history; entering «فیلم‌های برگزیده» then left focus there, below
+ * the row the user came for. Null holds focus on the placeholder until that row settles.
+ */
+internal fun homeEntryRow(rows: List<RowUi>, focusedRowKey: String?): RowUi? =
+    rows.firstOrNull { it.key == focusedRowKey && it.items.isNotEmpty() }
+        ?: rows.firstOrNull { it.items.isNotEmpty() || it.loading }?.takeIf { it.items.isNotEmpty() }
+
 private val recentKeys = HomeRows.rows.filter { it.source is RowSource.Recent }.map { it.key }.toSet()
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -175,8 +186,7 @@ fun HomeScreen(
     var entered by remember { mutableStateOf(false) }
     // Where focus lands on entry: the last focused row (coming back from a title) or the first row with cards.
     // Once entered it is no longer needed, and not reading focusedRowKey here keeps row changes cheap.
-    val entryRow = if (entered) null else rows.firstOrNull { it.key == focusedRowKey && it.items.isNotEmpty() }
-        ?: rows.firstOrNull { it.items.isNotEmpty() }
+    val entryRow = if (entered) null else homeEntryRow(rows, focusedRowKey)
     val entryIndex = entryRow?.let { vm.focusedIndex(it.key).coerceIn(0, it.items.lastIndex) } ?: 0
     val entryRequester = remember { FocusRequester() }
     val placeholderRequester = remember { FocusRequester() }

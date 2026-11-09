@@ -77,21 +77,13 @@ class SessionPlayer(player: Player, private val controls: SessionControls) : For
     // The ExoPlayer's own available-commands / metadata events would undo ours: they pass a filter.
     override fun addListener(listener: Player.Listener) {
         if (listener in filters) return
-        val filter = Filter(listener)
+        val filter = SessionListenerFilter(listener, { commands }, { metadata })
         filters[listener] = filter
         super.addListener(filter)
     }
 
     override fun removeListener(listener: Player.Listener) {
         filters.remove(listener)?.let { super.removeListener(it) }
-    }
-
-    private inner class Filter(private val target: Player.Listener) : Player.Listener by target {
-        override fun onAvailableCommandsChanged(availableCommands: Player.Commands) =
-            target.onAvailableCommandsChanged(commands)
-
-        override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) =
-            target.onMediaMetadataChanged(metadata)
     }
 
     // ---- commands: through the view model, never straight to the ExoPlayer ----

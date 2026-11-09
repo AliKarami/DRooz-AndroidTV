@@ -17,6 +17,7 @@ import com.alikarami.drooz.player.audio.AudioOption
 import com.alikarami.drooz.player.audio.GAIN_TICK_MS
 import com.alikarami.drooz.player.engine.EngineEvent
 import com.alikarami.drooz.player.engine.EngineTracks
+import com.alikarami.drooz.player.session.SessionControls
 import com.alikarami.drooz.site.SiteConfig
 import com.alikarami.drooz.site.SiteException
 import com.alikarami.drooz.site.model.*
@@ -215,7 +216,45 @@ class PlayerViewModelTest {
         watch.map["s1e1"] = WatchEntry("s1e1", seriesRef.path, 1, 1, 600_000, 3_600_000, 0, false)
         Env().vm(scope = this)
         runCurrent()
-        assertEquals(600_000L, engine.loads.single().second)
+        // A few seconds earlier, so the scene picks up where the viewer left it.
+        assertEquals(597_000L, engine.loads.single().second)
+    }
+
+    @Test fun recoveryAndReturnAfterAResumeKeepTheExactPosition() = playerTest {
+        watch.map["s1e1"] = WatchEntry("s1e1", seriesRef.path, 1, 1, 600_000, 3_600_000, 0, false)
+        val env = Env()
+        val v = env.vm(scope = this)
+        runCurrent()
+        engine.emit(EngineEvent.Ready)
+        runCurrent()
+        engine.positionMs = 640_000
+        engine.emit(EngineEvent.Error(2004, "ERROR_CODE_IO_BAD_HTTP_STATUS", 403))
+        runCurrent()
+        assertEquals(640_000L, engine.loads.last().second)
+        engine.emit(EngineEvent.Ready)
+        runCurrent()
+        engine.positionMs = 700_000
+        v.onStop()
+        v.onStart()
+        runCurrent()
+        assertEquals(700_000L, engine.loads.last().second)
+    }
+
+    @Test fun silentReopenBeforeFirstReadyReloadsTheSameRewoundStart() = playerTest {
+        watch.map["s1e1"] = WatchEntry("s1e1", seriesRef.path, 1, 1, 600_000, 3_600_000, 0, false)
+        val env = Env()
+        env.vm(scope = this)
+        runCurrent()
+        engine.emit(EngineEvent.Error(2004, "ERROR_CODE_IO_BAD_HTTP_STATUS", 403))
+        runCurrent()
+        assertEquals(listOf(597_000L, 597_000L), engine.loads.map { it.second })
+    }
+
+    @Test fun startFromZeroIsNotRewound() = playerTest {
+        watch.map["s1e1"] = WatchEntry("s1e1", seriesRef.path, 1, 1, 20_000, 3_600_000, 0, false)
+        Env().vm(scope = this)
+        runCurrent()
+        assertEquals(0L, engine.loads.single().second)
     }
 
     @Test fun finishedEntryStartsFromZero() = playerTest {
@@ -291,6 +330,23 @@ class PlayerViewModelTest {
         v.onStart()
         assertFalse(engine.suspended)
         assertEquals(played, engine.played) // coming back does not start by itself
+    }
+
+    @Test fun playWhileHiddenIsIgnored() = playerTest {
+        // A media-session command (Assistant, another device) never starts a hidden, suspended player.
+        val v = Env().vm(scope = this)
+        runCurrent()
+        engine.emit(EngineEvent.Ready)
+        runCurrent()
+        v.onStop()
+        val played = engine.played
+        v.play()
+        v.togglePlay()
+        assertEquals(played, engine.played)
+        assertFalse(engine.isPlaying.value)
+        v.onStart()
+        runCurrent()
+        assertEquals(played, engine.played) // and the return reopen stays paused
     }
 
     @Test fun nothingSavedBeforePlaybackStarted() = playerTest {
@@ -544,6 +600,60 @@ class PlayerViewModelTest {
         assertEquals(1, engine.played)
         v.play()
         assertEquals(2, engine.played)
+    }
+
+    // The media session's commands reach the overlay while it shows (controls, seek bar, scrub), like
+    // the remote's keys; without it they act on the view model directly.
+    @Test fun sessionControls_goThroughTheAttachedOverlay_elseDirect() = playerTest {
+        val v = started(Env())
+        engine.durationMs = 3_600_000
+        engine.positionMs = 50_000
+        val calls = mutableListOf<String>()
+        val overlay = object : SessionControls {
+            override fun togglePlay() { calls += "toggle" }
+            override fun play() { calls += "play" }
+            override fun pause() { calls += "pause" }
+            override fun seekBy(deltaMs: Long) { calls += "by $deltaMs" }
+            override fun seekTo(ms: Long) { calls += "to $ms" }
+            override fun playNext() { calls += "next" }
+            override fun stop() { calls += "stop" }
+        }
+        v.attachOverlay(overlay)
+        v.sessionControls.pause()
+        v.sessionControls.seekTo(70_000)
+        v.sessionControls.seekBy(-10_000)
+        assertEquals(listOf("pause", "to 70000", "by -10000"), calls)
+        assertEquals(0, engine.paused)
+        assertTrue(engine.seeks.isEmpty())
+
+        v.detachOverlay(overlay)
+        v.sessionControls.pause()
+        runCurrent()
+        assertEquals(1, engine.paused)
+        assertEquals(3, calls.size)
+    }
+
+    // A recreated screen attaches its overlay before the old one detaches: the old detach must not drop it.
+    @Test fun detachingAStaleOverlay_keepsTheCurrentOne() = playerTest {
+        val v = started(Env())
+        var current = 0
+        fun overlay(onPause: () -> Unit) = object : SessionControls {
+            override fun togglePlay() = Unit
+            override fun play() = Unit
+            override fun pause() = onPause()
+            override fun seekBy(deltaMs: Long) = Unit
+            override fun seekTo(ms: Long) = Unit
+            override fun playNext() = Unit
+            override fun stop() = Unit
+        }
+        val old = overlay { }
+        val new = overlay { current++ }
+        v.attachOverlay(old)
+        v.attachOverlay(new)
+        v.detachOverlay(old)
+        v.sessionControls.pause()
+        assertEquals(1, current)
+        assertEquals(0, engine.paused)
     }
 
     @Test fun togglePlayPausesWhileBuffering() = playerTest {

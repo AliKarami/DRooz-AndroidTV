@@ -1,5 +1,6 @@
 package com.alikarami.drooz.ui
 
+import com.alikarami.drooz.site.model.CategoryKind
 import com.alikarami.drooz.site.model.TitleKind
 import com.alikarami.drooz.site.model.TitleRef
 import kotlinx.serialization.Serializable
@@ -29,6 +30,15 @@ data class Title(
     }
 }
 
-/** A site list (`/archive/...`) grid under [title]; [watchlist]: «لیست من», reloaded after a toggle. */
+/**
+ * A site list (`/archive/...`) grid under [title]; [watchlist]: «لیست من», reloaded after a toggle;
+ * [categories]: the Series / Films page, with the site menu's categories of that kind as chips.
+ */
 @Serializable
-data class ListRoute(val title: String, val path: String, val emptyText: String? = null, val watchlist: Boolean = false)
+data class ListRoute(
+    val title: String,
+    val path: String,
+    val emptyText: String? = null,
+    val watchlist: Boolean = false,
+    val categories: CategoryKind? = null,
+)

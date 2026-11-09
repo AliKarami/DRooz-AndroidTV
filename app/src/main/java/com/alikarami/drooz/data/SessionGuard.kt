@@ -29,6 +29,7 @@ class SessionGuardedSiteApi(private val api: SiteApi, private val events: Sessio
 
     override suspend fun home() = guard { api.home() }
     override suspend fun list(path: String, page: Int) = guard { api.list(path, page) }
+    override suspend fun listWithCategories(path: String) = guard { api.listWithCategories(path) }
     override suspend fun search(query: String) = guard { api.search(query) }
     override suspend fun title(ref: TitleRef) = guard { api.title(ref) }
     override suspend fun openStream(episode: Episode, ref: TitleRef, lang: String, height: Int) =

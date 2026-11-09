@@ -3,6 +3,9 @@ package com.alikarami.drooz.ui.home
 import android.os.SystemClock
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -114,7 +117,7 @@ class HomeViewModelFactory(private val graph: AppGraph) : ViewModelProvider.Fact
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T = HomeViewModel(
         graph.siteApi, graph.titleInfo, homeCache = graph.homeCache,
-        watchStore = graph.watchStore, titlePrefs = graph.titlePrefs,
+        watchStore = graph.watchStore, titlePrefs = graph.titlePrefs, hiddenTitles = graph.hiddenTitles,
     ) as T
 }
 
@@ -138,6 +141,17 @@ private val PosterWidth = 120.dp
 private const val EXIT_WINDOW_MS = 2_000L
 
 private val RowUi.isHidden get() = requested && !loading && !error && items.isEmpty()
+
+/**
+ * The row focus enters on: the remembered one (coming back from a title), else the first with cards — but
+ * not past an earlier row still loading. On a cold start the stored page fills the later rows at once while
+ * «ادامه تماشا» is still reading local history; entering «فیلم‌های برگزیده» then left focus there, below
+ * the row the user came for. Null holds focus on the placeholder until that row settles.
+ */
+internal fun homeEntryRow(rows: List<RowUi>, focusedRowKey: String?): RowUi? =
+    rows.firstOrNull { it.key == focusedRowKey && it.items.isNotEmpty() }
+        ?: rows.firstOrNull { it.items.isNotEmpty() || it.loading }?.takeIf { it.items.isNotEmpty() }
+
 private val recentKeys = HomeRows.rows.filter { it.source is RowSource.Recent }.map { it.key }.toSet()
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -155,6 +169,9 @@ fun HomeScreen(
     val state = vm.uiState.collectAsStateWithLifecycle()
     val allRows by remember { derivedStateOf(referentialEqualityPolicy()) { state.value.rows } }
     val error by remember { derivedStateOf(structuralEqualityPolicy()) { state.value.error } }
+    val menuHint by vm.menuHint.collectAsStateWithLifecycle()
+    // The «ادامه تماشا» card whose long-press menu is open.
+    var menuFor by remember { mutableStateOf<CardUi?>(null) }
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
     // Not saveable: home's state is kept across pushed pages, but it must come back with the rail closed
@@ -169,8 +186,7 @@ fun HomeScreen(
     var entered by remember { mutableStateOf(false) }
     // Where focus lands on entry: the last focused row (coming back from a title) or the first row with cards.
     // Once entered it is no longer needed, and not reading focusedRowKey here keeps row changes cheap.
-    val entryRow = if (entered) null else rows.firstOrNull { it.key == focusedRowKey && it.items.isNotEmpty() }
-        ?: rows.firstOrNull { it.items.isNotEmpty() }
+    val entryRow = if (entered) null else homeEntryRow(rows, focusedRowKey)
     val entryIndex = entryRow?.let { vm.focusedIndex(it.key).coerceIn(0, it.items.lastIndex) } ?: 0
     val entryRequester = remember { FocusRequester() }
     val placeholderRequester = remember { FocusRequester() }
@@ -317,7 +333,13 @@ fun HomeScreen(
                                             null -> Unit // a double press while the player starts
                                         }
                                     },
-                                    onOpen = onOpen,
+                                    onMenu = { ref ->
+                                        row.items.firstOrNull { it.ref == ref }?.let {
+                                            vm.onMenuOpened()
+                                            menuFor = it
+                                        }
+                                    },
+                                    hint = menuHint,
                                     onRetry = { vm.retryRow(row.key) },
                                 )
                             }
@@ -326,6 +348,16 @@ fun HomeScreen(
                 }
             }
         }
+    }
+    menuFor?.let { card ->
+        ContinueMenu(
+            card.title,
+            onDetails = { menuFor = null; onOpen(card.ref) },
+            // Closed in the same frame as the card leaves: focus, still on the card in the home window,
+            // follows the row's removed-card path to its neighbour.
+            onRemove = { menuFor = null; vm.removeFromContinue(card.ref) },
+            onDismiss = { menuFor = null },
+        )
     }
 }
 
@@ -361,7 +393,10 @@ private fun HomeRow(
     drawerClosed: () -> Boolean,
     onFocus: (Int) -> Unit,
     onActivate: (TitleRef) -> Unit,
-    onOpen: (TitleRef) -> Unit,
+    /** Long-press OK on a «ادامه تماشا» card. */
+    onMenu: (TitleRef) -> Unit,
+    /** Whether a focused «ادامه تماشا» row still hints at the long-press menu. */
+    hint: Boolean,
     onRetry: () -> Unit,
 ) {
     val landscape = row.items.firstOrNull()?.landscape ?: (row.key in recentKeys)
@@ -392,8 +427,11 @@ private fun HomeRow(
         slotRequester.requestFocusSoon()
         if (slot == Slot.Cards) holdFocus = false
     }
+    val recent = row.key in recentKeys
+    var rowFocused by remember { mutableStateOf(false) }
     Column(
-        Modifier.fillMaxWidth().onPreviewKeyEvent { e ->
+        Modifier.fillMaxWidth().then(if (recent) Modifier.onFocusChanged { rowFocused = it.hasFocus } else Modifier)
+            .onPreviewKeyEvent { e ->
             if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
             val target = when (e.key) {
                 Key.DirectionUp -> upKey
@@ -405,15 +443,13 @@ private fun HomeRow(
             true
         },
     ) {
-        Box(Modifier.height(RowHeader).padding(start = RowStart), contentAlignment = Alignment.BottomStart) {
-            Text(row.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = Color.White)
-        }
+        RowTitle(row.title, showHint = { recent && hint && rowFocused && slot == Slot.Cards })
         when (slot) {
             Slot.Cards -> {
                 // Focus was on a card a refresh removed if this row owned focus and the rail is closed.
                 val reclaim = { focusOwner.value == row.key && drawerClosed() }
-                // Long-press on a «ادامه تماشا» card opens the title instead of playing.
-                val onLongOpen = onOpen.takeIf { row.key in recentKeys }
+                // Long-press on a «ادامه تماشا» card opens its menu (details, remove) instead of playing.
+                val onLongOpen = onMenu.takeIf { recent }
                 CardsRow(row, landscape, initialIndex, entryIndex, entryRequester, slotRequester, nav, focusedIndex, reclaim,
                     onActivate, onLongOpen) { i ->
                     focusOwner.value = row.key
@@ -508,6 +544,27 @@ private fun CardsRow(
                 PosterCard(card.title, card.posterUrl, onClick = open, modifier = m, width = PosterWidth,
                     subtitle = card.subtitle)
             }
+        }
+    }
+}
+
+/**
+ * The row's title, and beside it (while [showHint]) the quiet long-press hint; its own scope, so focus
+ * entering or leaving the row recomposes only the header.
+ */
+@Composable
+private fun RowTitle(title: String, showHint: () -> Boolean) {
+    Row(
+        Modifier.height(RowHeader).padding(start = RowStart),
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        verticalAlignment = Alignment.Bottom,
+    ) {
+        Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = Color.White)
+        AnimatedVisibility(showHint(), enter = fadeIn(tween(400, delayMillis = 600)), exit = fadeOut(tween(200))) {
+            Text(
+                stringResource(R.string.cw_menu_hint), Modifier.padding(bottom = 1.dp),
+                style = MaterialTheme.typography.labelSmall, color = DroozColors.TextSecondary, maxLines = 1,
+            )
         }
     }
 }

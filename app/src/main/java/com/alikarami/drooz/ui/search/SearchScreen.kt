@@ -14,6 +14,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -37,6 +39,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.FocusDirection
@@ -79,6 +82,8 @@ import com.alikarami.drooz.ui.common.requestFocusSoon
 import com.alikarami.drooz.ui.home.HeroBackdrop
 import com.alikarami.drooz.ui.home.HeroInfo
 import com.alikarami.drooz.ui.home.RailItem
+import com.alikarami.drooz.ui.list.ChipButton
+import com.alikarami.drooz.ui.list.GridContentEnd
 import com.alikarami.drooz.ui.list.GridContentStart
 import com.alikarami.drooz.ui.list.PosterGrid
 import com.alikarami.drooz.ui.list.ProvideGridPivot
@@ -168,6 +173,21 @@ fun SearchScreen(vm: SearchViewModel, onOpen: (TitleRef) -> Unit) {
         }
     }
 
+    // Opening a result is what saves its query as a recent search.
+    val openResult: (TitleRef) -> Unit = { ref ->
+        vm.onResultOpened()
+        onOpen(ref)
+    }
+    // A recent chip goes away as soon as its search starts (or the history is cleared): focus moves to the field
+    // first, so it is never lost; the results take it when they land.
+    fun runRecent(q: String) {
+        runCatching { fieldRequester.requestFocus() }
+        field = TextFieldValue(q, TextRange(q.length))
+        vm.runRecent(q)
+        jumpToResults = true
+    }
+    val idle = state.items.isEmpty() && !state.loading && state.error == null && !state.isEmptyResult
+
     BoxWithConstraints(Modifier.fillMaxSize().background(DroozColors.Background)) {
         val gridTop = maxHeight * GridFraction
         val cellWidth = gridCellWidth(maxWidth)
@@ -241,6 +261,16 @@ fun SearchScreen(vm: SearchViewModel, onOpen: (TitleRef) -> Unit) {
             }
             HeroInfo(state.hero, rowTitle = null, compact = true)
         }
+        if (idle && state.recent.isNotEmpty()) {
+            RecentSearchesRow(
+                state.recent, onRun = ::runRecent,
+                onClear = {
+                    runCatching { fieldRequester.requestFocus() }
+                    vm.clearRecent()
+                },
+                modifier = Modifier.align(Alignment.TopStart).fillMaxWidth().padding(top = 24.dp + FieldHeight + 24.dp),
+            )
+        }
 
         val content = Modifier.fillMaxSize().padding(top = gridTop)
         when {
@@ -251,7 +281,7 @@ fun SearchScreen(vm: SearchViewModel, onOpen: (TitleRef) -> Unit) {
                     // A new answer is a new grid: scroll and focus memory start fresh.
                     key(state.searchedFor) {
                         PosterGrid(
-                            state.items, cellWidth, onOpen, vm::onFocusIndex, content.alpha(dim),
+                            state.items, cellWidth, openResult, vm::onFocusIndex, content.alpha(dim),
                             entryIndex = vm.focusedIndex,
                             takeFocus = restoreKey != null && restoreKey == state.searchedFor,
                             firstCard = firstCard,
@@ -275,6 +305,41 @@ fun SearchScreen(vm: SearchViewModel, onOpen: (TitleRef) -> Unit) {
                 content,
             )
             else -> Message(stringResource(R.string.search_idle), stringResource(R.string.search_idle_tip), content)
+        }
+    }
+}
+
+/**
+ * «جستجوهای اخیر» under the field: one chip per query (OK runs it) and a last «پاک کردن» chip. Down from the
+ * field lands on the newest query, not the chip nearest to the field's centre.
+ */
+@Suppress("DEPRECATION") // focusProperties.enter: the same redirect the rail and the title tabs use
+@OptIn(ExperimentalComposeUiApi::class)
+@Composable
+private fun RecentSearchesRow(queries: List<String>, onRun: (String) -> Unit, onClear: () -> Unit, modifier: Modifier) {
+    val first = remember { FocusRequester() }
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(
+            stringResource(R.string.search_recent), Modifier.padding(start = GridContentStart),
+            style = MaterialTheme.typography.labelLarge, color = DroozColors.TextSecondary,
+        )
+        Row(
+            Modifier
+                .focusProperties { enter = { first } }
+                .focusGroup()
+                .horizontalScroll(rememberScrollState())
+                .padding(start = GridContentStart, end = GridContentEnd, top = 4.dp, bottom = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            queries.forEachIndexed { i, q ->
+                // key: a re-ordered history keeps each chip's focus state with its query.
+                key(q) {
+                    ChipButton(q, selected = false, onClick = { onRun(q) },
+                        modifier = if (i == 0) Modifier.focusRequester(first) else Modifier)
+                }
+            }
+            ChipButton(stringResource(R.string.search_recent_clear), selected = false, onClick = onClear)
         }
     }
 }

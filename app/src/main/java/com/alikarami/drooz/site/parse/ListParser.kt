@@ -2,10 +2,12 @@ package com.alikarami.drooz.site.parse
 
 import com.alikarami.drooz.site.model.ListPage
 import org.jsoup.Jsoup
+import org.jsoup.nodes.Document
 
 object ListParser {
-    fun parse(html: String): ListPage {
-        val doc = Jsoup.parse(html)
+    fun parse(html: String): ListPage = parse(Jsoup.parse(html))
+
+    fun parse(doc: Document): ListPage {
         val items = doc.select(".postMeta").mapNotNull(CardParser::parse).distinctBy { it.ref }
         val page = doc.selectFirst(".pagination .page-item.active")?.text()
             ?.let { PersianText.digits(it).trim().toIntOrNull() } ?: 1

@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.absolutePadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.derivedStateOf
@@ -51,6 +52,7 @@ import com.alikarami.drooz.player.UpNext
 import com.alikarami.drooz.player.engine.ExoPlaybackEngine
 import com.alikarami.drooz.player.engine.VideoSize
 import com.alikarami.drooz.player.scrubOffsetMs
+import com.alikarami.drooz.player.session.SessionControls
 import com.alikarami.drooz.ui.common.BusySpinner
 import com.alikarami.drooz.ui.common.requestFocusSoon
 import kotlinx.coroutines.delay
@@ -157,6 +159,14 @@ internal fun PlayerOverlayHost(
         if (c.overlay == Overlay.NONE && !upNextShownNow) c.show(Overlay.CONTROLS, target)
     }
 
+    /** A seek drops a scrub in progress (its commit would undo the seek) and redraws the seek bar. */
+    fun seek(apply: () -> Unit) {
+        c.scrubMs = null
+        apply()
+        c.refresh++
+        showIfHidden(ControlsTarget.SEEK_BAR)
+    }
+
     fun perform(action: KeyAction) {
         when (action) {
             KeyAction.ShowControls -> c.show(Overlay.CONTROLS, ControlsTarget.PLAY)
@@ -164,12 +174,7 @@ internal fun PlayerOverlayHost(
                 vm.togglePlay()
                 showIfHidden(ControlsTarget.PLAY)
             }
-            is KeyAction.Seek -> {
-                c.scrubMs = null
-                vm.seekBy(action.deltaMs)
-                c.refresh++
-                showIfHidden(ControlsTarget.SEEK_BAR)
-            }
+            is KeyAction.Seek -> seek { vm.seekBy(action.deltaMs) }
             is KeyAction.Scrub -> {
                 if (c.scrubMs == null) c.scrubOriginMs = engine.positionMs
                 val duration = engine.durationMs
@@ -216,7 +221,11 @@ internal fun PlayerOverlayHost(
             scrubbing = c.scrubMs != null,
             heldMs = n.eventTime - n.downTime,
         )
-        if (action == KeyAction.None) return !down && c.consumedDowns.remove(n.keyCode)
+        if (action == KeyAction.None) {
+            val ownUp = !down && c.consumedDowns.remove(n.keyCode)
+            // A media key's repeat / stray up falling through would reach the media session as a press.
+            return ownUp || isPlayerMediaKey(n.keyCode)
+        }
         perform(action)
         // After perform: an overlay change clears the set, but this press's own KeyUp must still be eaten.
         if (down) c.consumedDowns += n.keyCode else c.consumedDowns -= n.keyCode
@@ -226,6 +235,21 @@ internal fun PlayerOverlayHost(
     // Android 16+ (predictive back) does not deliver KEYCODE_BACK as a key event; this covers it.
     // Where the key event does arrive, onKey consumes its KeyUp and this never fires.
     BackHandler { handleBack() }
+
+    // Media-session commands (voice, the now-playing card) change the screen as the remote's keys do.
+    DisposableEffect(vm) {
+        val controls = object : SessionControls {
+            override fun togglePlay() = perform(KeyAction.TogglePlayAndShow)
+            override fun play() = perform(KeyAction.PlayAndShow)
+            override fun pause() = perform(KeyAction.PauseAndShow)
+            override fun seekBy(deltaMs: Long) = perform(KeyAction.Seek(deltaMs))
+            override fun seekTo(ms: Long) = seek { vm.seekTo(ms) }
+            override fun playNext() = perform(KeyAction.Next)
+            override fun stop() = perform(KeyAction.Stop)
+        }
+        vm.attachOverlay(controls)
+        onDispose { vm.detachOverlay(controls) }
+    }
 
     // Back from Home / standby (paused): the controls show, so the screen reads as paused, not hung.
     LaunchedEffect(Unit) { vm.resumes.collect { showIfHidden(ControlsTarget.PLAY) } }

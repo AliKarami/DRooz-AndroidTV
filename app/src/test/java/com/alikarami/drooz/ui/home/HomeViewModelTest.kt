@@ -1,6 +1,7 @@
 package com.alikarami.drooz.ui.home
 
 import com.alikarami.drooz.data.Backdrop
+import com.alikarami.drooz.data.HiddenTitles
 import com.alikarami.drooz.data.HomePageCache
 import com.alikarami.drooz.data.SiteApi
 import com.alikarami.drooz.data.TitleInfoRepository
@@ -25,11 +26,14 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TemporaryFolder
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class HomeViewModelTest {
     private val dispatcher = StandardTestDispatcher()
+    @get:Rule val tmp = TemporaryFolder()
 
     @Before fun setUp() = Dispatchers.setMain(dispatcher)
     @After fun tearDown() = Dispatchers.resetMain()
@@ -412,8 +416,18 @@ class HomeViewModelTest {
         store: FakeWatchStore = FakeWatchStore(),
         prefs: FakeTitlePrefs = FakeTitlePrefs(),
         clock: () -> Long = { 0L },
+        hidden: FakeHiddenTitles? = null,
     ) = HomeViewModel(api, TitleInfoRepository(api, clock, fetchScope = CoroutineScope(dispatcher + SupervisorJob())),
-        watchStore = store, titlePrefs = prefs, now = clock)
+        watchStore = store, titlePrefs = prefs, now = clock, hiddenTitles = hidden)
+
+    private class FakeHiddenTitles(
+        val map: MutableMap<Long, Long> = mutableMapOf(),
+        var failure: Exception? = null,
+        val gate: CompletableDeferred<Unit>? = null,
+    ) : HiddenTitles {
+        override suspend fun all(): Map<Long, Long> { gate?.await(); failure?.let { throw it }; return map.toMap() }
+        override suspend fun hide(postId: Long, at: Long) { failure?.let { throw it }; map[postId] = at }
+    }
 
     private fun HomeViewModel.recent() = uiState.value.rows.first { it.key == "recent" }
 
@@ -683,5 +697,160 @@ class HomeViewModelTest {
         vm.onFocus("featured", 2); runCurrent()
         gate.complete(Unit); advanceUntilIdle()
         assertEquals(ref(12), vm.uiState.value.hero!!.ref)
+    }
+
+    // ── Removing a title from «ادامه تماشا» ───────────────────────────────
+
+    @Test fun removeFromContinue_dropsCardAtOnce_focusAndHeroMoveToNeighbour() = runTest(dispatcher) {
+        val a = series(1); val b = series(2); val c = series(3)
+        val hidden = FakeHiddenTitles()
+        val api = FakeApi(recentHome(a, b, c), onTitle = { seriesDetail(it) })
+        val vm = cwVm(api, clock = { 500L }, hidden = hidden); advanceUntilIdle()
+        vm.onFocus("recent", 1); runCurrent()
+        vm.removeFromContinue(b)
+        assertEquals(listOf(a, c), vm.recent().items.map { it.ref })    // before the store write runs
+        assertEquals(1, vm.focusedIndex("recent"))
+        assertEquals(c, vm.uiState.value.hero!!.ref)
+        advanceUntilIdle()
+        assertEquals(mapOf(2L to 500L), hidden.map)
+        assertNull(vm.activate("recent", b))
+    }
+
+    @Test fun removeFromContinue_lastCard_focusMovesBack() = runTest(dispatcher) {
+        val a = series(1); val b = series(2)
+        val api = FakeApi(recentHome(a, b), onTitle = { seriesDetail(it) })
+        val vm = cwVm(api, hidden = FakeHiddenTitles()); advanceUntilIdle()
+        vm.onFocus("recent", 1); runCurrent()
+        vm.removeFromContinue(b); advanceUntilIdle()
+        assertEquals(listOf(a), vm.recent().items.map { it.ref })
+        assertEquals(0, vm.focusedIndex("recent"))
+    }
+
+    @Test fun hiddenTitle_staysOutAcrossRefreshes_untilPlayedAgain() = runTest(dispatcher) {
+        val a = series(1); val b = series(2)
+        val store = FakeWatchStore(mutableListOf(local(a, "s1e1", pos = 600_000, at = 50)))
+        val hidden = FakeHiddenTitles(mutableMapOf(1L to 100L))
+        val api = FakeApi(recentHome(a, b), onTitle = { seriesDetail(it) })
+        val repo = TitleInfoRepository(api, fetchScope = CoroutineScope(dispatcher + SupervisorJob()))
+        val vm = HomeViewModel(api, repo, watchStore = store, hiddenTitles = hidden); advanceUntilIdle()
+        assertEquals(listOf(b), vm.recent().items.map { it.ref })
+        vm.refresh(); advanceUntilIdle()
+        assertEquals(listOf(b), vm.recent().items.map { it.ref })
+
+        store.entries += local(a, "s1e2", pos = 600_000, at = 101)          // played again after the hide
+        repo.invalidate(a)
+        vm.onResume(); advanceUntilIdle()
+        assertEquals(listOf(a, b), vm.recent().items.map { it.ref })
+    }
+
+    // Cold start: a removed title must not flash back while the hides are still being read.
+    @Test fun hiddenTitle_neverShownBeforeHidesAreRead() = runTest(dispatcher) {
+        val a = series(1); val b = series(2)
+        val gate = CompletableDeferred<Unit>()
+        val hidden = FakeHiddenTitles(mutableMapOf(1L to 100L), gate = gate)
+        val api = FakeApi(recentHome(a, b), onTitle = { seriesDetail(it) })
+        val vm = cwVm(api, hidden = hidden); runCurrent()
+        assertFalse(a in vm.recent().items.map { it.ref })
+        gate.complete(Unit); advanceUntilIdle()
+        assertEquals(listOf(b), vm.recent().items.map { it.ref })
+    }
+
+    // A failing hidden store must neither drop the row nor undo a removal made this session.
+    @Test fun failingHiddenStore_keepsRowAndSessionRemoval() = runTest(dispatcher) {
+        val a = series(1); val b = series(2)
+        val hidden = FakeHiddenTitles(failure = java.io.IOException("disk"))
+        val api = FakeApi(recentHome(a, b), onTitle = { seriesDetail(it) })
+        val vm = cwVm(api, hidden = hidden); advanceUntilIdle()
+        assertEquals(listOf(a, b), vm.recent().items.map { it.ref })
+        vm.removeFromContinue(a); advanceUntilIdle()
+        vm.refresh(); advanceUntilIdle()
+        assertEquals(listOf(b), vm.recent().items.map { it.ref })
+    }
+
+    // The long-press hint shows until the menu has been opened once in this session.
+    @Test fun menuHint_untilMenuOpened() = runTest(dispatcher) {
+        val vm = cwVm(FakeApi(home()), hidden = FakeHiddenTitles()); advanceUntilIdle()
+        assertTrue(vm.menuHint.value)
+        vm.onMenuOpened()
+        assertFalse(vm.menuHint.value)
+    }
+
+    // ── Cold start: the page an earlier run stored ────────────────────────
+
+    private val stored get() = java.io.File(tmp.root, "home_page.json")
+    /** A new process: nothing in memory, the file from the last run. Its own dispatcher, as Dispatchers.IO. */
+    private fun TestScope.diskCache() =
+        HomePageCache(ttlMs = 600_000, file = stored, io = StandardTestDispatcher(testScheduler)) { 0L }
+
+    @Test fun coldStart_showsStoredPageThenTheFreshOne() = runTest(dispatcher) {
+        diskCache().persist(home())
+        val api = FakeApi(home())
+        val fresh = CompletableDeferred<HomePage>()
+        api.onHome = { fresh.await() }
+        val vm = HomeViewModel(api, TitleInfoRepository(api, fetchScope = backgroundScope), homeCache = diskCache())
+        advanceUntilIdle()
+        val recent = vm.uiState.value.rows[0]
+        assertEquals(listOf("Shaun The Sheep", "Other One"), recent.items.map { it.title })
+        assertFalse(recent.loading)
+        assertEquals(5, vm.uiState.value.rows.first { it.key == "featured" }.items.size)
+
+        fresh.complete(home().copy(recentlyStreamed = listOf(PosterRef(ref(3, "brand-new"), "rp3"))))
+        advanceUntilIdle()
+        assertEquals(listOf("Brand New"), vm.uiState.value.rows[0].items.map { it.title })
+        // The fresh page is what the next cold start shows.
+        assertEquals(ref(3, "brand-new"), diskCache().stored()!!.recentlyStreamed.single().ref)
+    }
+
+    @Test fun coldStart_failedFetchKeepsStoredPageQuietly_andResumeRetries() = runTest(dispatcher) {
+        diskCache().persist(home())
+        val api = FakeApi(home())
+        var homeCalls = 0
+        api.onHome = { homeCalls++; throw com.alikarami.drooz.site.SiteException.NetworkError(RuntimeException("x")) }
+        val vm = HomeViewModel(api, TitleInfoRepository(api, fetchScope = backgroundScope), homeCache = diskCache())
+        advanceUntilIdle()
+        assertEquals(2, vm.uiState.value.rows[0].items.size)
+        assertNull(vm.uiState.value.error)
+        assertTrue(vm.uiState.value.rows.none { it.error })
+        // The site never confirmed it: back on home, it is asked again (quietly).
+        api.onHome = { homeCalls++; home().copy(recentlyStreamed = listOf(PosterRef(ref(3, "brand-new"), "rp3"))) }
+        vm.onResume(); advanceUntilIdle()
+        assertEquals(2, homeCalls)
+        assertEquals(listOf("Brand New"), vm.uiState.value.rows[0].items.map { it.title })
+        vm.onResume(); advanceUntilIdle()
+        assertEquals(2, homeCalls)
+    }
+
+    // A fetch that beats the disk read is never replaced by the older stored page.
+    @Test fun coldStart_freshPageWinsOverALateStoredOne() = runTest(dispatcher) {
+        diskCache().persist(home())
+        val api = FakeApi(home().copy(recentlyStreamed = listOf(PosterRef(ref(3, "brand-new"), "rp3"))))
+        val vm = HomeViewModel(api, TitleInfoRepository(api, fetchScope = backgroundScope), homeCache = diskCache())
+        advanceUntilIdle()
+        assertEquals(listOf("Brand New"), vm.uiState.value.rows[0].items.map { it.title })
+    }
+
+    // The session ended while home's request was in flight: its page must not come back afterwards.
+    @Test fun pageFetchedBeforeClear_isNotCachedAfterIt() = runTest(dispatcher) {
+        val cache = diskCache()
+        val api = FakeApi(home())
+        val gate = CompletableDeferred<Unit>()
+        api.onHome = { gate.await(); home() }
+        HomeViewModel(api, TitleInfoRepository(api, fetchScope = backgroundScope), homeCache = cache)
+        runCurrent()
+        cache.clear()                                   // AppViewModel.forgetSession
+        gate.complete(Unit); advanceUntilIdle()
+        assertNull(cache.fresh())
+        assertFalse(stored.exists())
+    }
+
+    @Test fun coldStart_withoutStoredPage_showsSkeletonThenError() = runTest(dispatcher) {
+        val api = FakeApi(home())
+        val gate = CompletableDeferred<Unit>()
+        api.onHome = { gate.await(); error("offline") }
+        val vm = HomeViewModel(api, TitleInfoRepository(api, fetchScope = backgroundScope), homeCache = diskCache())
+        runCurrent()
+        assertTrue(vm.uiState.value.rows[0].loading)
+        gate.complete(Unit); advanceUntilIdle()
+        assertEquals("offline", vm.uiState.value.error)
     }
 }

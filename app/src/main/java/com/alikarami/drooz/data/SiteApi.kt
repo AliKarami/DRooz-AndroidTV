@@ -9,6 +9,8 @@ import com.alikarami.drooz.site.model.*
 interface SiteApi {
     suspend fun home(): HomePage
     suspend fun list(path: String, page: Int = 1): ListPage
+    /** Page 1 of [path] plus the site menu's categories from the same HTML (none when the menu isn't recognised). */
+    suspend fun listWithCategories(path: String): CategorizedListPage = CategorizedListPage(list(path, 1), emptyList())
     suspend fun search(query: String): List<TitleCard>
     suspend fun title(ref: TitleRef): TitleDetail
     suspend fun openStream(episode: Episode, ref: TitleRef, lang: String, height: Int): StreamSession
@@ -29,6 +31,7 @@ interface AuthApi {
 class SiteApiAdapter(private val repo: SiteRepository) : SiteApi {
     override suspend fun home() = repo.home()
     override suspend fun list(path: String, page: Int) = repo.list(path, page)
+    override suspend fun listWithCategories(path: String) = repo.listWithCategories(path)
     override suspend fun search(query: String) = repo.search(query)
     override suspend fun title(ref: TitleRef) = repo.title(ref)
     override suspend fun openStream(episode: Episode, ref: TitleRef, lang: String, height: Int) =

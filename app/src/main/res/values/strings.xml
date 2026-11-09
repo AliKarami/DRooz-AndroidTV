@@ -83,4 +83,9 @@
     <string name="player_play_now">▶︎ پخش الان</string>
     <string name="player_watch_credits">تماشای تیتراژ</string>
     <string name="player_now_playing">در حال پخش</string>
+    <string name="cw_menu_details">جزئیات</string>
+    <string name="cw_menu_remove">حذف از ادامه تماشا</string>
+    <string name="cw_menu_hint">برای گزینه‌های بیشتر OK را نگه دارید</string>
+    <string name="search_recent">جستجوهای اخیر</string>
+    <string name="search_recent_clear">پاک کردن</string>
 </resources>

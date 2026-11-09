@@ -22,6 +22,7 @@ import androidx.navigation.toRoute
 import com.alikarami.drooz.AppGraph
 import com.alikarami.drooz.R
 import com.alikarami.drooz.player.PlayerActivity
+import com.alikarami.drooz.site.model.CategoryKind
 import com.alikarami.drooz.site.model.TitleRef
 import com.alikarami.drooz.ui.home.HomeScreen
 import com.alikarami.drooz.ui.home.HomeViewModel
@@ -120,9 +121,12 @@ fun DroozNavHost(
                     RailItem.Search -> go(entry, Search)
                     RailItem.Home -> Unit // HomeScreen closes the rail
                     // Each page is headed like the rail item that opened it.
-                    RailItem.Series -> go(entry, ListRoute(context.getString(R.string.rail_series), "/archive/series/"))
-                    RailItem.Films ->
-                        go(entry, ListRoute(context.getString(R.string.rail_films), "/archive/category/new-films/"))
+                    RailItem.Series -> go(entry, ListRoute(
+                        context.getString(R.string.rail_series), "/archive/series/", categories = CategoryKind.SERIES,
+                    ))
+                    RailItem.Films -> go(entry, ListRoute(
+                        context.getString(R.string.rail_films), "/archive/category/new-films/", categories = CategoryKind.FILM,
+                    ))
                     RailItem.MyList ->
                         go(entry, ListRoute(
                             context.getString(R.string.rail_my_list), "/user/watchlist/",
@@ -155,7 +159,9 @@ fun DroozNavHost(
         }
         composable<ListRoute> { entry ->
             val route = entry.toRoute<ListRoute>()
-            val vm: ListViewModel = viewModel(factory = ListViewModelFactory(graph, route.path, route.title, route.watchlist))
+            val vm: ListViewModel = viewModel(
+                factory = ListViewModelFactory(graph, route.path, route.title, route.watchlist, route.categories),
+            )
             ListScreen(vm, onOpen = { openTitle(entry, it) }, emptyText = route.emptyText)
         }
         composable<Search> { entry ->

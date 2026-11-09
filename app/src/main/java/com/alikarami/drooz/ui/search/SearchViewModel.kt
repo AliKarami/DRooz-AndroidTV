@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.alikarami.drooz.AppGraph
+import com.alikarami.drooz.data.RecentSearches
 import com.alikarami.drooz.data.SiteApi
 import com.alikarami.drooz.data.TitleInfoRepository
 import com.alikarami.drooz.site.model.TitleCard
@@ -16,7 +17,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 
 data class SearchUiState(
     /** What the field shows (untrimmed). */
@@ -28,6 +31,8 @@ data class SearchUiState(
     /** The trimmed query [items] answer, or null when nothing has been searched (idle / too short). */
     val searchedFor: String? = null,
     val hero: HeroUi? = null,
+    /** «جستجوهای اخیر», newest first. */
+    val recent: List<String> = emptyList(),
 ) {
     /** A finished search that found nothing (not idle, not loading, not failed). */
     val isEmptyResult: Boolean get() = searchedFor != null && items.isEmpty() && !loading && error == null
@@ -35,18 +40,31 @@ data class SearchUiState(
 
 class SearchViewModelFactory(private val graph: AppGraph) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
-    override fun <T : ViewModel> create(modelClass: Class<T>): T = SearchViewModel(graph.siteApi, graph.titleInfo) as T
+    override fun <T : ViewModel> create(modelClass: Class<T>): T =
+        SearchViewModel(graph.siteApi, graph.titleInfo, recent = graph.recentSearches) as T
 }
 
-/** Search-as-you-type (debounced) plus immediate searches for the IME's Search key and voice results. */
+/**
+ * Search-as-you-type (debounced) plus immediate searches for the IME's Search key, voice results and recent
+ * queries. A query joins [recent] only when a result of it is opened. History failures never affect search.
+ */
 class SearchViewModel(
     private val api: SiteApi,
     titleInfo: TitleInfoRepository,
     private val debounceMs: Long = 400,
     dwellMs: Long = 300,
+    private val recent: RecentSearches? = null,
 ) : ViewModel() {
     private val _state = MutableStateFlow(SearchUiState())
     val uiState: StateFlow<SearchUiState> = _state
+
+    init {
+        recent?.let { r ->
+            viewModelScope.launch {
+                r.queries.catch { emit(emptyList()) }.collect { q -> _state.update { it.copy(recent = q) } }
+            }
+        }
+    }
 
     private var cards: List<TitleCard> = emptyList()
     private var job: Job? = null
@@ -74,6 +92,24 @@ class SearchViewModel(
     }
 
     fun retry() = schedule(_state.value.query.trim(), 0, force = true)
+
+    /** OK on a recent query: it fills the field and runs now. */
+    fun runRecent(query: String) {
+        _state.update { it.copy(query = query) }
+        schedule(query.trim(), 0)
+    }
+
+    /** A result is being opened: the query it answers becomes the newest recent search. */
+    fun onResultOpened() {
+        val q = _state.value.searchedFor ?: return
+        val r = recent ?: return
+        viewModelScope.safeLaunch(onError = { /* history is best effort */ }) { r.add(q) }
+    }
+
+    fun clearRecent() {
+        val r = recent ?: return
+        viewModelScope.safeLaunch(onError = { /* history is best effort */ }) { r.clear() }
+    }
 
     fun onFocusIndex(index: Int) {
         val card = cards.getOrNull(index) ?: return

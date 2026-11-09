@@ -15,11 +15,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -32,6 +34,7 @@ import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.alikarami.drooz.AppGraph
 import com.alikarami.drooz.R
+import com.alikarami.drooz.site.model.CategoryKind
 import com.alikarami.drooz.site.model.TitleRef
 import com.alikarami.drooz.ui.common.ErrorState
 import com.alikarami.drooz.ui.common.requestFocusSoon
@@ -44,10 +47,13 @@ class ListViewModelFactory(
     private val path: String,
     private val title: String,
     private val watchlist: Boolean = false,
+    private val categories: CategoryKind? = null,
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T =
-        ListViewModel(graph.siteApi, graph.titleInfo, path, title, reloadOnWatchlistChange = watchlist) as T
+        ListViewModel(
+            graph.siteApi, graph.titleInfo, path, title, reloadOnWatchlistChange = watchlist, categories = categories,
+        ) as T
 }
 
 /** The compact hero strip: the grid starts at this fraction of the screen height. */
@@ -77,18 +83,33 @@ fun ListScreen(vm: ListViewModel, onOpen: (TitleRef) -> Unit, emptyText: String?
             )
             HeroInfo(state.hero, rowTitle = null, compact = true)
         }
-        val content = Modifier.fillMaxSize().padding(top = gridTop)
+        val hasChips = state.chips.isNotEmpty()
+        // Plain holder: read when a grid or error first appears, so a focus move must not recompose.
+        val chipFocus = remember { ChipFocus() }
+        if (hasChips) {
+            CategoryChipRow(
+                state.chips, state.selectedChip, vm::selectChip,
+                Modifier.fillMaxWidth().padding(top = gridTop).height(ChipRowHeight)
+                    .onFocusChanged { chipFocus.focused = it.hasFocus },
+            )
+        }
+        val content = Modifier.fillMaxSize().padding(top = if (hasChips) gridTop + ChipRowHeight else gridTop)
         when {
+            // A new listing (another chip) is a new grid: scroll and focus memory start fresh, and it leaves
+            // focus on the chips; a grid composed anew (first load, Back from a title) takes focus as before.
             state.items.isNotEmpty() -> ProvideGridPivot {
-                PosterGrid(
-                    state.items, cellWidth, onOpen, vm::onFocusIndex, content,
-                    entryIndex = vm.focusedIndex,
-                    loadingMore = state.loadingMore, pageError = state.pageError, onRetry = vm::retry,
-                )
+                key(state.chips.getOrNull(state.selectedChip)?.path) {
+                    PosterGrid(
+                        state.items, cellWidth, onOpen, vm::onFocusIndex, content,
+                        entryIndex = vm.focusedIndex,
+                        takeFocus = !chipFocus.focused,
+                        loadingMore = state.loadingMore, pageError = state.pageError, onRetry = vm::retry,
+                    )
+                }
             }
             state.error != null -> {
                 val requester = remember { FocusRequester() }
-                LaunchedEffect(Unit) { requester.requestFocusSoon() }
+                LaunchedEffect(Unit) { if (!chipFocus.focused) requester.requestFocusSoon() }
                 ErrorState(
                     stringResource(R.string.list_failed), stringResource(R.string.retry), vm::retry,
                     content.focusRequester(requester).focusGroup(),
@@ -101,5 +122,10 @@ fun ListScreen(vm: ListViewModel, onOpen: (TitleRef) -> Unit, emptyText: String?
             }
         }
     }
+}
+
+/** Whether focus is in the chip row. */
+private class ChipFocus {
+    var focused = false
 }
 

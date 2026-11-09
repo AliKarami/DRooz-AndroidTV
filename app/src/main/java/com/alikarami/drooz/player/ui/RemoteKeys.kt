@@ -40,6 +40,18 @@ sealed interface KeyAction {
 }
 
 /**
+ * The media keys [mapKey] acts on. The player consumes every event of these (repeats and ups too): one
+ * that fell through would reach the media session as a second press.
+ */
+fun isPlayerMediaKey(keyCode: Int): Boolean = when (keyCode) {
+    KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_MEDIA_PLAY, KeyEvent.KEYCODE_MEDIA_PAUSE,
+    KeyEvent.KEYCODE_MEDIA_NEXT, KeyEvent.KEYCODE_MEDIA_STOP,
+    KeyEvent.KEYCODE_MEDIA_FAST_FORWARD, KeyEvent.KEYCODE_MEDIA_REWIND,
+    KeyEvent.KEYCODE_MEDIA_SKIP_FORWARD, KeyEvent.KEYCODE_MEDIA_SKIP_BACKWARD -> true
+    else -> false
+}
+
+/**
  * Pure mapping, so the remote's behaviour is testable. [seekBarFocused] = the seek bar has focus;
  * [heldMs] = how long the key has been down (event time − down time).
  * Physical RIGHT is always forward and LEFT backward, whatever the layout direction.

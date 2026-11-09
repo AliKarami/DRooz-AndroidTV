@@ -20,6 +20,7 @@ import com.alikarami.drooz.player.audio.GainSchedule
 import com.alikarami.drooz.player.audio.GainSmoother
 import com.alikarami.drooz.player.audio.pickAudioTrack
 import com.alikarami.drooz.player.engine.EngineTracks
+import com.alikarami.drooz.player.session.SessionControls
 import com.alikarami.drooz.player.subtitle.SrtParser
 import com.alikarami.drooz.player.subtitle.SubtitleTimeline
 import com.alikarami.drooz.data.PlayerSettings
@@ -185,6 +186,43 @@ class PlayerViewModel(
     private val _resumes = Channel<Unit>(Channel.CONFLATED)
     /** Back in the foreground while playing (paused): the overlay shows the controls, so it reads as paused. */
     val resumes: Flow<Unit> = _resumes.receiveAsFlow()
+
+    /** The player screen's overlay while it shows: applies session commands as it does the remote's keys. */
+    private var overlayControls: SessionControls? = null
+
+    fun attachOverlay(controls: SessionControls) {
+        overlayControls = controls
+    }
+
+    /** Only [controls] itself: a recreated screen may have attached its own already. */
+    fun detachOverlay(controls: SessionControls) {
+        if (overlayControls === controls) overlayControls = null
+    }
+
+    private val direct = object : SessionControls {
+        override fun togglePlay() = this@PlayerViewModel.togglePlay()
+        override fun play() = this@PlayerViewModel.play()
+        override fun pause() = this@PlayerViewModel.pause()
+        override fun seekBy(deltaMs: Long) = this@PlayerViewModel.seekBy(deltaMs)
+        override fun seekTo(ms: Long) = this@PlayerViewModel.seekTo(ms)
+        override fun playNext() = this@PlayerViewModel.playNext()
+        override fun stop() = close()
+    }
+
+    /**
+     * The media session's commands: through the overlay while it shows (controls, seek bar, a scrub in
+     * progress), else (loading, failed) straight to this view model.
+     */
+    val sessionControls: SessionControls = object : SessionControls {
+        private val target get() = overlayControls ?: direct
+        override fun togglePlay() = target.togglePlay()
+        override fun play() = target.play()
+        override fun pause() = target.pause()
+        override fun seekBy(deltaMs: Long) = target.seekBy(deltaMs)
+        override fun seekTo(ms: Long) = target.seekTo(ms)
+        override fun playNext() = target.playNext()
+        override fun stop() = target.stop()
+    }
 
     private var streamId: String = args.streamId
     private var episode: Episode? = null
@@ -381,7 +419,9 @@ class PlayerViewModel(
             }
             _state.update { it.copy(subtitle = choice, subtitleOffsetMs = saved?.subtitleOffsetMs ?: 0L) }
         }
-        val start = startAt ?: saved?.let { resumePositionMs(it.positionMs, it.durationMs, it.finished) } ?: 0L
+        // From the watch store: rewound a little (the same start again on a reopen before anything played,
+        // nothing is saved until Ready). A known position (recovery, return from hidden) loads exactly.
+        val start = startAt ?: saved?.let { resumeStartMs(it.positionMs, it.durationMs, it.finished) } ?: 0L
         if (closed) return
         // Downloads run beside the engine load and never block or fail playback.
         ensureSubtitles(_state.value.subtitle)
@@ -892,12 +932,13 @@ class PlayerViewModel(
         _state.update { it.copy(upNext = null) }
     }
 
+    /** Never plays while hidden: the engine is suspended (a media-session command can still arrive). */
     fun togglePlay() {
         if (wantsPlay) {
             wantsPlay = false
             engine.pause()
             save()
-        } else {
+        } else if (foreground) {
             wantsPlay = true
             engine.play()
         }

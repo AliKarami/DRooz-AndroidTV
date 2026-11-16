@@ -12,7 +12,7 @@ android {
 
     defaultConfig {
         applicationId = "com.alikarami.drooz"
-        minSdk = 31
+        minSdk = 30
         targetSdk = 37
         versionCode = 6
         versionName = "1.1.1"

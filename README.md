@@ -57,7 +57,7 @@ A fast, good-looking TV app for [DLRooz](https://robin.robert-redford.net/): bro
 
 ## What you need
 
-- A TV, TV box or stick running **Android TV or Google TV** (Android 12 or newer).
+- A TV, TV box or stick running **Android TV or Google TV** (Android 11 or newer).
 - A **DLRooz account**. You sign in once with your usual username and password.
 
 ## Install in 3 minutes
@@ -117,7 +117,7 @@ github.com/AliKarami/DRooz-AndroidTV/releases/latest/download/DRooz.apk
 
 <div dir="rtl">
 
-بعد از نصب، با نام کاربری و رمز دی‌ال‌روز خودتان وارد شوید. نیازمندی‌ها: Android TV یا Google TV با اندروید ۱۲ یا بالاتر، و حساب دی‌ال‌روز.
+بعد از نصب، با نام کاربری و رمز دی‌ال‌روز خودتان وارد شوید. نیازمندی‌ها: Android TV یا Google TV با اندروید ۱۱ یا بالاتر، و حساب دی‌ال‌روز.
 
 </div>
 

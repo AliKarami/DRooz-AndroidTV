@@ -81,7 +81,7 @@ class CategoryMenuParserTest {
               <li class="nav-item dropdown"><a class="nav-link dropdown-toggle" href="#">فیلم ها</a>
                 <div class="dropdown-menu">
                   <a class="dropdown-item" href="/archive/category/anime/?type=series">انیمه</a>
-                  <a class="dropdown-item" href="https://robin.robert-redford.net/archive/series/country/iran/">ایرانی</a>
+                  <a class="dropdown-item" href="https://site.example/archive/series/country/iran/">ایرانی</a>
                   <a class="dropdown-item" href="/archive/category/dubbed-series">دوبله</a>
                   <a class="dropdown-item" href="/archive/category/kids/">کودک</a>
                   <a class="dropdown-item" href="/archive/category/kids/">کودک دوباره</a>

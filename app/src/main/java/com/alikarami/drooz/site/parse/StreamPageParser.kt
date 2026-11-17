@@ -48,5 +48,5 @@ object StreamPageParser {
         )
     }
 
-    private fun absolute(path: String) = if (path.startsWith("/")) SiteConfig.BASE_URL + path else path
+    private fun absolute(path: String) = if (path.startsWith("/")) SiteConfig.baseUrl + path else path
 }

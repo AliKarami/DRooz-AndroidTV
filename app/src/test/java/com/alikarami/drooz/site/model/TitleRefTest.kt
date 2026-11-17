@@ -10,7 +10,7 @@ class TitleRefTest {
 
     @Test fun refFromAbsoluteUrl() = assertEquals(
         TitleRef(TitleKind.FILM, 5744530, "once-upon-a-time-in-the-middle-east"),
-        TitleRef.fromPath("https://robin.robert-redford.net/post/film/5744530/once-upon-a-time-in-the-middle-east/"))
+        TitleRef.fromPath("https://site.example/post/film/5744530/once-upon-a-time-in-the-middle-east/"))
 
     @Test fun refPathRoundTrip() {
         val ref = TitleRef(TitleKind.FILM, 5744530, "once-upon-a-time-in-the-middle-east")

@@ -42,8 +42,8 @@ class SiteRepositoryTest {
 
     @Before fun start() {
         server.start()
-        val jar = PersistentCookieJar(tmp.newFile("cookies"), siteHost = server.hostName)
-        val http = SiteHttp(server.url("/"), jar)
+        val jar = PersistentCookieJar(tmp.newFile("cookies"), siteHost = { server.hostName })
+        val http = SiteHttp({ server.url("/") }, jar)
         creds = CredentialStore(tmp.root.resolve("creds.bin"), box)
         repo = SiteRepository(http, AuthService(http, jar, creds))
     }
@@ -75,8 +75,8 @@ class SiteRepositoryTest {
     // HTML parsing is heavy on a TV CPU: it must run on the parse dispatcher, never the caller's (main) thread.
     @Test fun parsingRunsOnParseDispatcher() = runTest {
         val parse = CountingDispatcher()
-        val jar = PersistentCookieJar(tmp.newFile("cookies2"), siteHost = server.hostName)
-        val http = SiteHttp(server.url("/"), jar)
+        val jar = PersistentCookieJar(tmp.newFile("cookies2"), siteHost = { server.hostName })
+        val http = SiteHttp({ server.url("/") }, jar)
         val repo = SiteRepository(http, AuthService(http, jar, creds), parseDispatcher = parse)
         server.enqueue(page("home.html"))
         server.enqueue(page("list_new_films.html"))
@@ -254,8 +254,8 @@ class SiteRepositoryTest {
     }
 
     @Test fun aNewLoginAfterARefusalRenewsAgain() {
-        val jar = PersistentCookieJar(tmp.newFile("cookies3"), siteHost = server.hostName)
-        val http = SiteHttp(server.url("/"), jar)
+        val jar = PersistentCookieJar(tmp.newFile("cookies3"), siteHost = { server.hostName })
+        val http = SiteHttp({ server.url("/") }, jar)
         val auth = AuthService(http, jar, creds)
         val repo = SiteRepository(http, auth)
         creds.save(Credentials("testuser", "secret", null))

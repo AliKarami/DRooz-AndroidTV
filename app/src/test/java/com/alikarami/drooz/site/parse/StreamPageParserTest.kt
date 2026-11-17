@@ -1,5 +1,6 @@
 package com.alikarami.drooz.site.parse
 
+import com.alikarami.drooz.site.SiteConfig
 import com.alikarami.drooz.site.SiteException
 import com.alikarami.drooz.testutil.fixture
 import org.junit.Assert.assertEquals
@@ -10,17 +11,19 @@ import com.alikarami.drooz.site.model.SubtitleKind
 import org.junit.Test
 
 class StreamPageParserTest {
+    init { SiteConfig.base = SiteConfig.normalize("site.example") }
+
     private val html = fixture("stream_film_ouatime.html")
     private val s = StreamPageParser.parse(html, "371517")
 
     @Test fun masterUrl() = assertEquals(
-        "https://robin.robert-redford.net/json/m3u8/371517/5744530/USERTOKEN/master.m3u8?key=KEY&expire=1800000000&load",
+        "https://site.example/json/m3u8/371517/5744530/USERTOKEN/master.m3u8?key=KEY&expire=1800000000&load",
         s.masterUrl)
 
     @Test fun subtitles() {
         assertEquals(listOf("Farsi", "English", "English + Farsi"), s.subtitles.map { it.label })
         assertEquals(
-            "https://robin.robert-redford.net/json/subtitle/582055/5744530/sub.srt?stream=371517&second=582056",
+            "https://site.example/json/subtitle/582055/5744530/sub.srt?stream=371517&second=582056",
             s.subtitles[2].url)
     }
 

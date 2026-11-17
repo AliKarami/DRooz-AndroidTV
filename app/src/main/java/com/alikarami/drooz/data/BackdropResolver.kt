@@ -23,7 +23,7 @@ object BackdropResolver {
         h: Int = 1080,
     ): Backdrop {
         featured[ref]?.let { return Backdrop.Wide(ImageUrls.backdrop(it, w, h)) }
-        played[ref]?.let { return Backdrop.Wide(SiteConfig.BASE_URL + it) }
+        played[ref]?.let { return Backdrop.Wide(SiteConfig.baseUrl + it) }
         detail?.trailerThumbHash?.let { return Backdrop.Wide(ImageUrls.trailerThumb(it, w, h)) }
         (detail?.card?.posterHash ?: posterHash)?.let { return Backdrop.BlurredPoster(ImageUrls.poster(it, 240, 360)) }
         return Backdrop.None

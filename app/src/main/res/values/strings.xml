@@ -37,6 +37,8 @@
     <string name="search_voice_prompt">نام فیلم یا سریال را بگویید</string>
     <string name="search_voice_unavailable">جستجوی صوتی در دسترس نیست</string>
     <string name="login_heading">ورود به حساب کاربری</string>
+    <string name="login_server">آدرس سایت</string>
+    <string name="login_server_placeholder">example.com</string>
     <string name="login_username">نام کاربری یا ایمیل</string>
     <string name="login_password">رمز عبور</string>
     <string name="login_mobile_hint">لطفا شماره موبایل خود را کامل کنید</string>

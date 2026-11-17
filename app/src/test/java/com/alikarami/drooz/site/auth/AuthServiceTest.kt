@@ -40,9 +40,9 @@ class AuthServiceTest {
 
     @Before fun start() {
         server.start()
-        jar = PersistentCookieJar(tmp.newFile("cookies"), siteHost = server.hostName)
+        jar = PersistentCookieJar(tmp.newFile("cookies"), siteHost = { server.hostName })
         creds = CredentialStore(tmp.root.resolve("creds.bin"), box)
-        auth = AuthService(SiteHttp(server.url("/"), jar), jar, creds)
+        auth = AuthService(SiteHttp({ server.url("/") }, jar), jar, creds)
     }
 
     @After fun stop() = server.close()
@@ -124,7 +124,7 @@ class AuthServiceTest {
                 Dispatchers.IO.dispatch(context, block)
             }
         }
-        val auth = AuthService(SiteHttp(server.url("/"), jar), jar, creds, parseDispatcher = parse)
+        val auth = AuthService(SiteHttp({ server.url("/") }, jar), jar, creds, parseDispatcher = parse)
         form()
         server.enqueue(page("login_wrong.html"))
         assertEquals(LoginResult.WrongCredentials, auth.login("testuser", "bad", null))
@@ -266,7 +266,7 @@ class AuthServiceTest {
         }
         val slowCreds = CredentialStore(tmp.root.resolve("creds.bin"), slowBox)
         slowCreds.save(Credentials("testuser", "secret", null))
-        val auth = AuthService(SiteHttp(server.url("/"), jar), jar, slowCreds)
+        val auth = AuthService(SiteHttp({ server.url("/") }, jar), jar, slowCreds)
         val log = serve()
 
         val relogin = async(Dispatchers.IO) { auth.relogin() }
@@ -363,7 +363,7 @@ class AuthServiceTest {
         loggedIn()
         assertEquals("testuser", auth.username())
         // A fresh process knows it only from the stored credentials.
-        assertEquals("testuser", AuthService(SiteHttp(server.url("/"), jar), jar, creds).username())
+        assertEquals("testuser", AuthService(SiteHttp({ server.url("/") }, jar), jar, creds).username())
         server.enqueue(MockResponse.Builder().body("bye").build())
         auth.logout()
         assertNull(auth.username())
@@ -380,7 +380,7 @@ class AuthServiceTest {
     // TV gets them cleared before its login completes; the same account keeps them (D8).
     @Test fun aDifferentAccountSigningInReportsTheChange() = runTest {
         var changes = 0
-        val auth = AuthService(SiteHttp(server.url("/"), jar), jar, creds,
+        val auth = AuthService(SiteHttp({ server.url("/") }, jar), jar, creds,
             owner = AccountOwner(tmp.root.resolve("account.id")), onAccountChanged = { changes++ })
         fun success() {
             form()

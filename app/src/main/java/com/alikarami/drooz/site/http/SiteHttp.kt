@@ -27,7 +27,8 @@ data class SiteResponse(val finalPath: String, val body: String)
  * drips in cannot hold a screen past it. POSTs are never retried.
  */
 class SiteHttp(
-    private val baseUrl: HttpUrl,
+    /** Read per request: the address can be changed on the login screen. */
+    private val baseUrl: () -> HttpUrl?,
     private val jar: PersistentCookieJar,
     client: OkHttpClient = OkHttpClient(),
     timeoutMs: Long = 8_000,
@@ -105,8 +106,10 @@ class SiteHttp(
             })
         }
 
-    private fun resolve(path: String): HttpUrl =
-        baseUrl.resolve(path) ?: throw IllegalArgumentException("bad path $path")
+    private fun resolve(path: String): HttpUrl {
+        val base = baseUrl() ?: throw IllegalStateException("no server address")
+        return base.resolve(path) ?: throw IllegalArgumentException("bad path $path")
+    }
 
     private suspend fun execute(request: Request, requiresAuth: Boolean, client: OkHttpClient = this.client): SiteResponse =
         call(client, request) { r ->

@@ -80,14 +80,14 @@ private val ErrorColor = Color(0xFFFF6B6B)
 /** Where the Google TV keyboard's top edge sits (it reports no insets). */
 private const val KeyboardTopFraction = 0.55f
 
-private enum class LoginField { Username, Password, Mobile }
+private enum class LoginField { Server, Username, Password, Mobile }
 
 @Composable
 fun LoginScreen(vm: LoginViewModel, onLoggedIn: () -> Unit) {
     val state by vm.uiState.collectAsStateWithLifecycle()
     val loggedIn by rememberUpdatedState(onLoggedIn)
     LaunchedEffect(vm) { vm.loggedIn.collect { loggedIn() } }
-    LoginContent(state, vm::onUsername, vm::onPassword, vm::onMobile, vm::submit)
+    LoginContent(state, vm::onServer, vm::onUsername, vm::onPassword, vm::onMobile, vm::submit)
 }
 
 /**
@@ -100,6 +100,7 @@ fun LoginPreview(withMobile: Boolean) {
     var state by remember { mutableStateOf(LoginUiState(mobileHint = if (withMobile) "09xx***1234" else null)) }
     LoginContent(
         state,
+        onServer = { state = state.copy(server = it) },
         onUsername = { state = state.copy(username = it) },
         onPassword = { state = state.copy(password = it) },
         onMobile = { state = state.copy(mobile = it) },
@@ -108,7 +109,8 @@ fun LoginPreview(withMobile: Boolean) {
 }
 
 /**
- * Login form for the remote: username, password, then the mobile number once the site asks for it.
+ * Login form for the remote: the site address (nothing is built in; the user types it), username,
+ * password, then the mobile number once the site asks for it.
  * Fields are [TvTextField]s (focus never opens the keyboard by itself; OK does). The keyboard's Next
  * moves straight on to the next field, still typing; Done on the last field submits.
  */
@@ -116,6 +118,7 @@ fun LoginPreview(withMobile: Boolean) {
 @Composable
 fun LoginContent(
     state: LoginUiState,
+    onServer: (String) -> Unit,
     onUsername: (String) -> Unit,
     onPassword: (String) -> Unit,
     onMobile: (String) -> Unit,
@@ -124,6 +127,7 @@ fun LoginContent(
     val keyboard = LocalSoftwareKeyboardController.current
     // Local values keep the cursor / IME composition in sync; the view model holds the strings. They are
     // seeded once and never written back from [state]: a write-back races the IME and drops characters.
+    var server by remember { mutableStateOf(TextFieldValue(state.server, TextRange(state.server.length))) }
     var user by remember { mutableStateOf(TextFieldValue(state.username, TextRange(state.username.length))) }
     var pass by remember { mutableStateOf(TextFieldValue(state.password, TextRange(state.password.length))) }
     var mobile by remember { mutableStateOf(TextFieldValue(state.mobile, TextRange(state.mobile.length))) }
@@ -135,6 +139,7 @@ fun LoginContent(
     fun track(f: LoginField) = Modifier.onGloballyPositioned { c ->
         form[0]?.takeIf { it.isAttached }?.let { fieldBottoms[f] = it.localPositionOf(c, Offset.Zero).y + c.size.height }
     }
+    val serverRequester = remember { FocusRequester() }
     val userRequester = remember { FocusRequester() }
     val passRequester = remember { FocusRequester() }
     val mobileRequester = remember { FocusRequester() }
@@ -152,7 +157,10 @@ fun LoginContent(
         onSubmit()
     }
 
-    LaunchedEffect(Unit) { if (!askMobile) userRequester.requestFocusSoon() }
+    // No saved address yet: start on the address field.
+    LaunchedEffect(Unit) {
+        if (!askMobile) (if (state.server.isBlank()) serverRequester else userRequester).requestFocusSoon()
+    }
     // The site asked for the mobile: focus that field (OK opens the keyboard; opening it right away
     // would cover the hint that explains why the form grew).
     LaunchedEffect(askMobile) {
@@ -198,19 +206,34 @@ fun LoginContent(
             Modifier.width(FormWidth)
                 .graphicsLayer { translationY = lift }
                 .onGloballyPositioned { form[0] = it; formHeight = it.size.height.toFloat() },
-            verticalArrangement = Arrangement.spacedBy(if (askMobile) 6.dp else 8.dp),
+            // Compact on both steps: the address field (first step) or the mobile field (second) makes the form tall.
+            verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            // Smaller brand on the mobile step: the taller form must stay inside the 5% overscan-safe area.
+            // A small brand: the form must stay inside the 5% overscan-safe area.
             Text(
                 stringResource(R.string.app_name),
-                style = MaterialTheme.typography.displayMedium.copy(fontSize = if (askMobile) 30.sp else 40.sp),
+                style = MaterialTheme.typography.displayMedium.copy(fontSize = 30.sp),
                 color = DroozColors.Accent, fontWeight = FontWeight.ExtraBold,
             )
             Text(
-                stringResource(R.string.login_heading), Modifier.padding(bottom = if (askMobile) 2.dp else 8.dp),
+                stringResource(R.string.login_heading), Modifier.padding(bottom = 2.dp),
                 style = MaterialTheme.typography.titleLarge, color = Color.White,
             )
 
+            // The address is settled by the mobile step (the site already answered); hiding it there keeps the
+            // taller form on screen.
+            if (!askMobile) {
+                Label(stringResource(R.string.login_server))
+                Field(
+                    server, { server = it; onServer(it.text) }, editing == LoginField.Server,
+                    editingChange(LoginField.Server), serverRequester,
+                    KeyboardOptions(keyboardType = KeyboardType.Uri, autoCorrectEnabled = false, imeAction = ImeAction.Next),
+                    onImeAction = { editing = LoginField.Username },
+                    track(LoginField.Server),
+                    placeholder = stringResource(R.string.login_server_placeholder),
+                    ltr = true,
+                )
+            }
             Label(stringResource(R.string.login_username))
             Field(
                 user, { user = it; onUsername(it.text) }, editing == LoginField.Username,

@@ -1,10 +1,10 @@
-# DLRooz TV — Android TV client for robin.robert-redford.net
+# DLRooz TV — Android TV client for site.example
 
 **Date:** 2026-10-28 · **Status:** draft for approval
 
 ## 1. Intent
 
-The owner watches movies and series from the DLRooz site (`https://robin.robert-redford.net/`, a paid-account site) and has no TV app for it. This is a personal, native Android TV app for their **Google TV Streamer (4K)** connected to an LG TV + LG soundbar. UX quality is the top priority: it must feel like Netflix / Google TV, not like a website in a box.
+The owner watches movies and series from the DLRooz site (`https://site.example/`, a paid-account site) and has no TV app for it. This is a personal, native Android TV app for their **Google TV Streamer (4K)** connected to an LG TV + LG soundbar. UX quality is the top priority: it must feel like Netflix / Google TV, not like a website in a box.
 
 How it's used, in order of frequency:
 

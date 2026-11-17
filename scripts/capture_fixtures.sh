@@ -5,7 +5,7 @@
 set -euo pipefail
 jar=$1
 out=${2:-app/src/test/resources/fixtures}
-base=https://robin.robert-redford.net
+base=${SITE_BASE:?set SITE_BASE to the site address, e.g. https://example.com}
 ua="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT

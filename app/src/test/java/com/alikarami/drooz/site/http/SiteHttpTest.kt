@@ -29,7 +29,7 @@ class SiteHttpTest {
 
     @Before fun start() {
         server.start()
-        http = SiteHttp(server.url("/"), PersistentCookieJar(tmp.newFile(), siteHost = server.hostName), okHttpClient)
+        http = SiteHttp({ server.url("/") }, PersistentCookieJar(tmp.newFile(), siteHost = { server.hostName }), okHttpClient)
     }
 
     @After fun stop() = server.close()
@@ -93,7 +93,7 @@ class SiteHttpTest {
     }
 
     private fun fastHttp(postTimeoutMs: Long = 300) =
-        SiteHttp(server.url("/"), PersistentCookieJar(tmp.newFile(), siteHost = server.hostName),
+        SiteHttp({ server.url("/") }, PersistentCookieJar(tmp.newFile(), siteHost = { server.hostName }),
             timeoutMs = 300, maxAttempts = 3, postTimeoutMs = postTimeoutMs)
 
     private fun hung() = MockResponse.Builder().headersDelay(2, java.util.concurrent.TimeUnit.SECONDS).body("late").build()
@@ -119,7 +119,7 @@ class SiteHttpTest {
     }
 
     private fun timedHttp(callTimeoutMs: Long = 20_000, retryDelayMs: Long = 0) =
-        SiteHttp(server.url("/"), PersistentCookieJar(tmp.newFile(), siteHost = server.hostName),
+        SiteHttp({ server.url("/") }, PersistentCookieJar(tmp.newFile(), siteHost = { server.hostName }),
             timeoutMs = 300, maxAttempts = 3, callTimeoutMs = callTimeoutMs, retryDelayMs = retryDelayMs)
 
     private fun elapsedMs(block: () -> Unit): Long {

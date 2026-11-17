@@ -1,7 +1,5 @@
 package com.alikarami.drooz.site.model
 
-import com.alikarami.drooz.site.SiteConfig
-
 enum class TitleKind(val pathSegment: String) { FILM("film"), SERIES("series") }
 
 data class TitleRef(val kind: TitleKind, val postId: Long, val slug: String) {
@@ -11,7 +9,7 @@ data class TitleRef(val kind: TitleKind, val postId: Long, val slug: String) {
         private val PATH = Regex("""/post/(film|series)/(\d+)/([^/?#]+)/?""")
 
         fun fromPath(path: String): TitleRef? {
-            val m = PATH.find(path.removePrefix(SiteConfig.BASE_URL)) ?: return null
+            val m = PATH.find(path) ?: return null
             val kind = if (m.groupValues[1] == "film") TitleKind.FILM else TitleKind.SERIES
             return TitleRef(kind, m.groupValues[2].toLong(), m.groupValues[3])
         }

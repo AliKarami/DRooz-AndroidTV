@@ -1,6 +1,5 @@
 package com.alikarami.drooz.site.parse
 
-import com.alikarami.drooz.site.SiteConfig
 import com.alikarami.drooz.site.model.CategoryKind
 import com.alikarami.drooz.site.model.SiteCategory
 import org.jsoup.Jsoup
@@ -15,6 +14,8 @@ import org.jsoup.nodes.Element
 object CategoryMenuParser {
     private val LISTING = Regex("""^/archive/(?:category/([a-z0-9-]+)|series|(?:film|series)/(?:country|genre)/[a-z0-9-]+)/$""")
     private val TYPE_QUERY = Regex("""^type=(film|series)$""")
+    /** `https://host` of an absolute link (the menu links back to the site itself). */
+    private val ORIGIN = Regex("""^https?://[^/]+""")
     private val EXCLUDED_SLUGS = setOf("coming-soon")
 
     fun parse(html: String): List<SiteCategory> = parse(Jsoup.parse(html))
@@ -24,7 +25,7 @@ object CategoryMenuParser {
         val seen = HashSet<String>()
         return menu.select("a[href]").mapNotNull { a ->
             val label = PersianText.normalize(a.text()).ifEmpty { return@mapNotNull null }
-            val href = a.attr("href").trim().removePrefix(SiteConfig.BASE_URL)
+            val href = a.attr("href").trim().replaceFirst(ORIGIN, "")
             val rawPath = href.substringBefore('?').substringBefore('#')
             val path = if (rawPath.endsWith("/")) rawPath else "$rawPath/"
             val query = href.substringAfter('?', "").substringBefore('#')

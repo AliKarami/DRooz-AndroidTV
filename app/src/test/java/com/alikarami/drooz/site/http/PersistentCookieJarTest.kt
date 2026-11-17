@@ -34,20 +34,20 @@ class PersistentCookieJarTest {
     @Test
     fun persistsCookiesAcrossInstances() {
         val file = tmp.newFile("cookies.jsonl")
-        val jar = PersistentCookieJar(file, siteHost = server.hostName)
+        val jar = PersistentCookieJar(file, siteHost = { server.hostName })
         call(jar, MockResponse.Builder()
             .addHeader("Set-Cookie", "sf=abc123; Max-Age=31536000; path=/")
             .addHeader("Set-Cookie", "cf=session42; Max-Age=31536000; path=/")
             .build())
 
-        val reloaded = PersistentCookieJar(file, siteHost = server.hostName)
+        val reloaded = PersistentCookieJar(file, siteHost = { server.hostName })
         assertEquals("session42", reloaded.cookie("cf"))
         assertEquals("abc123", reloaded.cookie("sf"))
     }
 
     @Test
     fun alwaysSendsScrCookie() {
-        val jar = PersistentCookieJar(tmp.newFile(), siteHost = server.hostName)
+        val jar = PersistentCookieJar(tmp.newFile(), siteHost = { server.hostName })
         call(jar, MockResponse.Builder().build())
         assertTrue(server.takeRequest().headers["Cookie"]!!.contains("scr=1"))
     }
@@ -55,22 +55,22 @@ class PersistentCookieJarTest {
     @Test
     fun scrIsNeverPersisted() {
         val file = tmp.newFile()
-        val jar = PersistentCookieJar(file, siteHost = server.hostName)
+        val jar = PersistentCookieJar(file, siteHost = { server.hostName })
         call(jar, MockResponse.Builder().addHeader("Set-Cookie", "scr=2; path=/").build())
-        assertNull(PersistentCookieJar(file, siteHost = server.hostName).cookie("scr"))
+        assertNull(PersistentCookieJar(file, siteHost = { server.hostName }).cookie("scr"))
     }
 
     @Test
     fun expiredCookiesAreDropped() {
         val file = tmp.newFile()
-        val jar = PersistentCookieJar(file, siteHost = server.hostName)
+        val jar = PersistentCookieJar(file, siteHost = { server.hostName })
         call(jar, MockResponse.Builder().addHeader("Set-Cookie", "cf=old; Max-Age=0; path=/").build())
         assertNull(jar.cookie("cf"))
     }
 
     @Test
     fun clearKeepsOnly() {
-        val jar = PersistentCookieJar(tmp.newFile(), siteHost = server.hostName)
+        val jar = PersistentCookieJar(tmp.newFile(), siteHost = { server.hostName })
         call(jar, MockResponse.Builder()
             .addHeader("Set-Cookie", "sf=keep; Max-Age=1000; path=/")
             .addHeader("Set-Cookie", "cf=drop; Max-Age=1000; path=/")
@@ -90,7 +90,7 @@ class PersistentCookieJarTest {
         val file = tmp.newFile("cookies.jsonl")
         file.writeText(listOf(line("sf", "dev1", server.hostName), line("cf", "x", ""), line(" bad", "x", server.hostName),
             "{not json").joinToString("\n"))
-        val jar = PersistentCookieJar(file, siteHost = server.hostName)
+        val jar = PersistentCookieJar(file, siteHost = { server.hostName })
         assertEquals("dev1", jar.cookie("sf"))
         assertNull(jar.cookie("cf"))
     }
@@ -99,7 +99,7 @@ class PersistentCookieJarTest {
     fun unreadableFileStartsEmpty() {
         val dir = tmp.newFolder("cookies.jsonl")
         dir.resolve("child").writeText("x")
-        assertNull(PersistentCookieJar(dir, siteHost = server.hostName).cookie("sf"))
+        assertNull(PersistentCookieJar(dir, siteHost = { server.hostName }).cookie("sf"))
     }
 
     // A disk error while saving must not fail the HTTP call that delivered the cookie (D5).
@@ -107,7 +107,7 @@ class PersistentCookieJarTest {
     fun failedPersistKeepsTheCookieInMemory() {
         val file = tmp.root.resolve("cookies.jsonl")
         tmp.newFolder("cookies.jsonl.tmp").resolve("child").writeText("x")
-        val jar = PersistentCookieJar(file, siteHost = server.hostName)
+        val jar = PersistentCookieJar(file, siteHost = { server.hostName })
         call(jar, MockResponse.Builder().addHeader("Set-Cookie", "cf=s1; Max-Age=1000; path=/").build())
         assertEquals("s1", jar.cookie("cf"))
     }
@@ -115,7 +115,7 @@ class PersistentCookieJarTest {
     @Test
     fun persistLeavesNoTempFile() {
         val file = tmp.root.resolve("cookies.jsonl")
-        val jar = PersistentCookieJar(file, siteHost = server.hostName)
+        val jar = PersistentCookieJar(file, siteHost = { server.hostName })
         call(jar, MockResponse.Builder().addHeader("Set-Cookie", "cf=s1; Max-Age=1000; path=/").build())
         assertTrue(file.exists())
         assertTrue(!tmp.root.resolve("cookies.jsonl.tmp").exists())
@@ -129,7 +129,7 @@ class PersistentCookieJarTest {
     @Test
     fun unchangedCookiesAreNotRewritten() {
         var writes = 0
-        val jar = PersistentCookieJar(tmp.root.resolve("c.jsonl"), siteHost = "example.test") { _, _ -> writes++ }
+        val jar = PersistentCookieJar(tmp.root.resolve("c.jsonl"), siteHost = { "example.test" }) { _, _ -> writes++ }
         jar.saveFromResponse(url, listOf(cookie("cf", "s1")))
         jar.saveFromResponse(url, listOf(cookie("cf", "s1")))
         assertEquals(1, writes)
@@ -142,7 +142,7 @@ class PersistentCookieJarTest {
     fun persistDoesNotBlockRequests() {
         val writing = CountDownLatch(1)
         val release = CountDownLatch(1)
-        val jar = PersistentCookieJar(tmp.root.resolve("c.jsonl"), siteHost = "example.test") { _, _ ->
+        val jar = PersistentCookieJar(tmp.root.resolve("c.jsonl"), siteHost = { "example.test" }) { _, _ ->
             writing.countDown()
             release.await(5, TimeUnit.SECONDS)
         }

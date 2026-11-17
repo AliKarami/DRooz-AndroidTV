@@ -184,7 +184,7 @@ class PlayerViewModelTest {
         assertEquals(PlayerPhase.Playing, s.phase)
         assertEquals("Some Show", s.title)
         assertEquals("فصل ۱ · قسمت ۱", s.episodeLabel)
-        assertEquals(SiteConfig.BASE_URL + "/bd/s1e1.jpg", s.backdropUrl)
+        assertEquals(SiteConfig.baseUrl + "/bd/s1e1.jpg", s.backdropUrl)
         assertEquals("s1e1", s.currentStreamId)
     }
 
@@ -278,7 +278,7 @@ class PlayerViewModelTest {
         env.titleInfo.remember(seriesRef, "/played.jpg")
         env.api.gate = CompletableDeferred()
         val v = env.vm(scope = this)
-        assertEquals(SiteConfig.BASE_URL + "/played.jpg", v.state.value.backdropUrl)
+        assertEquals(SiteConfig.baseUrl + "/played.jpg", v.state.value.backdropUrl)
         runCurrent()
         assertEquals(PlayerPhase.Loading, v.state.value.phase)
         assertEquals("Some Show", v.state.value.title)

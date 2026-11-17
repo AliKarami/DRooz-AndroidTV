@@ -22,6 +22,8 @@ import com.alikarami.drooz.data.playerPrefsStore
 import com.alikarami.drooz.data.TitleInfoRepository
 import com.alikarami.drooz.data.TitlePrefs
 import com.alikarami.drooz.data.titlePrefsStore
+import com.alikarami.drooz.site.FileServerAddress
+import com.alikarami.drooz.site.ServerAddress
 import com.alikarami.drooz.site.SiteConfig
 import com.alikarami.drooz.ui.common.buildImageLoader
 import com.alikarami.drooz.data.DataStoreRecentSearches
@@ -34,7 +36,6 @@ import com.alikarami.drooz.site.auth.CredentialStore
 import com.alikarami.drooz.site.auth.KeystoreSecretBox
 import com.alikarami.drooz.site.http.PersistentCookieJar
 import com.alikarami.drooz.site.http.SiteHttp
-import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 
 /** Manual dependency container. Session files live in no-backup storage so they never leave the device. */
@@ -57,7 +58,7 @@ class AppGraph(context: Context) {
         }
         .build()
 
-    val http = SiteHttp(SiteConfig.BASE_URL.toHttpUrl(), cookieJar, baseClient)
+    val http = SiteHttp({ SiteConfig.base }, cookieJar, baseClient)
     private val localTitlePrefs = DataStoreTitlePrefs(titlePrefsStore(appContext))
     private val fileWatchStore = FileWatchStore(appContext.filesDir.resolve("watch_state.json"))
     private val fileHiddenTitles = FileHiddenTitles(appContext.filesDir.resolve("hidden_titles.json"))
@@ -81,6 +82,15 @@ class AppGraph(context: Context) {
     val titleInfo = TitleInfoRepository(siteApi)
     /** Last home page; also on disk (cache dir) for an instant cold start, deleted with the session. */
     val homeCache = HomePageCache(file = appContext.cacheDir.resolve("home_page.json"))
+    /** The site address the user typed on the login screen; a new one drops the old site's cookies and home cache. */
+    val serverAddress: ServerAddress = FileServerAddress(dir.resolve("server.txt"), onChanged = {
+        cookieJar.clear()
+        runCatching { homeCache.clear() }
+    }).also {
+        // No address saved (e.g. an install from before it was asked for): a leftover session cannot be
+        // used, so start at Login.
+        if (it.current == null) cookieJar.clear()
+    }
     val titlePrefs: TitlePrefs = localTitlePrefs
     val playerPrefs: PlayerPrefs = DataStorePlayerPrefs(playerPrefsStore(appContext))
     val watchStore: WatchStore = fileWatchStore

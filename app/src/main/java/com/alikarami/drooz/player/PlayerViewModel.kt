@@ -405,7 +405,7 @@ class PlayerViewModel(
         s.backdropPath?.let { titleInfo.remember(ref, it) }
         session = s
         gainSchedule = GainSchedule(s.gains, s.minGain, s.maxGain)
-        s.backdropPath?.let { p -> _state.update { it.copy(backdropUrl = SiteConfig.BASE_URL + p) } }
+        s.backdropPath?.let { p -> _state.update { it.copy(backdropUrl = SiteConfig.baseUrl + p) } }
         ensureSettings()
         val saved = watch.get(id)
         val available = availableSubtitles(s)

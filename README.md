@@ -6,7 +6,7 @@
 
 **Your DLRooz movies and series, made for the big screen.**
 
-A fast, good-looking TV app for [DLRooz](https://robin.robert-redford.net/): browse with the remote, pick up where you left off, and watch with Persian subtitles that look great.
+A fast, good-looking TV app for DLRooz (you enter the site address on the login screen): browse with the remote, pick up where you left off, and watch with Persian subtitles that look great.
 
 [**⬇ Download the latest APK**](https://github.com/AliKarami/DRooz-AndroidTV/releases/latest/download/DRooz.apk) · [All releases](https://github.com/AliKarami/DRooz-AndroidTV/releases) · [راهنمای فارسی](#راهنمای-فارسی)
 

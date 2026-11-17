@@ -1,6 +1,7 @@
 package com.alikarami.drooz.ui.login
 
 import com.alikarami.drooz.data.AuthApi
+import com.alikarami.drooz.site.ServerAddress
 import com.alikarami.drooz.site.SiteException
 import com.alikarami.drooz.site.auth.LoginResult
 import kotlinx.coroutines.CompletableDeferred
@@ -20,6 +21,8 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import okhttp3.HttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import java.io.IOException
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -42,6 +45,11 @@ class LoginViewModelTest {
         }
     }
 
+    private class FakeServer(var saved: HttpUrl? = "https://site.example/".toHttpUrl()) : ServerAddress {
+        override val current: HttpUrl? get() = saved
+        override fun set(url: HttpUrl) { saved = url }
+    }
+
     private fun LoginViewModel.fill(user: String = "ali", pass: String = "secret") {
         onUsername(user)
         onPassword(pass)
@@ -49,7 +57,7 @@ class LoginViewModelTest {
 
     @Test fun needsMobileShowsHintAndKeepsFields() = runTest(dispatcher) {
         val auth = FakeAuth { LoginResult.NeedsMobile("09xx***1234") }
-        val vm = LoginViewModel(auth)
+        val vm = LoginViewModel(auth, FakeServer())
         vm.fill()
         vm.submit(); advanceUntilIdle()
         val s = vm.uiState.value
@@ -68,7 +76,7 @@ class LoginViewModelTest {
     }
 
     @Test fun wrongCredentialsMessage() = runTest(dispatcher) {
-        val vm = LoginViewModel(FakeAuth { LoginResult.WrongCredentials })
+        val vm = LoginViewModel(FakeAuth { LoginResult.WrongCredentials }, FakeServer())
         vm.fill()
         vm.submit(); advanceUntilIdle()
         assertEquals("نام کاربری یا رمز عبور اشتباه است", vm.uiState.value.error)
@@ -77,7 +85,7 @@ class LoginViewModelTest {
     }
 
     @Test fun networkErrorMessage() = runTest(dispatcher) {
-        val vm = LoginViewModel(FakeAuth { throw SiteException.NetworkError(IOException("reset")) })
+        val vm = LoginViewModel(FakeAuth { throw SiteException.NetworkError(IOException("reset")) }, FakeServer())
         vm.fill()
         vm.submit(); advanceUntilIdle()
         assertEquals("اتصال به سایت برقرار نشد؛ دوباره تلاش کنید", vm.uiState.value.error)
@@ -86,14 +94,14 @@ class LoginViewModelTest {
 
     // A server-side failure or a Cloudflare block is not the user's network: say so (D15).
     @Test fun httpErrorMessageNamesTheCode() = runTest(dispatcher) {
-        val vm = LoginViewModel(FakeAuth { throw SiteException.HttpError(502) })
+        val vm = LoginViewModel(FakeAuth { throw SiteException.HttpError(502) }, FakeServer())
         vm.fill()
         vm.submit(); advanceUntilIdle()
         assertEquals("سایت با خطا پاسخ داد (کد 502)؛ کمی بعد دوباره تلاش کنید", vm.uiState.value.error)
     }
 
     @Test fun blockedMessage() = runTest(dispatcher) {
-        val vm = LoginViewModel(FakeAuth { throw SiteException.Blocked() })
+        val vm = LoginViewModel(FakeAuth { throw SiteException.Blocked() }, FakeServer())
         vm.fill()
         vm.submit(); advanceUntilIdle()
         assertEquals("سایت درخواست را موقتاً مسدود کرد؛ کمی بعد دوباره تلاش کنید", vm.uiState.value.error)
@@ -102,7 +110,7 @@ class LoginViewModelTest {
     @Test fun successEmitsLoggedIn() = runTest(dispatcher) {
         val auth = FakeAuth { LoginResult.Success }
         auth.gate = CompletableDeferred()
-        val vm = LoginViewModel(auth)
+        val vm = LoginViewModel(auth, FakeServer())
         val events = mutableListOf<Unit>()
         backgroundScope.launch(dispatcher) { vm.loggedIn.collect { events += it } }
         vm.fill()
@@ -118,7 +126,7 @@ class LoginViewModelTest {
 
     @Test fun emptyFieldsAreNotSent() = runTest(dispatcher) {
         val auth = FakeAuth { LoginResult.Success }
-        val vm = LoginViewModel(auth)
+        val vm = LoginViewModel(auth, FakeServer())
         vm.fill(pass = "")
         vm.submit(); advanceUntilIdle()
         assertTrue(auth.calls.isEmpty())
@@ -126,9 +134,44 @@ class LoginViewModelTest {
     }
 
     @Test fun siteFailureMessageShown() = runTest(dispatcher) {
-        val vm = LoginViewModel(FakeAuth { LoginResult.Failed("شماره موبایل پذیرفته نشد") })
+        val vm = LoginViewModel(FakeAuth { LoginResult.Failed("شماره موبایل پذیرفته نشد") }, FakeServer())
         vm.fill()
         vm.submit(); advanceUntilIdle()
         assertEquals("شماره موبایل پذیرفته نشد", vm.uiState.value.error)
+    }
+
+    @Test fun savedServerIsPrefilled() {
+        assertEquals("site.example", LoginViewModel(FakeAuth { LoginResult.Success }, FakeServer()).uiState.value.server)
+        assertEquals("", LoginViewModel(FakeAuth { LoginResult.Success }, FakeServer(null)).uiState.value.server)
+    }
+
+    @Test fun emptyServerIsNotSent() = runTest(dispatcher) {
+        val auth = FakeAuth { LoginResult.Success }
+        val vm = LoginViewModel(auth, FakeServer(null))
+        vm.fill()
+        vm.submit(); advanceUntilIdle()
+        assertTrue(auth.calls.isEmpty())
+        assertEquals(LoginStrings.EMPTY_SERVER, vm.uiState.value.error)
+    }
+
+    @Test fun invalidServerIsNotSent() = runTest(dispatcher) {
+        val auth = FakeAuth { LoginResult.Success }
+        val vm = LoginViewModel(auth, FakeServer(null))
+        vm.onServer("not a site")
+        vm.fill()
+        vm.submit(); advanceUntilIdle()
+        assertTrue(auth.calls.isEmpty())
+        assertEquals(LoginStrings.BAD_SERVER, vm.uiState.value.error)
+    }
+
+    @Test fun typedServerIsSavedBeforeLogin() = runTest(dispatcher) {
+        val server = FakeServer(null)
+        val auth = FakeAuth { assertEquals("https://new.example/", server.saved.toString()); LoginResult.Success }
+        val vm = LoginViewModel(auth, server)
+        vm.onServer(" new.example/some/page ")
+        vm.fill()
+        vm.submit(); advanceUntilIdle()
+        assertEquals(1, auth.calls.size)
+        assertEquals("https://new.example/", server.saved.toString())
     }
 }

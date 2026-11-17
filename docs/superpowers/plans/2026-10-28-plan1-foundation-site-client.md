@@ -14,7 +14,7 @@
 
 ## Global Constraints
 
-- Base URL `https://robin.robert-redford.net`; every site request carries cookie `scr=1` and User-Agent `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36`.
+- Base URL `https://site.example`; every site request carries cookie `scr=1` and User-Agent `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36`.
 - Cookies (`sf`, `cf`, …) persist forever across launches; never cleared except by explicit logout. Re-login only on a detected expired session, keeping `sf`.
 - Never request a `/stream/...` page except immediately before the user plays something (it marks the title as streamed on the account). Never cache `master.m3u8` URLs (valid ~1 min).
 - **The GitHub repo is public.** Never commit credentials, cookies, the real user token, user id, username, phone number or m3u8 keys. Fixtures are committed only after sanitization (Task 2), enforced by `FixtureHygieneTest`.
@@ -221,7 +221,7 @@ data class StreamSession(val title: String, val masterUrl: String, val backdropP
   @Test fun critics()  { assertEquals(38, PersianText.criticsScore("امتیاز منتقدین : 38 / 100")) }
   @Test fun refFromPath() { assertEquals(TitleRef(TitleKind.SERIES, 5735053, "pluribus"), TitleRef.fromPath("/post/series/5735053/pluribus/")) }
   @Test fun refPathRoundTrip() // fromPath(ref.path) == ref
-  @Test fun posterUrl() { assertEquals("https://robin.robert-redford.net/img/300-450/abc.jpg.webp", ImageUrls.poster("abc.jpg.webp", 300, 450)) }
+  @Test fun posterUrl() { assertEquals("https://site.example/img/300-450/abc.jpg.webp", ImageUrls.poster("abc.jpg.webp", 300, 450)) }
   ```
 - [ ] **Step 2:** Run → FAIL. **Step 3:** Implement (`CardParser` is exercised by Tasks 6's tests). **Step 4:** Run → PASS.
 - [ ] **Step 5:** Commit `feat(site): models and text helpers`.
@@ -288,9 +288,9 @@ data class StreamSession(val title: String, val masterUrl: String, val backdropP
 
 - [ ] **Step 1: Failing tests**
   ```kotlin
-  @Test fun masterUrl()   { assertEquals("https://robin.robert-redford.net/json/m3u8/371517/5744530/USERTOKEN/master.m3u8?key=KEY&expire=1800000000&load", s.masterUrl) }
+  @Test fun masterUrl()   { assertEquals("https://site.example/json/m3u8/371517/5744530/USERTOKEN/master.m3u8?key=KEY&expire=1800000000&load", s.masterUrl) }
   @Test fun subtitles()   { assertEquals(listOf("Farsi", "English", "English + Farsi"), s.subtitles.map { it.label })
-      assertEquals("https://robin.robert-redford.net/json/subtitle/582055/5744530/sub.srt?stream=371517&second=582056", s.subtitles[2].url) }
+      assertEquals("https://site.example/json/subtitle/582055/5744530/sub.srt?stream=371517&second=582056", s.subtitles[2].url) }
   @Test fun qualityLabels() { assertEquals(mapOf(2475 to "1080 [ 2.48 GB ]", 1100 to "720 [ 1.14 GB ]", 488 to "480 [ 553 MB ]"), s.qualityLabels) }
   @Test fun gains()       { assertEquals(841, s.gains.size); assertEquals(0.64, s.minGain); assertEquals(1.93, s.maxGain) }
   @Test fun iframes()     { assertEquals(3, s.iframes.size); assertEquals(listOf(0.0, 6.5, 8.208), s.iframes[0].take(3)) }

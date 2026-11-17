@@ -20,7 +20,7 @@ class BackdropResolverTest {
 
     @Test fun playedBackdropNext() {
         val r = BackdropResolver.resolve(ref, emptyMap(), mapOf(ref to "/img/1920-1080/p.jpg.webp"), detail("po", "tr"))
-        assertEquals(Backdrop.Wide(SiteConfig.BASE_URL + "/img/1920-1080/p.jpg.webp"), r)
+        assertEquals(Backdrop.Wide(SiteConfig.baseUrl + "/img/1920-1080/p.jpg.webp"), r)
     }
 
     @Test fun trailerThumbNext() {

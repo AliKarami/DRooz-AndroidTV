@@ -19,7 +19,8 @@ import java.io.IOException
  */
 class PersistentCookieJar(
     private val file: File,
-    private val siteHost: String = SiteConfig.HOST,
+    /** Read per request: the address can be changed on the login screen. */
+    private val siteHost: () -> String? = { SiteConfig.host },
     private val now: () -> Long = System::currentTimeMillis,
     private val write: (File, ByteArray) -> Unit = ::writeAtomically,
 ) : CookieJar {
@@ -79,7 +80,7 @@ class PersistentCookieJar(
     override fun loadForRequest(url: HttpUrl): List<Cookie> {
         dropExpired()
         val matching = cookies.filter { it.matches(url) }
-        if (url.host != siteHost) return matching
+        if (url.host != siteHost()) return matching
         val scr = Cookie.Builder().name(SiteConfig.SCR_COOKIE).value(SiteConfig.SCR_VALUE)
             .hostOnlyDomain(url.host).path("/").build()
         return matching + scr

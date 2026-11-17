@@ -24,6 +24,7 @@ import com.alikarami.drooz.data.TitlePrefs
 import com.alikarami.drooz.data.titlePrefsStore
 import com.alikarami.drooz.site.FileServerAddress
 import com.alikarami.drooz.site.ServerAddress
+import com.alikarami.drooz.site.adoptLegacySessionAddress
 import com.alikarami.drooz.site.SiteConfig
 import com.alikarami.drooz.ui.common.buildImageLoader
 import com.alikarami.drooz.data.DataStoreRecentSearches
@@ -87,9 +88,8 @@ class AppGraph(context: Context) {
         cookieJar.clear()
         runCatching { homeCache.clear() }
     }).also {
-        // No address saved (e.g. an install from before it was asked for): a leftover session cannot be
-        // used, so start at Login.
-        if (it.current == null) cookieJar.clear()
+        // An install from before the address was asked for: keep its session on the site it logged into.
+        adoptLegacySessionAddress(it, cookieJar, AuthService.SESSION_COOKIE)
     }
     val titlePrefs: TitlePrefs = localTitlePrefs
     val playerPrefs: PlayerPrefs = DataStorePlayerPrefs(playerPrefsStore(appContext))

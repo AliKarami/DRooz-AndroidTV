@@ -160,9 +160,10 @@ class AuthService(
         }
     }
 
-    private companion object {
+    companion object {
+        /** The site's session cookie; its domain also tells which site an old install logged into. */
         const val SESSION_COOKIE = "cf"
-        const val DEVICE_COOKIE = "sf"
-        const val LOGOUT_PATH = "/user/logout/"
+        private const val DEVICE_COOKIE = "sf"
+        private const val LOGOUT_PATH = "/user/logout/"
     }
 }

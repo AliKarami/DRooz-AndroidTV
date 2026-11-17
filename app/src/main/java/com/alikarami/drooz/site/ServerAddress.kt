@@ -2,6 +2,7 @@ package com.alikarami.drooz.site
 
 import android.util.Log
 import com.alikarami.drooz.BuildConfig
+import com.alikarami.drooz.site.http.PersistentCookieJar
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import java.io.File
@@ -52,4 +53,15 @@ class FileServerAddress(
     private companion object {
         const val TAG = "ServerAddress"
     }
+}
+
+/**
+ * An install from before the address was asked for has a session but no saved address: adopt the site its
+ * [sessionCookie] belongs to, so updating the app keeps the login (and the device id the site counts devices by).
+ */
+fun adoptLegacySessionAddress(address: ServerAddress, jar: PersistentCookieJar, sessionCookie: String) {
+    if (address.current != null) return
+    val domain = jar.cookieDomain(sessionCookie) ?: return
+    val url = runCatching { HttpUrl.Builder().scheme("https").host(domain).build() }.getOrNull() ?: return
+    address.set(url)
 }

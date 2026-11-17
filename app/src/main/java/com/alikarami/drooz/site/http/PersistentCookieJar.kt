@@ -92,6 +92,13 @@ class PersistentCookieJar(
         return cookies.lastOrNull { it.name == name }?.value
     }
 
+    /** The domain of the newest cookie called [name], or null if there is none. */
+    @Synchronized
+    fun cookieDomain(name: String): String? {
+        dropExpired()
+        return cookies.lastOrNull { it.name == name }?.domain
+    }
+
     /** Removes all cookies except those named in [keep] (logout keeps the device id `sf`). */
     fun clear(keep: Set<String> = emptySet()) {
         val snapshot = synchronized(this) {

@@ -66,6 +66,7 @@ import androidx.tv.material3.Text
 import com.alikarami.drooz.R
 import com.alikarami.drooz.player.PlayerUiState
 import com.alikarami.drooz.player.engine.PlaybackEngine
+import com.alikarami.drooz.player.qualityName
 import com.alikarami.drooz.ui.common.TitleText
 import com.alikarami.drooz.ui.common.UiStrings
 import com.alikarami.drooz.ui.common.formatClock
@@ -189,7 +190,7 @@ private fun ButtonsRow(
                         Modifier.focusRequester(requesters.getValue(ControlsTarget.SUBTITLE_AUDIO)),
                     ) { GlyphIcon(PlayerIcons.Subtitles) }
                     ControlIcon(
-                        UiStrings.qualityButton(state.selectedQuality), { onOpen(Overlay.QUALITY) },
+                        UiStrings.qualityButton(state.selectedQuality?.let { qualityName(it, state.qualities) }), { onOpen(Overlay.QUALITY) },
                         Modifier.focusRequester(requesters.getValue(ControlsTarget.QUALITY)),
                     ) { GlyphIcon(PlayerIcons.Quality) }
                     ControlIcon(

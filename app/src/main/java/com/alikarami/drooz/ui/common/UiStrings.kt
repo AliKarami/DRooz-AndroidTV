@@ -29,6 +29,8 @@ object UiStrings {
      */
     private const val LRI = "\u2066"
     private const val PDI = "\u2069"
+    /** [text] as one left-to-right island inside RTL text (a masked phone number, «1080 [797 MB]»). */
+    fun ltr(text: String): String = "$LRI$text$PDI"
     /** 0.5 → «۰٫۵×», 1 → «۱×». */
     fun speed(x: Float): String = "$LRI${decimal(x.toString())}×$PDI"
     fun speedButton(x: Float): String = "سرعت ${speed(x)}"
@@ -41,11 +43,14 @@ object UiStrings {
         }
         return "$LRI$sign${decimal((kotlin.math.abs(ms) / 1000.0).toString())}$PDI ثانیه"
     }
-    /** Quality names stay Latin, as the site shows them («1080p»). */
-    fun qualityAuto(playingHeight: Int?): String = if (playingHeight == null) "خودکار" else "خودکار (${playingHeight}p)"
+    /**
+     * Quality names stay Latin, as the site shows them («1080p»; see qualityName). Isolated, so the
+     * parentheses around the name stay in place inside the RTL label.
+     */
+    fun qualityAuto(playingName: String?): String = if (playingName == null) "خودکار" else "خودکار (${ltr(playingName)})"
     /** The controls' pill, kept short so the button row fits (the panel shows the full labels). */
-    fun qualityButton(selectedHeight: Int?): String =
-        if (selectedHeight == null) "کیفیت: خودکار" else "کیفیت: ${selectedHeight}p"
+    fun qualityButton(selectedName: String?): String =
+        if (selectedName == null) "کیفیت: خودکار" else "کیفیت: ${ltr(selectedName)}"
     fun percent(n: Int): String = "$n٪".toPersianDigits()
     fun autoPlayIn(seconds: Int): String = "پخش خودکار تا $seconds ثانیه دیگر".toPersianDigits()
     /** Audio rendition names from the stream, by label text; unknown labels verbatim. */

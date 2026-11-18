@@ -65,6 +65,7 @@ import com.alikarami.drooz.player.PlayerViewModel
 import com.alikarami.drooz.player.SPEEDS
 import com.alikarami.drooz.player.SUBTITLE_STEP_MS
 import com.alikarami.drooz.player.UpNext
+import com.alikarami.drooz.player.qualityName
 import com.alikarami.drooz.player.subtitleKinds
 import com.alikarami.drooz.ui.common.DroozImage
 import com.alikarami.drooz.ui.common.ImageSizes
@@ -356,12 +357,13 @@ internal fun QualityPanel(state: PlayerUiState, focusToken: Int?, onPick: (Int?)
     val selectedPresent = state.selectedQuality != null && state.qualities.any { it.height == state.selectedQuality }
     SidePanel(stringResource(R.string.player_quality), SMALL_PANEL_FRACTION, modifier) {
         PanelOption(
-            UiStrings.qualityAuto(state.playingHeight), state.selectedQuality == null, { onPick(null) },
+            UiStrings.qualityAuto(state.playingHeight?.let { qualityName(it, state.qualities) }),
+            state.selectedQuality == null, { onPick(null) },
             if (!selectedPresent) Modifier.focusRequester(current) else Modifier,
         )
         state.qualities.forEach { q ->
             val sel = q.height == state.selectedQuality
-            PanelOption(q.label, sel, { onPick(q.height) }, if (sel) Modifier.focusRequester(current) else Modifier)
+            PanelOption(UiStrings.ltr(q.label), sel, { onPick(q.height) }, if (sel) Modifier.focusRequester(current) else Modifier)
         }
     }
 }

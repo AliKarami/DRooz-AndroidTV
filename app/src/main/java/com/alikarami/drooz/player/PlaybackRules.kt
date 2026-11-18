@@ -119,6 +119,15 @@ fun qualityOptions(variants: List<VariantInfo>, siteLabels: Map<Int, String>): L
             QualityOption(v.height, label ?: "${v.height}p")
         }
 
+/**
+ * Short name for the rendition of [height]: the site's nominal resolution («1080 [797 MB]» → «1080p»), so a
+ * wide 1920×960 stream picked as «1080» is not called «960p»; else «{height}p».
+ */
+fun qualityName(height: Int, options: List<QualityOption>): String {
+    val nominal = options.firstOrNull { it.height == height }?.label?.trimStart()?.takeWhile(Char::isDigit)
+    return "${nominal?.ifEmpty { null } ?: height}p"
+}
+
 private fun labelByBitrate(kbps: Int, siteLabels: Map<Int, String>): String? {
     siteLabels[kbps]?.let { return it }
     val nearest = siteLabels.keys.minByOrNull { abs(it - kbps) } ?: return null

@@ -359,6 +359,8 @@ class ListViewModelTest {
         assertEquals(mini to 1, api.listCalls.last())
         assertEquals(ref(9100), vm.uiState.value.items.first().ref)
         assertEquals(0, vm.focusedIndex)
+        // Focus is still on the chips: the hero shows the first card instead of staying empty.
+        assertEquals(ref(9100), vm.uiState.value.hero?.ref)
         vm.onFocusIndex(19); advanceUntilIdle()
         assertEquals(mini to 2, api.listCalls.last())
         assertEquals(40, vm.uiState.value.items.size)

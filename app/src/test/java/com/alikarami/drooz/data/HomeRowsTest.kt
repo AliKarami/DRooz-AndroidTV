@@ -11,7 +11,8 @@ class HomeRowsTest {
             HomeRows.rows.map { it.title },
         )
         assertEquals(
-            listOf("/archive/category/new-tv-show/", "/archive/playlist/show/most-popular-tv-shows/",
+            // «سریال های بروز شده» comes from the Series listing: the home section has no posters or titles.
+            listOf("/archive/series/", "/archive/category/new-tv-show/", "/archive/playlist/show/most-popular-tv-shows/",
                 "/archive/playlist/show/imdb-top-250-tv-series/", "/archive/category/dubbed-films/",
                 "/archive/category/safe-for-children/"),
             HomeRows.rows.mapNotNull { (it.source as? RowSource.ListPath)?.path },
@@ -26,7 +27,7 @@ class HomeRowsTest {
     // Home sections are looked up by title; both sides use the same normalized form (B11).
     @Test fun sectionTitlesAreNormalized() {
         val titles = HomeRows.rows.mapNotNull { (it.source as? RowSource.HomeSection)?.title }
-        assertEquals(3, titles.size)
+        assertEquals(2, titles.size)
         titles.forEach { assertEquals(com.alikarami.drooz.site.parse.PersianText.normalize(it), it) }
         assertEquals(RowSource.HomeSection("فیلم های برگزیده"), RowSource.HomeSection("فيلم\u200cهاي برگزيده"))
     }

@@ -67,6 +67,7 @@ import androidx.tv.material3.Text
 import com.alikarami.drooz.R
 import com.alikarami.drooz.ui.common.BusySpinner
 import com.alikarami.drooz.ui.common.TvTextField
+import com.alikarami.drooz.ui.common.UiStrings
 import com.alikarami.drooz.ui.common.requestFocusSoon
 import com.alikarami.drooz.ui.theme.DroozCardShape
 import com.alikarami.drooz.ui.theme.DroozColors
@@ -270,7 +271,7 @@ fun LoginContent(
                         onImeAction = ::submit,
                         track(LoginField.Mobile),
                         // The site's masked number (e.g. 09xx***1234) as the placeholder.
-                        placeholder = state.mobileHint,
+                        placeholder = state.mobileHint?.let(UiStrings::ltr),
                         ltr = true,
                     )
                 }

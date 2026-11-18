@@ -213,6 +213,11 @@ class ListViewModel(
                         loading = false, loadingMore = more, endReached = loadedPage >= lastPage,
                     )
                 }
+                // A new chip's listing arrives while focus stays on the chips: the hero shows the card focus
+                // would enter at, instead of staying empty over the previous listing's backdrop.
+                if (next == 1 && _state.value.hero == null) {
+                    cards.getOrNull(focusedIndex)?.let { heroes.focus(it.ref, it, it.posterHash) }
+                }
             } while (more)
         }
     }

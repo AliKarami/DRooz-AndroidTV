@@ -100,6 +100,16 @@ class PlaybackRulesTest {
         ),
     )
 
+    @Test fun qualityNameIsTheSiteNominalResolution() {
+        // A 2:1 film's «1080» rendition is 1920×960: it is still called 1080p.
+        val options = listOf(QualityOption(960, "1080 [797 MB]"), QualityOption(720, "720p"), QualityOption(480, "SD"))
+        assertEquals("1080p", qualityName(960, options))
+        assertEquals("720p", qualityName(720, options))
+        // No leading number, or a height with no option: the height.
+        assertEquals("480p", qualityName(480, options))
+        assertEquals("360p", qualityName(360, options))
+    }
+
     // Two 1080 renditions: the label of the smaller one comes first in the map (height matching would pick it).
     private val labels1080 = linkedMapOf(1200 to "1080 [ 1.2 GB ]", 2475 to "1080 [ 2.48 GB ]")
 

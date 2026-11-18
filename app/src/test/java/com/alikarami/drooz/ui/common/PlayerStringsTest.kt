@@ -23,11 +23,18 @@ class PlayerStringsTest {
     }
 
     @Test fun qualityLabels() {
-        assertEquals("خودکار (1080p)", UiStrings.qualityAuto(1080))
+        // The Latin name is an LRI…PDI isolate, so the parentheses stay around it inside the RTL label.
+        assertEquals("خودکار (⁦1080p⁩)", UiStrings.qualityAuto("1080p"))
         assertEquals("خودکار", UiStrings.qualityAuto(null))
         // The controls' pill is short (the panel keeps the full labels).
-        assertEquals("کیفیت: 1080p", UiStrings.qualityButton(1080))
+        assertEquals("کیفیت: ⁦1080p⁩", UiStrings.qualityButton("1080p"))
         assertEquals("کیفیت: خودکار", UiStrings.qualityButton(null))
+    }
+
+    @Test fun ltrIsolate() {
+        // «1080 [797 MB]» and a masked phone number otherwise reorder inside RTL text.
+        assertEquals("⁦1080 [797 MB]⁩", UiStrings.ltr("1080 [797 MB]"))
+        assertEquals("⁦09xx***1234⁩", UiStrings.ltr("09xx***1234"))
     }
 
     @Test fun percentAndCountdown() {

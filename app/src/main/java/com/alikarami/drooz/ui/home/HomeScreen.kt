@@ -137,6 +137,13 @@ private val RowPadV = 12.dp
 private val CardGap = 16.dp
 private val LandscapeWidth = 220.dp
 private val PosterWidth = 120.dp
+/**
+ * Height a focused poster row needs below the rows' top: header, padding, the 2:3 poster, and its caption
+ * (a 2-line title and up to a 2-line badge, see PosterCard). The rows start high enough for this to fit.
+ */
+private val PosterRowHeight = RowHeader + RowPadV * 2 + PosterWidth * 1.5f + 100.dp
+/** Room the full hero text (2-line title, 3-line synopsis) needs from the top of the screen. */
+private val FullHeroHeight = 260.dp
 
 private const val EXIT_WINDOW_MS = 2_000L
 
@@ -268,12 +275,16 @@ fun HomeScreen(
         },
     ) {
         BoxWithConstraints(Modifier.fillMaxSize().background(DroozColors.Background)) {
-            val rowsTop = maxHeight * 0.5f
+            // Half the screen, or higher when a poster row would not fit below that: on a 540dp-tall screen
+            // (any 1080p or 4K TV at its usual density) its captions fell off the bottom edge. The hero text
+            // then takes its compact form (1-line title, 2-line synopsis) to fit above the rows.
+            val rowsTop = minOf(maxHeight * 0.5f, maxHeight - PosterRowHeight)
             HomeHero(
                 state,
                 rowTitle = { rows.firstOrNull { it.key == focusedRowKey }?.title },
                 backdropModifier = Modifier.fillMaxWidth().height(maxHeight * 0.62f),
-                infoModifier = Modifier.align(Alignment.TopStart).padding(start = ContentStart, top = 36.dp).width(480.dp),
+                infoModifier = Modifier.align(Alignment.TopStart).padding(start = ContentStart, top = 28.dp).width(480.dp),
+                compact = rowsTop < FullHeroHeight,
             )
             if (homeFailed) {
                 ErrorState(
@@ -368,10 +379,11 @@ private fun HomeHero(
     rowTitle: () -> String?,
     backdropModifier: Modifier,
     infoModifier: Modifier,
+    compact: Boolean,
 ) {
     val hero = rememberSettledHero(state.value.hero)
     HeroBackdrop(hero, backdropModifier)
-    HeroInfo(hero, rowTitle(), infoModifier)
+    HeroInfo(hero, rowTitle(), infoModifier, compact = compact)
 }
 
 private enum class Slot { Cards, Error, Skeleton }

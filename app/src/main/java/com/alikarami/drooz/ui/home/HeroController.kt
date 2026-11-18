@@ -7,6 +7,7 @@ import com.alikarami.drooz.site.ImageUrls
 import com.alikarami.drooz.site.model.TitleCard
 import com.alikarami.drooz.site.model.TitleDetail
 import com.alikarami.drooz.site.model.TitleRef
+import com.alikarami.drooz.site.parse.PersianText
 import com.alikarami.drooz.ui.common.UiStrings
 import com.alikarami.drooz.ui.common.prettifySlug
 import com.alikarami.drooz.ui.common.safeLaunch
@@ -18,11 +19,21 @@ import kotlinx.coroutines.delay
 /** Display title for a card: the site title, or a prettified slug when the site only gave the slug. */
 fun cardTitle(ref: TitleRef, title: String?): String = title?.takeIf { it != ref.slug } ?: prettifySlug(ref.slug)
 
-/** A 2:3 poster card for [card]. */
+/** A 2:3 poster card for [card]; its caption takes the series badge in the app's short form (see [shortEpisodeBadge]). */
 fun TitleCard.toPosterCardUi(): CardUi = CardUi(
     ref, cardTitle(ref, title), posterHash?.let { ImageUrls.poster(it, 240, 360) },
-    episodeLabel ?: year?.toString()?.toPersianDigits(), landscape = false,
+    episodeLabel?.let(::shortEpisodeBadge) ?: year?.toString()?.toPersianDigits(), landscape = false,
 )
+
+/**
+ * «قسمت ۰۷ فصل سوم» → «فصل ۳ · قسمت ۷», as the app writes episodes elsewhere and short enough for a poster
+ * caption. No-break spaces keep each number with its word, so a long one («فصل ۳۰ · قسمت ۱۴») wraps only at
+ * the dot. A badge that reads otherwise is kept as is.
+ */
+fun shortEpisodeBadge(label: String): String =
+    PersianText.episodeBadge(label)?.let { (season, episode) ->
+        "فصل\u00A0$season · قسمت\u00A0$episode".toPersianDigits()
+    } ?: label
 
 /**
  * The focus-following hero shared by home and list grids: shows list data at once, then after [dwellMs]

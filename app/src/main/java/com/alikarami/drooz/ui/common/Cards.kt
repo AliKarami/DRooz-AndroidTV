@@ -22,6 +22,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.unit.Dp
@@ -71,10 +72,11 @@ fun PosterCard(
             Modifier.fillMaxWidth().zIndex(AboveFocusedCard), color = Color.White, maxLines = 2,
         )
         if (subtitle != null) {
+            // Two lines at most: a long badge wraps instead of being cut (one line lost the season or episode).
             Text(
                 subtitle, Modifier.fillMaxWidth().zIndex(AboveFocusedCard),
                 style = MaterialTheme.typography.labelSmall.copy(textAlign = TextAlign.Right),
-                color = Color(0xFFCFD2DA), maxLines = 1,
+                color = Color(0xFFCFD2DA), maxLines = 2, overflow = TextOverflow.Ellipsis,
             )
         }
     }

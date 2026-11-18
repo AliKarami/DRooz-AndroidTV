@@ -49,4 +49,37 @@ object PersianText {
     fun minutes(s: String): Int? = MINUTES.find(digits(s))?.groupValues?.get(1)?.toIntOrNull()
 
     fun criticsScore(s: String): Int? = CRITICS.find(digits(s))?.groupValues?.get(1)?.toIntOrNull()
+
+    private val ORDINALS = mapOf(
+        "اول" to 1, "یکم" to 1, "دوم" to 2, "سوم" to 3, "چهارم" to 4, "پنجم" to 5, "ششم" to 6, "هفتم" to 7,
+        "هشتم" to 8, "نهم" to 9, "دهم" to 10, "یازدهم" to 11, "دوازدهم" to 12, "سیزدهم" to 13, "چهاردهم" to 14,
+        "پانزدهم" to 15, "شانزدهم" to 16, "هفدهم" to 17, "هجدهم" to 18, "هیجدهم" to 18, "نوزدهم" to 19,
+        "بیستم" to 20, "سی ام" to 30, "سیام" to 30, "چهلم" to 40,
+    )
+    private val TENS = mapOf("بیست" to 20, "سی" to 30, "چهل" to 40)
+
+    /** «سوم» → 3, «بیست و یکم» → 21, «۳» → 3; null for anything else. */
+    fun ordinal(word: String): Int? {
+        val w = normalize(word)
+        digits(w).toIntOrNull()?.let { return it }
+        ORDINALS[w]?.let { return it }
+        val parts = w.split(" و ")
+        if (parts.size != 2) return null
+        val tens = TENS[parts[0]] ?: return null
+        val unit = ORDINALS[parts[1]]?.takeIf { it in 1..9 } ?: return null
+        return tens + unit
+    }
+
+    private val EPISODE_BADGE = Regex("""قسمت (\d+) فصل (.+)""")
+
+    /**
+     * The site's series badge «قسمت ۰۷ فصل سوم» as (season 3, episode 7); null when it reads otherwise
+     * (e.g. «قسمت ۰۷ فصل سوم / ۷۰», which then keeps its own wording).
+     */
+    fun episodeBadge(label: String): Pair<Int, Int>? {
+        val m = EPISODE_BADGE.matchEntire(digits(normalize(label))) ?: return null
+        val episode = m.groupValues[1].toIntOrNull() ?: return null
+        val season = ordinal(m.groupValues[2]) ?: return null
+        return season to episode
+    }
 }

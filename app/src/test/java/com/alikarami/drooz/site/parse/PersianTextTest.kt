@@ -28,4 +28,26 @@ class PersianTextTest {
         assertEquals("کودک", PersianText.normalize("كودك"))
         assertEquals("abc", PersianText.normalize("abc"))
     }
+
+    @Test fun ordinals() {
+        assertEquals(1, PersianText.ordinal("اول"))
+        assertEquals(3, PersianText.ordinal("سوم"))
+        assertEquals(11, PersianText.ordinal("یازدهم"))
+        assertEquals(18, PersianText.ordinal("هیجدهم"))
+        assertEquals(20, PersianText.ordinal("بیستم"))
+        assertEquals(25, PersianText.ordinal("بیست و پنجم"))
+        assertEquals(30, PersianText.ordinal("سی‌ام"))
+        assertEquals(4, PersianText.ordinal("۴"))
+        assertNull(PersianText.ordinal("آخر"))
+        assertNull(PersianText.ordinal("بیست و دهم"))
+    }
+
+    @Test fun episodeBadge() {
+        assertEquals(3 to 7, PersianText.episodeBadge("قسمت ۰۷ فصل سوم"))
+        assertEquals(11 to 11, PersianText.episodeBadge(" قسمت ۱۱ فصل یازدهم"))
+        assertEquals(25 to 6, PersianText.episodeBadge("قسمت ۰۶ فصل بیست و پنجم"))
+        // Other shapes are left to the caller.
+        assertNull(PersianText.episodeBadge("قسمت ۰۷"))
+        assertNull(PersianText.episodeBadge("قسمت ۰۷ فصل سوم / ۷۰"))
+    }
 }

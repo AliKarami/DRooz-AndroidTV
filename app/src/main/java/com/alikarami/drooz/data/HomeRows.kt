@@ -19,7 +19,9 @@ object HomeRows {
     val rows: List<HomeRowConfig> = listOf(
         HomeRowConfig("recent", "ادامه تماشا", RowSource.Recent),
         HomeRowConfig("featured", "فیلم های برگزیده", RowSource.HomeSection("فیلم های برگزیده")),
-        HomeRowConfig("updated-series", "سریال های بروز شده", RowSource.HomeSection("سریال های بروز شده")),
+        // The listing behind the home section's «بیشتر»: the section itself has only wide 373×67 strips (cropped
+        // to a sliver as posters) and no titles; the listing has posters, titles and episode badges.
+        HomeRowConfig("updated-series", "سریال های بروز شده", RowSource.ListPath("/archive/series/")),
         HomeRowConfig("new-films", "فیلم های جدید", RowSource.HomeSection("فیلم های جدید")),
         HomeRowConfig("new-series", "سریال های جدید", RowSource.ListPath("/archive/category/new-tv-show/")),
         HomeRowConfig("popular", "سریال های محبوب", RowSource.ListPath("/archive/playlist/show/most-popular-tv-shows/")),

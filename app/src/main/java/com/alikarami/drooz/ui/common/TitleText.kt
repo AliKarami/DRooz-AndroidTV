@@ -11,9 +11,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.tv.material3.Text
 
-/** "shaun-the-sheep" -> "Shaun The Sheep". */
+/** "shaun-the-sheep" -> "Shaun The Sheep"; percent-escapes are decoded ("uzak-%c5%9eehir" -> "Uzak Şehir"). */
 fun prettifySlug(slug: String): String =
-    slug.split('-').filter { it.isNotEmpty() }.joinToString(" ") { w -> w.replaceFirstChar { it.uppercase() } }
+    runCatching { java.net.URLDecoder.decode(slug.replace("+", "%2B"), "UTF-8") }.getOrDefault(slug)
+        .split('-').filter { it.isNotEmpty() }.joinToString(" ") { w -> w.replaceFirstChar { it.uppercase() } }
 
 fun String.toPersianDigits(): String = map { if (it in '0'..'9') '۰' + (it - '0') else it }.joinToString("")
 

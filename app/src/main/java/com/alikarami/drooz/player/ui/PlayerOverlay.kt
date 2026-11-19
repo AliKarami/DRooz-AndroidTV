@@ -220,6 +220,7 @@ internal fun PlayerOverlayHost(
             seekBarFocused = c.seekBarFocused && c.overlay == Overlay.CONTROLS,
             scrubbing = c.scrubMs != null,
             heldMs = n.eventTime - n.downTime,
+            buttonsFocused = c.overlay == Overlay.CONTROLS && !c.seekBarFocused,
         )
         if (action == KeyAction.None) {
             val ownUp = !down && c.consumedDowns.remove(n.keyCode)

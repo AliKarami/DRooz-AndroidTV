@@ -53,6 +53,7 @@ fun isPlayerMediaKey(keyCode: Int): Boolean = when (keyCode) {
 
 /**
  * Pure mapping, so the remote's behaviour is testable. [seekBarFocused] = the seek bar has focus;
+ * [buttonsFocused] = the controls are open with focus on one of their buttons (not the up-next card);
  * [heldMs] = how long the key has been down (event time − down time).
  * Physical RIGHT is always forward and LEFT backward, whatever the layout direction.
  */
@@ -64,6 +65,7 @@ fun mapKey(
     seekBarFocused: Boolean,
     scrubbing: Boolean,
     heldMs: Long = 0L,
+    buttonsFocused: Boolean = false,
 ): KeyAction {
     val firstDown = isDown && repeatCount == 0
     when (keyCode) {
@@ -96,6 +98,9 @@ fun mapKey(
 
     val seekKeys = overlay == Overlay.NONE || (overlay == Overlay.CONTROLS && seekBarFocused)
     if (direction != 0 && seekKeys) return seekKey(direction, isDown, repeatCount, scrubbing, heldMs)
+    // On the buttons a tap moves focus, but a hold scrubs, as on the seek bar: after OK pauses, focus sits
+    // on ⏯, and a held arrow used to only walk focus along the row (skipping meant clicking ⏩ again and again).
+    if (direction != 0 && buttonsFocused && isDown && repeatCount > 0) return KeyAction.Scrub(direction, heldMs)
 
     if (!isDown || !seekKeys) return KeyAction.None
     return when (keyCode) {

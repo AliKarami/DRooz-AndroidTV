@@ -88,7 +88,7 @@ class PlaybackRulesTest {
     }
 
     @Test fun scrubDistanceGrowsWithHoldTime() = assertEquals(
-        listOf(0L, 10_000L, 20_000L, 50_000L, 80_000L, 200_000L, 320_000L),
+        listOf(0L, 60_000L, 240_000L, 600_000L, 1_200_000L, 2_400_000L, 3_000_000L),
         listOf(-5L, 1_000L, 2_000L, 3_000L, 4_000L, 6_000L, 7_000L).map(::scrubOffsetMs),
     )
 

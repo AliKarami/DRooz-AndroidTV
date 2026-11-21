@@ -70,6 +70,20 @@ class RemoteKeysTest {
         assertEquals(KeyAction.None, mapKey(KEYCODE_DPAD_RIGHT, true, 0, Overlay.QUALITY, false, false))
     }
 
+    @Test fun heldArrowOnTheButtonsScrubsThenCommits() {
+        // The first press still moves focus; its repeats scrub, and the release commits.
+        assertEquals(KeyAction.None, mapKey(KEYCODE_DPAD_RIGHT, true, 0, Overlay.CONTROLS, false, false, buttonsFocused = true))
+        assertEquals(KeyAction.Scrub(1, 1_200), mapKey(KEYCODE_DPAD_RIGHT, true, 3, Overlay.CONTROLS, false, false, heldMs = 1_200, buttonsFocused = true))
+        assertEquals(KeyAction.Scrub(-1, 600), mapKey(KEYCODE_DPAD_LEFT, true, 1, Overlay.CONTROLS, false, true, heldMs = 600, buttonsFocused = true))
+        assertEquals(KeyAction.CommitScrub, mapKey(KEYCODE_DPAD_RIGHT, false, 0, Overlay.CONTROLS, false, true, buttonsFocused = true))
+    }
+
+    @Test fun heldArrowOnTheUpNextCardOrInAPanelOnlyMovesFocus() {
+        // The card reaches mapKey as CONTROLS without buttonsFocused: no scrub behind it.
+        assertEquals(KeyAction.None, mapKey(KEYCODE_DPAD_RIGHT, true, 4, Overlay.CONTROLS, false, false, heldMs = 2_000))
+        assertEquals(KeyAction.None, mapKey(KEYCODE_DPAD_RIGHT, true, 4, Overlay.SPEED, false, false, heldMs = 2_000))
+    }
+
     @Test fun mediaKeysWorkEverywhere() {
         assertEquals(KeyAction.TogglePlayAndShow, mapKey(KEYCODE_MEDIA_PLAY_PAUSE, true, 0, Overlay.SUBTITLE_AUDIO, false, false))
         assertEquals(KeyAction.Seek(10_000), mapKey(KEYCODE_MEDIA_FAST_FORWARD, true, 0, Overlay.NONE, false, false))

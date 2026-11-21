@@ -79,8 +79,11 @@ fun nextEpisode(seasons: List<Season>, streamId: String): Episode? {
     return if (i < 0) null else ordered.getOrNull(i + 1)
 }
 
-/** Hold-to-scrub speed (media ms per ms held) from each hold time on: 10 s/s, then 30, 60, 120. */
-private val SCRUB_SPEEDS = listOf(0L to 10L, 2_000L to 30L, 4_000L to 60L, 6_000L to 120L)
+/**
+ * Hold-to-scrub speed (media ms per ms held) from each hold time on: 60 s/s, then 180, 360 and 600 a second
+ * later each. A hold starts well past what taps give (each tap is 10 s): ½ s held ≈ 30 s, 2 s ≈ 4 min, 4 s ≈ 20 min.
+ */
+private val SCRUB_SPEEDS = listOf(0L to 60L, 1_000L to 180L, 2_000L to 360L, 3_000L to 600L)
 
 /**
  * How far a key held for [heldMs] has moved the scrub head from where the hold began. A function of

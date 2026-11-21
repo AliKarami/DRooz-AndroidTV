@@ -14,8 +14,8 @@ android {
         applicationId = "com.alikarami.drooz"
         minSdk = 28
         targetSdk = 37
-        versionCode = 10
-        versionName = "1.2.2"
+        versionCode = 11
+        versionName = "1.2.3"
     }
 
     // The release key lives outside the repo (default ~/.drooz-release/keystore.properties, or the path in

@@ -37,6 +37,14 @@ import com.alikarami.drooz.site.auth.CredentialStore
 import com.alikarami.drooz.site.auth.KeystoreSecretBox
 import com.alikarami.drooz.site.http.PersistentCookieJar
 import com.alikarami.drooz.site.http.SiteHttp
+import com.alikarami.drooz.update.AppVersion
+import com.alikarami.drooz.update.FileCheckRecord
+import com.alikarami.drooz.update.GitHubReleases
+import com.alikarami.drooz.update.SystemApkInstaller
+import com.alikarami.drooz.update.UpdateManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import okhttp3.OkHttpClient
 
 /** Manual dependency container. Session files live in no-backup storage so they never leave the device. */
@@ -107,4 +115,14 @@ class AppGraph(context: Context) {
 
     val imageLoader: ImageLoader = buildImageLoader(appContext, mediaClient)
     val cacheCleaner: CacheCleaner = AppCacheCleaner(imageLoader, homeCache, titleInfo, recentSearches)
+
+    /** Self-update from GitHub Releases. The APK is downloaded into the cache dir. */
+    val updates: UpdateManager = GitHubReleases(baseClient).let { gh ->
+        UpdateManager(
+            current = AppVersion.parse(BuildConfig.VERSION_NAME) ?: AppVersion(0, 0, 0),
+            source = gh, downloader = gh, installer = SystemApkInstaller(appContext),
+            dir = appContext.cacheDir.resolve("update"), record = FileCheckRecord(dir.resolve("update_check.txt")),
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate), io = Dispatchers.IO,
+        )
+    }
 }

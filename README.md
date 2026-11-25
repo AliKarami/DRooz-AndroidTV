@@ -76,7 +76,7 @@ The app isn't on the Play Store, so you install it from the file here. It's easy
 
 You'll find **DRooz** with your other apps. Downloader can delete the APK file afterwards, since you don't need it any more.
 
-**Updating:** repeat step 3 whenever there's a new release. Your login and settings are kept.
+**Updating:** from version 1.3.0 the app updates itself. When a new release is out, Home offers it: press **Update**. The first time, the TV asks you to let DRooz install apps: turn it on and press Back, and the update carries on. You can also check from **Settings → About**. Your login and settings are kept. (On an older version, repeat step 3 once.)
 
 <details>
 <summary>Other ways to install</summary>
@@ -117,7 +117,7 @@ github.com/AliKarami/DRooz-AndroidTV/releases/latest/download/DRooz.apk
 
 <div dir="rtl">
 
-بعد از نصب، با نام کاربری و رمز دی‌ال‌روز خودتان وارد شوید. نیازمندی‌ها: Android TV یا Google TV با اندروید ۹ یا بالاتر، و حساب دی‌ال‌روز.
+بعد از نصب، با نام کاربری و رمز دی‌ال‌روز خودتان وارد شوید. از نسخه ۱.۳.۰ برنامه خودش به‌روز می‌شود: وقتی نسخه جدیدی بیاید، در صفحه اصلی «به‌روزرسانی» را بزنید (بار اول تلویزیون اجازه نصب برنامه را می‌خواهد). نیازمندی‌ها: Android TV یا Google TV با اندروید ۹ یا بالاتر، و حساب دی‌ال‌روز.
 
 </div>
 

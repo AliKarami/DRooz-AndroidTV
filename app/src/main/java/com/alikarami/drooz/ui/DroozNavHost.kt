@@ -20,6 +20,11 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.toRoute
 import com.alikarami.drooz.AppGraph
+import com.alikarami.drooz.BuildConfig
+import androidx.navigation.NavDestination.Companion.hasRoute
+import androidx.navigation.compose.currentBackStackEntryAsState
+import com.alikarami.drooz.ui.update.UpdateActions
+import com.alikarami.drooz.ui.update.UpdateDialog
 import com.alikarami.drooz.R
 import com.alikarami.drooz.player.PlayerActivity
 import com.alikarami.drooz.site.model.CategoryKind
@@ -83,6 +88,16 @@ fun DroozNavHost(
         appVm.navigation.collect { if (it == AppNav.ToLogin) resetTo(Login) }
     }
 
+    val updates = graph.updates
+    val updateState by updates.state.collectAsStateWithLifecycle()
+    val updatePrompt by updates.prompt.collectAsStateWithLifecycle()
+    val updateActions = remember(updates) { UpdateActions(updates::checkNow, updates::install, updates::openInstallPermission) }
+    val current by nav.currentBackStackEntryAsState()
+    // Offered on Home only: never over a login or a page the user is reading.
+    if (updatePrompt && current?.destination?.hasRoute<Home>() == true) {
+        UpdateDialog(updateState, updateActions, onDismiss = updates::dismissPrompt)
+    }
+
     NavHost(
         nav,
         startDestination = appVm.startDestination,
@@ -111,6 +126,8 @@ fun DroozNavHost(
         }
         composable<Home> { entry ->
             val vm: HomeViewModel = viewModel(factory = HomeViewModelFactory(graph))
+            // Debug builds are signed with another key: a release could never install over them.
+            LaunchedEffect(Unit) { if (!BuildConfig.DEBUG) updates.checkIfDue() }
             // Debug play: once Home is reached (straight away, or after the debug login).
             LaunchedEffect(Unit) { appVm.takeDebugPlay()?.let { openTitle(null, it, autoPlay = true) } }
             HomeScreen(vm, onOpen = { openTitle(entry, it) }, onPlay = { args ->
@@ -178,7 +195,7 @@ fun DroozNavHost(
                     }
                 }
             }
-            SettingsScreen(vm)
+            SettingsScreen(vm, updateState, updateActions)
         }
     }
 }

@@ -44,6 +44,12 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        // Back from the system screen that allows installing: carry on with the update.
+        graph.updates.onResume()
+    }
+
     private companion object {
         /**
          * Debug builds only:

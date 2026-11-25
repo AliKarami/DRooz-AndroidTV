@@ -90,4 +90,18 @@
     <string name="cw_menu_hint">برای گزینه‌های بیشتر OK را نگه دارید</string>
     <string name="search_recent">جستجوهای اخیر</string>
     <string name="search_recent_clear">پاک کردن</string>
+    <string name="update_available">نسخه %1$s آماده است</string>
+    <string name="update_install">به‌روزرسانی</string>
+    <string name="update_later">بعداً</string>
+    <string name="update_close">بستن</string>
+    <string name="update_check">بررسی به‌روزرسانی</string>
+    <string name="update_checking">در حال بررسی…</string>
+    <string name="update_up_to_date">آخرین نسخه را دارید</string>
+    <string name="update_downloading">در حال دریافت… %1$s</string>
+    <string name="update_installing">در حال نصب…</string>
+    <string name="update_permission">در صفحه‌ای که باز شد، اجازه نصب برنامه را برای دی‌ال‌روز روشن کنید و برگردید.</string>
+    <string name="update_open_settings">باز کردن تنظیمات</string>
+    <string name="update_failed_check">بررسی به‌روزرسانی ناموفق بود</string>
+    <string name="update_failed_download">دریافت نسخه جدید ناموفق بود</string>
+    <string name="update_failed_install">نصب ناموفق بود</string>
 </resources>

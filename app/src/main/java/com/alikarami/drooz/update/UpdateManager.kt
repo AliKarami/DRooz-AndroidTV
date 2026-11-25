@@ -89,9 +89,15 @@ class UpdateManager(
         scope.launch(io) { dir.listFiles()?.forEach { it.delete() } }
     }
 
-    /** From Home: checks if the last successful check is older than the interval. */
+    /**
+     * From Home (each time it resumes): checks if the last successful check is older than the interval.
+     * A settled state is checked again (the app may stay open for days, and a dismissed release is offered
+     * again); a download, an install or a wait for the permission is left alone.
+     */
     fun checkIfDue() {
-        if (busy || _state.value !is UpdateState.Idle) return
+        val s = _state.value
+        val settled = s is UpdateState.Idle || s is UpdateState.UpToDate || s is UpdateState.Available || s is UpdateState.Failed
+        if (busy || !settled) return
         val last = record.lastCheck()
         if (last in 1..now() && now() - last < checkInterval) return
         job = scope.launch {

@@ -12,6 +12,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavBackStackEntry
@@ -127,7 +128,8 @@ fun DroozNavHost(
         composable<Home> { entry ->
             val vm: HomeViewModel = viewModel(factory = HomeViewModelFactory(graph))
             // Debug builds are signed with another key: a release could never install over them.
-            LaunchedEffect(Unit) { if (!BuildConfig.DEBUG) updates.checkIfDue() }
+            // On every return to Home (from a page, the player or the background); the manager throttles it.
+            LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { if (!BuildConfig.DEBUG) updates.checkIfDue() }
             // Debug play: once Home is reached (straight away, or after the debug login).
             LaunchedEffect(Unit) { appVm.takeDebugPlay()?.let { openTitle(null, it, autoPlay = true) } }
             HomeScreen(vm, onOpen = { openTitle(entry, it) }, onPlay = { args ->

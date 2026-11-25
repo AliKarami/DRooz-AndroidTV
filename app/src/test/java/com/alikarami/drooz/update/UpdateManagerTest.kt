@@ -87,6 +87,44 @@ class UpdateManagerTest {
         assertEquals(1, source.calls)
     }
 
+    @Test fun longRunningAppChecksAgainOnceDue() = runTest {
+        source.result = { newer.copy(version = current) }
+        val m = manager()
+        m.checkIfDue(); runCurrent()
+        assertEquals(UpdateState.UpToDate, m.state.value)
+        // A release published while the app stays open.
+        source.result = { newer }
+        clock += 500
+        m.checkIfDue(); runCurrent()
+        assertEquals("not due yet", UpdateState.UpToDate, m.state.value)
+        clock += 600
+        m.checkIfDue(); runCurrent()
+        assertEquals(UpdateState.Available(newer), m.state.value)
+        assertTrue(m.prompt.value)
+    }
+
+    @Test fun dismissedReleaseIsOfferedAgainOnceDue() = runTest {
+        val m = manager()
+        m.checkIfDue(); runCurrent()
+        m.dismissPrompt()
+        m.checkIfDue(); runCurrent()
+        assertFalse("not due yet", m.prompt.value)
+        clock += 1001
+        m.checkIfDue(); runCurrent()
+        assertTrue(m.prompt.value)
+    }
+
+    @Test fun dueCheckLeavesAnUpdateInProgressAlone() = runTest {
+        installer.allowed = false
+        val m = manager()
+        m.checkIfDue(); runCurrent()
+        m.install(); runCurrent()
+        clock += 1001
+        m.checkIfDue(); runCurrent()
+        assertEquals(UpdateState.NeedsPermission(newer), m.state.value)
+        assertEquals(1, source.calls)
+    }
+
     @Test fun sameOrOlderIsUpToDateAndSilent() = runTest {
         source.result = { newer.copy(version = current) }
         val m = manager()

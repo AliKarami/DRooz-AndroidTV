@@ -58,6 +58,10 @@ import com.alikarami.drooz.ui.common.TitleText
 import com.alikarami.drooz.ui.common.UiStrings
 import com.alikarami.drooz.ui.common.requestFocusSoon
 import com.alikarami.drooz.ui.theme.DroozColors
+import com.alikarami.drooz.ui.update.UpdateActions
+import com.alikarami.drooz.ui.update.updateAction
+import com.alikarami.drooz.ui.update.updateStatusText
+import com.alikarami.drooz.update.UpdateState
 
 /** The subtitle choices settings offers (dub is per title, chosen on the title page). */
 private val LANGUAGES = listOf(SubtitleChoice.FA, SubtitleChoice.EN, SubtitleChoice.DUAL, SubtitleChoice.OFF)
@@ -69,7 +73,7 @@ private val PreviewShape = RoundedCornerShape(10.dp)
  * once. Logout asks first in a centred overlay; Back closes it, otherwise Back leaves the screen.
  */
 @Composable
-fun SettingsScreen(vm: SettingsViewModel) {
+fun SettingsScreen(vm: SettingsViewModel, update: UpdateState = UpdateState.Idle, updateActions: UpdateActions? = null) {
     val state by vm.uiState.collectAsStateWithLifecycle()
     val first = remember { FocusRequester() }
     val logout = remember { FocusRequester() }
@@ -105,13 +109,7 @@ fun SettingsScreen(vm: SettingsViewModel) {
                 AudioSection(state, vm)
                 StorageSection(state, vm)
                 AccountSection(state, vm, logout)
-                Section(R.string.settings_section_about) {
-                    Text(
-                        stringResource(R.string.settings_version, state.version),
-                        Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                        style = MaterialTheme.typography.bodyMedium, color = DroozColors.TextSecondary,
-                    )
-                }
+                AboutSection(state, update, updateActions)
             }
         }
         if (state.confirmLogout) LogoutDialog(onConfirm = vm::confirmLogout, onCancel = vm::cancelLogout)
@@ -191,6 +189,30 @@ private fun AccountSection(state: SettingsUiState, vm: SettingsViewModel, logout
             state.username?.let { TitleText(it, MaterialTheme.typography.bodyLarge, color = Color.White, maxLines = 1) }
             Spacer(Modifier.weight(1f))
             PillButton(stringResource(R.string.settings_logout), vm::requestLogout, Modifier.focusRequester(logout))
+        }
+    }
+}
+
+/** The version, and the self-update's status with its one action (check, install, retry…). */
+@Composable
+private fun AboutSection(state: SettingsUiState, update: UpdateState, actions: UpdateActions?) {
+    Section(R.string.settings_section_about) {
+        Text(
+            stringResource(R.string.settings_version, state.version),
+            Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            style = MaterialTheme.typography.bodyMedium, color = DroozColors.TextSecondary,
+        )
+        if (actions != null) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                updateAction(update, actions)?.let { (label, onClick) -> PillButton(label, onClick) }
+                updateStatusText(update)?.let {
+                    Text(it, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.bodyMedium, color = Color.White)
+                }
+            }
         }
     }
 }

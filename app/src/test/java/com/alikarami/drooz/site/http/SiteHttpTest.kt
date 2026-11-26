@@ -118,9 +118,10 @@ class SiteHttpTest {
         assertEquals(3, server.requestCount)
     }
 
-    private fun timedHttp(callTimeoutMs: Long = 20_000, retryDelayMs: Long = 0) =
+    private fun timedHttp(callTimeoutMs: Long = 20_000, retryDelayMs: Long = 0, rateLimitWaitsMs: List<Long> = listOf(0)) =
         SiteHttp({ server.url("/") }, PersistentCookieJar(tmp.newFile(), siteHost = { server.hostName }),
-            timeoutMs = 300, maxAttempts = 3, callTimeoutMs = callTimeoutMs, retryDelayMs = retryDelayMs)
+            timeoutMs = 300, maxAttempts = 3, callTimeoutMs = callTimeoutMs, retryDelayMs = retryDelayMs,
+            rateLimitWaitsMs = rateLimitWaitsMs)
 
     private fun elapsedMs(block: () -> Unit): Long {
         val t0 = System.nanoTime()
@@ -160,6 +161,23 @@ class SiteHttpTest {
         val e = assertThrows(SiteException.HttpError::class.java) { runBlocking { timedHttp().get("/") } }
         assertEquals(429, e.code)
         assertEquals(1, server.requestCount)
+    }
+
+    // #8: the site's 429 has no Retry-After and lasts tens of seconds; waiting a second was not enough.
+    @Test fun tooManyRequestsWithoutRetryAfterBacksOffLonger() {
+        repeat(4) { server.enqueue(MockResponse.Builder().code(429).body("slow down").build()) }
+        server.enqueue(ok("fine"))
+        val ms = elapsedMs { assertEquals("fine", runBlocking { timedHttp(rateLimitWaitsMs = listOf(100, 200, 300, 400)).get("/").body }) }
+        assertEquals(5, server.requestCount)
+        assertTrue("took $ms ms", ms >= 1_000)
+    }
+
+    @Test fun tooManyRequestsGivesUpWhenTheWaitsRunOut() {
+        repeat(3) { server.enqueue(MockResponse.Builder().code(429).body("slow down").build()) }
+        server.enqueue(ok("must not be used"))
+        val e = assertThrows(SiteException.HttpError::class.java) { runBlocking { timedHttp(rateLimitWaitsMs = listOf(10, 10)).get("/") } }
+        assertEquals(429, e.code)
+        assertEquals(3, server.requestCount)
     }
 
     @Test fun getWithRetryDisabledFailsAfterOneAttempt() {

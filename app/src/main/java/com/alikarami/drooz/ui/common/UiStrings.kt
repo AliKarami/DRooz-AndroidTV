@@ -57,10 +57,12 @@ object UiStrings {
         VideoFit.STRETCH -> "کشیدن تا اندازهٔ صفحه"
     }
     /** The controls' fit button label (the panel shows the full option names). */
-    fun fitButton(f: VideoFit): String = when (f) {
-        VideoFit.FIT -> "تصویر: کامل"
-        VideoFit.ZOOM -> "تصویر: پر کردن"
-        VideoFit.STRETCH -> "تصویر: کشیده"
+    fun fitButton(f: VideoFit): String = "تصویر: ${fitShort(f)}"
+    /** Short fit names, for the controls' pill and the settings row (where three full names would not fit). */
+    fun fitShort(f: VideoFit): String = when (f) {
+        VideoFit.FIT -> "کامل"
+        VideoFit.ZOOM -> "پر کردن"
+        VideoFit.STRETCH -> "کشیده"
     }
     /** The controls' pill, kept short so the button row fits (the panel shows the full labels). */
     fun qualityButton(selectedName: String?): String =

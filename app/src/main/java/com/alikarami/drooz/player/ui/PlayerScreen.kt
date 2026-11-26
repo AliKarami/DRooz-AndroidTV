@@ -47,7 +47,8 @@ import com.alikarami.drooz.ui.theme.DroozColors
 
 /**
  * The player: video (Media3 surface only, no controller, no ExoPlayer subtitles; scaled per
- * [VideoFit]), the app's own subtitles placed in the letterbox bars, and the loading / buffering / failed states.
+ * [VideoFit]), the app's own subtitles (in the letterbox bars in FIT; ZOOM and STRETCH leave no bars, so
+ * they sit near the bottom), and the loading / buffering / failed states.
  */
 @Composable
 fun PlayerScreen(vm: PlayerViewModel, engine: ExoPlaybackEngine) {

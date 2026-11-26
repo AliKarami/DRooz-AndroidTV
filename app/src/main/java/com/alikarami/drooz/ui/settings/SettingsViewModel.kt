@@ -14,6 +14,7 @@ import com.alikarami.drooz.data.SUBTITLE_SIZES
 import com.alikarami.drooz.data.SubtitleChoice
 import com.alikarami.drooz.data.SubtitleColor
 import com.alikarami.drooz.data.TitlePrefs
+import com.alikarami.drooz.data.VideoFit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
@@ -39,7 +40,7 @@ data class SettingsUiState(
 
 sealed interface SettingsEvent { data object LoggedOut : SettingsEvent }
 
-/** Global player settings, default dub, cache clearing and logout. Prefs failures never crash the screen. */
+/** Global player settings (subtitles, audio boost, picture fit), default dub, cache clearing and logout. Prefs failures never crash the screen. */
 class SettingsViewModel(
     private val playerPrefs: PlayerPrefs,
     private val titlePrefs: TitlePrefs,
@@ -102,6 +103,8 @@ class SettingsViewModel(
     }
 
     fun setAudioBoost(on: Boolean) = updatePlayer { it.copy(audioBoost = on) }
+
+    fun setVideoFit(fit: VideoFit) = updatePlayer { it.copy(videoFit = fit) }
 
     fun setDefaultDub(on: Boolean) {
         local.update { it.copy(defaultDub = on) }

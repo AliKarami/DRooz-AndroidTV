@@ -28,6 +28,7 @@ import com.alikarami.drooz.ui.update.UpdateActions
 import com.alikarami.drooz.ui.update.UpdateDialog
 import com.alikarami.drooz.R
 import com.alikarami.drooz.player.PlayerActivity
+import com.alikarami.drooz.site.SiteConfig
 import com.alikarami.drooz.site.model.CategoryKind
 import com.alikarami.drooz.site.model.TitleRef
 import com.alikarami.drooz.ui.home.HomeScreen
@@ -148,7 +149,7 @@ fun DroozNavHost(
                     ))
                     RailItem.MyList ->
                         go(entry, ListRoute(
-                            context.getString(R.string.rail_my_list), "/user/watchlist/",
+                            context.getString(R.string.rail_my_list), SiteConfig.WATCHLIST_PATH,
                             context.getString(R.string.my_list_empty), watchlist = true,
                         ))
                     RailItem.Settings -> go(entry, Settings)

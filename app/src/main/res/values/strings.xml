@@ -23,6 +23,7 @@
     <string name="title_creator">خالق: %1$s</string>
     <string name="title_director">کارگردان: %1$s</string>
     <string name="title_failed">بارگذاری نشد</string>
+    <string name="title_server_busy">سرور شلوغ است، چند لحظه دیگر دوباره تلاش کنید</string>
     <string name="title_watchlist_failed">لیست من به‌روز نشد</string>
     <string name="list_failed">فهرست بارگذاری نشد</string>
     <string name="my_list_empty">لیست شما خالی است</string>

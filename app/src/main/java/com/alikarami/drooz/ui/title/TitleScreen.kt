@@ -185,7 +185,8 @@ fun TitleScreen(
                 val retry = remember { FocusRequester() }
                 LaunchedEffect(Unit) { retry.requestFocusSoon() }
                 ErrorState(
-                    stringResource(R.string.title_failed), stringResource(R.string.retry), vm::load,
+                    stringResource(if (state.serverBusy) R.string.title_server_busy else R.string.title_failed),
+                    stringResource(R.string.retry), vm::load,
                     Modifier.focusRequester(retry).focusGroup(),
                 )
             }

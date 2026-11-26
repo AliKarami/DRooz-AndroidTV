@@ -11,6 +11,7 @@ import com.alikarami.drooz.data.WatchStore
 import com.alikarami.drooz.data.episodeState
 import com.alikarami.drooz.data.nextUp
 import com.alikarami.drooz.player.PlayerArgs
+import com.alikarami.drooz.site.SiteException
 import com.alikarami.drooz.site.model.Episode
 import com.alikarami.drooz.site.model.Season
 import com.alikarami.drooz.site.model.TitleDetail
@@ -40,6 +41,8 @@ data class TitleUiState(
     val dubSelected: Boolean,
     val inWatchlist: Boolean?,
     val error: String?,
+    /** The page could not load because the site kept answering "too many requests". */
+    val serverBusy: Boolean = false,
 )
 
 sealed interface PlayEvent {
@@ -58,6 +61,7 @@ class TitleViewModel(
     private var dub = false
     private var inWatchlist: Boolean? = null
     private var error: String? = null
+    private var serverBusy = false
     private var watchlistInFlight = false
     private var dubRestored = false
     /** This title's local watch entries by streamId. */
@@ -83,8 +87,15 @@ class TitleViewModel(
      */
     fun load() {
         error = null
+        serverBusy = false
         publish()
-        viewModelScope.safeLaunch(onError = { if (detail == null) { error = it.message ?: "error"; publish() } }) {
+        viewModelScope.safeLaunch(onError = {
+            if (detail == null) {
+                error = it.message ?: "error"
+                serverBusy = it is SiteException.HttpError && it.code == 429
+                publish()
+            }
+        }) {
             readLocal()
             if (detail == null) titleInfo.lastKnown(ref)?.let { show(it) }
             show(titleInfo.get(ref, maxAgeMs = TitleInfoRepository.PAGE_MAX_AGE_MS))
@@ -225,6 +236,7 @@ class TitleViewModel(
             dubSelected = dub,
             inWatchlist = inWatchlist,
             error = error,
+            serverBusy = serverBusy,
         )
     }
 }

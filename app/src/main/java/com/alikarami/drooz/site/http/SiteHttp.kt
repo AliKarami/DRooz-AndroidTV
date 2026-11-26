@@ -22,9 +22,10 @@ data class SiteResponse(val finalPath: String, val body: String)
  *
  * The site's server silently drops a share of requests (TLS completes, no response ever comes;
  * healthy responses arrive in < 1 s). GETs therefore use a short [timeoutMs] and are retried up to
- * [maxAttempts] times on timeouts and gateway errors, [retryDelayMs] apart; a 429 is retried once its
- * `Retry-After` has passed (when that is short). [callTimeoutMs] bounds one whole GET, so a body that
- * drips in cannot hold a screen past it. POSTs are never retried.
+ * [maxAttempts] times on timeouts and gateway errors, [retryDelayMs] apart. A 429 is retried after each of
+ * [rateLimitWaitsMs] in turn, or once its `Retry-After` has passed when it sends one (and that is short): the
+ * site's own 429 has no `Retry-After` and lasts tens of seconds. [callTimeoutMs] bounds one whole GET, so a
+ * body that drips in cannot hold a screen past it. POSTs are never retried.
  */
 class SiteHttp(
     /** Read per request: the address can be changed on the login screen. */
@@ -36,6 +37,8 @@ class SiteHttp(
     postTimeoutMs: Long = 30_000,
     callTimeoutMs: Long = 20_000,
     private val retryDelayMs: Long = 500,
+    /** Waits before each retry of a 429 without `Retry-After`; about 30 s in all, then the error is shown. */
+    private val rateLimitWaitsMs: List<Long> = listOf(2_000, 4_000, 8_000, 15_000),
 ) {
     private val client: OkHttpClient = client.newBuilder()
         .cookieJar(jar)
@@ -57,15 +60,23 @@ class SiteHttp(
 
     /** Pass [retry] = false for GETs that change server state (toggles): a dropped-but-processed request must not repeat. */
     suspend fun get(path: String, requiresAuth: Boolean = true, retry: Boolean = true): SiteResponse {
-        val attempts = if (retry) maxAttempts else 1
         val request = Request.Builder().url(resolve(path)).build()
         var attempt = 1
+        var rateLimited = 0
         while (true) {
             try {
                 return execute(request, requiresAuth)
             } catch (e: SiteException) {
+                if (!retry) throw e
+                if (e is SiteException.HttpError && e.code == TOO_MANY_REQUESTS) {
+                    // Counted on its own: a busy site is waited out longer than a dropped request.
+                    val wait = rateLimitWaitMs(e, rateLimited) ?: throw e
+                    delay(wait)
+                    rateLimited++
+                    continue
+                }
                 val wait = retryWaitMs(e) ?: throw e
-                if (attempt >= attempts) throw e
+                if (attempt >= maxAttempts) throw e
                 delay(wait)
                 attempt++
             }
@@ -127,11 +138,14 @@ class SiteHttp(
     private fun retryWaitMs(e: SiteException): Long? = when {
         e is SiteException.NetworkError -> retryDelayMs
         e is SiteException.HttpError && e.code in GATEWAY_ERRORS -> retryDelayMs
-        e is SiteException.HttpError && e.code == TOO_MANY_REQUESTS -> {
-            val after = e.retryAfterSeconds?.times(1_000) ?: retryDelayMs
-            after.takeIf { it <= MAX_RETRY_AFTER_MS }?.coerceAtLeast(retryDelayMs)
-        }
         else -> null
+    }
+
+    /** How long to wait before retry number [done] + 1 of a 429; null when it is not retried. */
+    private fun rateLimitWaitMs(e: SiteException.HttpError, done: Int): Long? {
+        if (done >= rateLimitWaitsMs.size) return null
+        val after = e.retryAfterSeconds?.times(1_000) ?: return rateLimitWaitsMs[done]
+        return after.takeIf { it <= MAX_RETRY_AFTER_MS }?.coerceAtLeast(retryDelayMs)
     }
 
     private companion object {

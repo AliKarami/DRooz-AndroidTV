@@ -420,6 +420,19 @@ class TitleViewModelTest {
         assertTrue(v.uiState.value.episodes.all { it.watched })
     }
 
+    // #8: a page the site refused for too many requests says the server is busy, not just «بارگذاری نشد».
+    @Test fun rateLimitedLoadSaysTheServerIsBusy() = runTest(dispatcher) {
+        val api = FakeApi(series(0))
+        api.titleFailure = com.alikarami.drooz.site.SiteException.HttpError(429)
+        val v = vm(api); advanceUntilIdle()
+        assertNull(v.uiState.value.detail)
+        assertTrue(v.uiState.value.serverBusy)
+        api.titleFailure = com.alikarami.drooz.site.SiteException.NetworkError(RuntimeException("x"))
+        v.load(); advanceUntilIdle()
+        assertNotNull(v.uiState.value.error)
+        assertFalse(v.uiState.value.serverBusy)
+    }
+
     @Test fun failedRevalidationKeepsPageQuietly() = runTest(dispatcher) {
         val (v, api) = load(series(0))
         collect(v)

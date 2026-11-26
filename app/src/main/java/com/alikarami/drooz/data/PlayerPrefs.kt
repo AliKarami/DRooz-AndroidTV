@@ -26,10 +26,18 @@ data class SubtitleStyle(
     val backgroundOpacity: Int = 75,
 )
 
+/**
+ * How the picture fills the screen. FIT shows the whole picture (black bars when its shape differs from
+ * the TV's); ZOOM fills the screen keeping the shape (the edges that do not fit are cut off); STRETCH
+ * fills the screen by stretching the picture to the TV's shape.
+ */
+enum class VideoFit { FIT, ZOOM, STRETCH }
+
 data class PlayerSettings(
     val subtitle: SubtitleChoice = SubtitleChoice.FA,
     val style: SubtitleStyle = SubtitleStyle(),
     val audioBoost: Boolean = true,
+    val videoFit: VideoFit = VideoFit.FIT,
 )
 
 val SUBTITLE_SIZES = 60..200 step 10
@@ -56,6 +64,7 @@ class DataStorePlayerPrefs(private val store: DataStore<Preferences>) : PlayerPr
     private val sizeKey = intPreferencesKey("subtitle_size")
     private val opacityKey = intPreferencesKey("subtitle_bg_opacity")
     private val boostKey = booleanPreferencesKey("audio_boost")
+    private val fitKey = stringPreferencesKey("video_fit")
 
     override val settings: Flow<PlayerSettings> = store.data.map { read(it) }
 
@@ -70,6 +79,7 @@ class DataStorePlayerPrefs(private val store: DataStore<Preferences>) : PlayerPr
             p[sizeKey] = next.style.sizePercent
             p[opacityKey] = next.style.backgroundOpacity
             p[boostKey] = next.audioBoost
+            p[fitKey] = next.videoFit.name
         }
     }
 
@@ -83,6 +93,7 @@ class DataStorePlayerPrefs(private val store: DataStore<Preferences>) : PlayerPr
                 backgroundOpacity = p[opacityKey]?.takeIf { it in BACKGROUND_OPACITIES } ?: d.style.backgroundOpacity,
             ),
             audioBoost = p[boostKey] ?: d.audioBoost,
+            videoFit = p[fitKey].toEnumOrNull<VideoFit>() ?: d.videoFit,
         )
     }
 

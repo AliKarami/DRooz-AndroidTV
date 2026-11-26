@@ -46,6 +46,7 @@ import com.alikarami.drooz.data.BACKGROUND_OPACITIES
 import com.alikarami.drooz.data.SUBTITLE_SIZES
 import com.alikarami.drooz.data.SubtitleChoice
 import com.alikarami.drooz.data.SubtitleStyle
+import com.alikarami.drooz.data.VideoFit
 import com.alikarami.drooz.player.SubtitleCues
 import com.alikarami.drooz.player.ui.ColorRow
 import com.alikarami.drooz.player.ui.StepperRow
@@ -69,7 +70,7 @@ private val PreviewHeight = 120.dp
 private val PreviewShape = RoundedCornerShape(10.dp)
 
 /**
- * «تنظیمات»: subtitle, audio, storage, account and about sections in one scrolling list. Changes apply at
+ * «تنظیمات»: subtitle, audio, picture, storage, account and about sections in one scrolling list. Changes apply at
  * once. Logout asks first in a centred overlay; Back closes it, otherwise Back leaves the screen.
  */
 @Composable
@@ -107,6 +108,7 @@ fun SettingsScreen(vm: SettingsViewModel, update: UpdateState = UpdateState.Idle
             Column(Modifier.widthIn(max = 760.dp)) {
                 SubtitleSection(state, vm, first)
                 AudioSection(state, vm)
+                PictureSection(state, vm)
                 StorageSection(state, vm)
                 AccountSection(state, vm, logout)
                 AboutSection(state, update, updateActions)
@@ -155,6 +157,18 @@ private fun AudioSection(state: SettingsUiState, vm: SettingsViewModel) {
         }
         SettingRow(stringResource(R.string.settings_default_dub)) {
             OnOffSwitch(state.defaultDub) { vm.setDefaultDub(!vm.uiState.value.defaultDub) }
+        }
+    }
+}
+
+/** How the picture fills the TV; the player's «اندازهٔ تصویر» panel changes the same setting. */
+@Composable
+private fun PictureSection(state: SettingsUiState, vm: SettingsViewModel) {
+    Section(R.string.settings_section_picture) {
+        SettingRow(stringResource(R.string.player_fit)) {
+            VideoFit.entries.forEach { f ->
+                OptionChip(UiStrings.fitShort(f), f == state.player.videoFit, { vm.setVideoFit(f) })
+            }
         }
     }
 }

@@ -13,6 +13,7 @@ import com.alikarami.drooz.data.TitleInfoRepository
 import com.alikarami.drooz.data.TitlePrefs
 import com.alikarami.drooz.data.WatchEntry
 import com.alikarami.drooz.data.WatchStore
+import com.alikarami.drooz.data.VideoFit
 import com.alikarami.drooz.player.audio.AudioOption
 import com.alikarami.drooz.player.audio.GAIN_TICK_MS
 import com.alikarami.drooz.player.engine.EngineEvent
@@ -986,6 +987,23 @@ class PlayerViewModelTest {
         advanceTimeBy(GAIN_TICK_MS * 4); runCurrent()
         assertFalse(v.state.value.boost)
         assertTrue(engine.gains.all { it == 1f })
+    }
+
+    @Test fun videoFitAppliesAndPersists() = playerTest {
+        val env = Env()
+        val v = started(env)
+        assertEquals(VideoFit.FIT, v.state.value.videoFit)
+        v.setVideoFit(VideoFit.STRETCH)
+        runCurrent()
+        assertEquals(VideoFit.STRETCH, v.state.value.videoFit)
+        assertEquals(VideoFit.STRETCH, env.prefs.settings.first().videoFit)
+    }
+
+    @Test fun videoFitFromSettingsApplies() = playerTest {
+        val env = Env()
+        env.prefs.settings.value = PlayerSettings(videoFit = VideoFit.ZOOM)
+        val v = started(env)
+        assertEquals(VideoFit.ZOOM, v.state.value.videoFit)
     }
 
     @Test fun styleAppliesAndPersists() = playerTest {

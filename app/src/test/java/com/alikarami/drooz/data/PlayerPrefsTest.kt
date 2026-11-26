@@ -21,8 +21,10 @@ class PlayerPrefsTest {
 
     @Test fun updateRoundTrips() = runTest {
         val prefs = DataStorePlayerPrefs(PreferenceDataStoreFactory.create(scope = backgroundScope) { tmp.newFile("p.preferences_pb") })
-        val want = PlayerSettings(SubtitleChoice.DUAL, SubtitleStyle(130, SubtitleColor.CYAN, 25), false)
-        prefs.update { it.copy(subtitle = SubtitleChoice.DUAL, style = SubtitleStyle(130, SubtitleColor.CYAN, 25), audioBoost = false) }
+        val want = PlayerSettings(SubtitleChoice.DUAL, SubtitleStyle(130, SubtitleColor.CYAN, 25), false, VideoFit.ZOOM)
+        prefs.update {
+            it.copy(subtitle = SubtitleChoice.DUAL, style = SubtitleStyle(130, SubtitleColor.CYAN, 25), audioBoost = false, videoFit = VideoFit.ZOOM)
+        }
         assertEquals(want, prefs.settings.first())
     }
 
@@ -46,6 +48,7 @@ class PlayerPrefsTest {
             it[intPreferencesKey("subtitle_bg_opacity")] = 33
             it[stringPreferencesKey("subtitle_color")] = "PURPLE"
             it[stringPreferencesKey("subtitle_choice")] = "NOPE"
+            it[stringPreferencesKey("video_fit")] = "SQUASH"
         }
         assertEquals(PlayerSettings(), DataStorePlayerPrefs(store).settings.first())
     }

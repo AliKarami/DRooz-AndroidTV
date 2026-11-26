@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.alikarami.drooz.data.SubtitleChoice
 import com.alikarami.drooz.data.SubtitleStyle
+import com.alikarami.drooz.data.VideoFit
 import com.alikarami.drooz.player.END_GUARD_MS
 import com.alikarami.drooz.player.PlayerUiState
 import com.alikarami.drooz.player.PlayerViewModel
@@ -112,6 +113,7 @@ private fun openerOf(o: Overlay): ControlsTarget = when (o) {
     Overlay.SUBTITLE_AUDIO -> ControlsTarget.SUBTITLE_AUDIO
     Overlay.QUALITY -> ControlsTarget.QUALITY
     Overlay.SPEED -> ControlsTarget.SPEED
+    Overlay.FIT -> ControlsTarget.FIT
     Overlay.EPISODES -> ControlsTarget.EPISODES
     else -> ControlsTarget.PLAY
 }
@@ -309,8 +311,10 @@ internal fun PlayerOverlayHost(
             upNextShown && c.upNextRightPx > 0 -> c.upNextRightPx + gapPx
             else -> 0
         }
+        // ZOOM / STRETCH fill the screen: no letterbox bars to hold the subtitles.
+        val shownVideoSize = videoSize.takeIf { state.videoFit == VideoFit.FIT }
         CueLayer(
-            vm, state.style, state.subtitle, videoSize, containerW, containerH,
+            vm, state.style, state.subtitle, shownVideoSize, containerW, containerH,
             coverPx = cover,
             preview = overlay == Overlay.SUBTITLE_AUDIO,
             leftInsetPx = leftInset,
@@ -365,6 +369,17 @@ internal fun PlayerOverlayHost(
             SpeedPanel(state.speed, c.focusToken.takeIf { overlay == Overlay.SPEED }, onPick = { s ->
                 vm.setSpeed(s)
                 c.show(Overlay.CONTROLS, ControlsTarget.SPEED)
+            })
+        }
+        AnimatedVisibility(
+            visible = overlay == Overlay.FIT,
+            modifier = Modifier.align(AbsoluteAlignment.TopLeft),
+            enter = fadeIn(tween(180)) + slideInHorizontally(tween(180)) { -it / 8 },
+            exit = fadeOut(tween(150)),
+        ) {
+            FitPanel(state.videoFit, c.focusToken.takeIf { overlay == Overlay.FIT }, onPick = { f ->
+                vm.setVideoFit(f)
+                c.show(Overlay.CONTROLS, ControlsTarget.FIT)
             })
         }
         AnimatedVisibility(

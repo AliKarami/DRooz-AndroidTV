@@ -8,6 +8,7 @@ import com.alikarami.drooz.data.SubtitleChoice
 import com.alikarami.drooz.data.SubtitleColor
 import com.alikarami.drooz.data.SubtitleStyle
 import com.alikarami.drooz.data.TitlePrefs
+import com.alikarami.drooz.data.VideoFit
 import com.alikarami.drooz.site.auth.LoginResult
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -184,6 +185,14 @@ class SettingsViewModelTest {
         vm.setAudioBoost(false); runCurrent()
         assertFalse(rig.prefs.state.value.audioBoost)
         assertFalse(vm.uiState.value.player.audioBoost)
+    }
+
+    @Test fun videoFit_persists() = runTest(dispatcher) {
+        val rig = Rig()
+        val vm = started(rig)
+        vm.setVideoFit(VideoFit.ZOOM); runCurrent()
+        assertEquals(VideoFit.ZOOM, rig.prefs.state.value.videoFit)
+        assertEquals(VideoFit.ZOOM, vm.uiState.value.player.videoFit)
     }
 
     @Test fun defaultDub_persists() = runTest(dispatcher) {

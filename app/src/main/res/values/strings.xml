@@ -46,6 +46,7 @@
     <string name="login_tip">برای نوشتن در هر کادر، OK را بزنید</string>
     <string name="settings_section_subtitle">زیرنویس</string>
     <string name="settings_section_audio">صدا</string>
+    <string name="settings_section_picture">تصویر</string>
     <string name="settings_section_storage">حافظه</string>
     <string name="settings_section_account">حساب کاربری</string>
     <string name="settings_section_about">درباره</string>
@@ -66,6 +67,7 @@
     <string name="player_subtitle_audio">زیرنویس و صدا</string>
     <string name="player_quality">کیفیت</string>
     <string name="player_speed">سرعت</string>
+    <string name="player_fit">اندازهٔ تصویر</string>
     <string name="player_episodes">قسمت‌ها</string>
     <string name="player_next_episode">قسمت بعد</string>
     <string name="player_group_subtitle">زیرنویس</string>

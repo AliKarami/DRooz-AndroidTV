@@ -10,7 +10,7 @@ const val SEEK_STEP_MS = 10_000L
 
 /** What sits on top of the video. Panels are opened from the controls' buttons. */
 enum class Overlay {
-    NONE, CONTROLS, SUBTITLE_AUDIO, QUALITY, SPEED, EPISODES;
+    NONE, CONTROLS, SUBTITLE_AUDIO, QUALITY, SPEED, FIT, EPISODES;
 
     /** A side panel or the episodes strip (the seek bar is not on screen). */
     val isPanel: Boolean get() = this != NONE && this != CONTROLS

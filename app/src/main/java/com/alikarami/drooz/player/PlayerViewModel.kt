@@ -14,6 +14,7 @@ import com.alikarami.drooz.data.TitleInfoRepository
 import com.alikarami.drooz.data.TitlePrefs
 import com.alikarami.drooz.data.WatchEntry
 import com.alikarami.drooz.data.WatchStore
+import com.alikarami.drooz.data.VideoFit
 import com.alikarami.drooz.player.audio.AudioOption
 import com.alikarami.drooz.player.audio.GAIN_TICK_MS
 import com.alikarami.drooz.player.audio.GainSchedule
@@ -130,6 +131,8 @@ data class PlayerUiState(
     val selectedAudio: Int? = null,
     val boost: Boolean = true,
     val speed: Float = 1f,
+    /** Global (stored): how the picture fills the screen. */
+    val videoFit: VideoFit = VideoFit.FIT,
     val upNext: UpNext? = null,
     /** The episodes strip's season ([stripSeason]); browsing another season doesn't switch playback. */
     val seasonEpisodes: List<PlayerEpisode> = emptyList(),
@@ -667,7 +670,7 @@ class PlayerViewModel(
 
     // ---- settings ----
 
-    /** Applies the stored settings once (style, boost, global subtitle choice); defaults if the store fails. */
+    /** Applies the stored settings once (style, boost, picture fit, global subtitle choice); defaults if the store fails. */
     private suspend fun ensureSettings() {
         if (settingsApplied) return
         val s = try {
@@ -681,7 +684,7 @@ class PlayerViewModel(
         if (settingsApplied) return
         settingsApplied = true
         globalChoice = s.subtitle.takeIf { it != SubtitleChoice.FA_DUB } ?: SubtitleChoice.FA
-        _state.update { it.copy(style = s.style, boost = s.audioBoost) }
+        _state.update { it.copy(style = s.style, boost = s.audioBoost, videoFit = s.videoFit) }
     }
 
     private fun persistSettings(transform: (PlayerSettings) -> PlayerSettings) {
@@ -873,6 +876,12 @@ class PlayerViewModel(
     fun setSpeed(speed: Float) {
         engine.setSpeed(speed)
         _state.update { it.copy(speed = speed) }
+    }
+
+    /** Stored globally: the TV's shape does not change between titles. */
+    fun setVideoFit(fit: VideoFit) {
+        _state.update { it.copy(videoFit = fit) }
+        persistSettings { it.copy(videoFit = fit) }
     }
 
     fun setBoost(on: Boolean) {

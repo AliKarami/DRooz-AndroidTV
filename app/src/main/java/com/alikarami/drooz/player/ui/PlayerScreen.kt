@@ -34,6 +34,7 @@ import androidx.tv.material3.Button
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.alikarami.drooz.R
+import com.alikarami.drooz.data.VideoFit
 import com.alikarami.drooz.player.PlayerPhase
 import com.alikarami.drooz.player.PlayerViewModel
 import com.alikarami.drooz.player.engine.ExoPlaybackEngine
@@ -45,8 +46,9 @@ import com.alikarami.drooz.ui.common.requestFocusSoon
 import com.alikarami.drooz.ui.theme.DroozColors
 
 /**
- * The player: video (Media3 surface only, no controller, no ExoPlayer subtitles), the app's own
- * subtitles placed in the letterbox bars, and the loading / buffering / failed states.
+ * The player: video (Media3 surface only, no controller, no ExoPlayer subtitles; scaled per
+ * [VideoFit]), the app's own subtitles (in the letterbox bars in FIT; ZOOM and STRETCH leave no bars, so
+ * they sit near the bottom), and the loading / buffering / failed states.
  */
 @Composable
 fun PlayerScreen(vm: PlayerViewModel, engine: ExoPlaybackEngine) {
@@ -62,7 +64,7 @@ fun PlayerScreen(vm: PlayerViewModel, engine: ExoPlaybackEngine) {
         val containerW = constraints.maxWidth
         val containerH = constraints.maxHeight
 
-        VideoSurface(engine, Modifier.fillMaxSize())
+        VideoSurface(engine, state.videoFit, Modifier.fillMaxSize())
 
         when (val phase = state.phase) {
             PlayerPhase.Loading -> LoadingScreen(state.title, state.episodeLabel, state.backdropUrl)
@@ -73,21 +75,27 @@ fun PlayerScreen(vm: PlayerViewModel, engine: ExoPlaybackEngine) {
 }
 
 @Composable
-private fun VideoSurface(engine: ExoPlaybackEngine, modifier: Modifier) {
+private fun VideoSurface(engine: ExoPlaybackEngine, fit: VideoFit, modifier: Modifier) {
     AndroidView(
         factory = { context ->
             PlayerView(context).apply {
                 useController = false
                 subtitleView?.visibility = View.GONE
-                resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                 setShutterBackgroundColor(AndroidColor.BLACK)
                 isFocusable = false
                 player = engine.exoPlayer
             }
         },
+        update = { it.resizeMode = resizeModeOf(fit) },
         onRelease = { it.player = null },
         modifier = modifier,
     )
+}
+
+private fun resizeModeOf(fit: VideoFit): Int = when (fit) {
+    VideoFit.FIT -> AspectRatioFrameLayout.RESIZE_MODE_FIT
+    VideoFit.ZOOM -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+    VideoFit.STRETCH -> AspectRatioFrameLayout.RESIZE_MODE_FILL
 }
 
 @Composable

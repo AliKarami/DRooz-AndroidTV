@@ -16,6 +16,7 @@ import com.alikarami.drooz.site.parse.ListParser
 import com.alikarami.drooz.site.parse.SearchParser
 import com.alikarami.drooz.site.parse.StreamPageParser
 import com.alikarami.drooz.site.parse.TitleParser
+import com.alikarami.drooz.site.parse.WatchlistParser
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -39,14 +40,15 @@ class SiteRepository(
 
     suspend fun home(): HomePage = authed { http.get("/").body.let { parse { HomeParser.parse(it) } } }
 
-    /** Page 1 is [path] itself; page N inserts `N/` before any query string. */
+    /** Page 1 is [path] itself; page N inserts `N/` before any query string. «لیست من» has its own layout (one page). */
     suspend fun list(path: String, page: Int = 1): ListPage = authed {
         val target = if (page <= 1) path else {
             val base = path.substringBefore('?').let { if (it.endsWith("/")) it else "$it/" }
             val query = path.substringAfter('?', "")
             "$base$page/" + if (query.isNotEmpty()) "?$query" else ""
         }
-        http.get(target).body.let { parse { ListParser.parse(it) } }
+        val watchlist = path.substringBefore('?') == SiteConfig.WATCHLIST_PATH
+        http.get(target).body.let { parse { if (watchlist) WatchlistParser.parse(it) else ListParser.parse(it) } }
     }
 
     /** Page 1 of [path] and the navigation menu's categories, from one request; a menu that can't be read gives none. */

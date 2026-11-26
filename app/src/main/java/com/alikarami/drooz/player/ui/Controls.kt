@@ -76,7 +76,7 @@ import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 
 /** Which control takes focus when the controls (re)appear. */
-enum class ControlsTarget { PLAY, SEEK_BAR, SUBTITLE_AUDIO, QUALITY, SPEED, EPISODES }
+enum class ControlsTarget { PLAY, SEEK_BAR, SUBTITLE_AUDIO, QUALITY, SPEED, FIT, EPISODES }
 
 /** The seek bar reads the engine this often while it is on screen (and right after each seek). */
 private const val SEEK_POLL_MS = 250L
@@ -197,6 +197,10 @@ private fun ButtonsRow(
                         UiStrings.speedButton(state.speed), { onOpen(Overlay.SPEED) },
                         Modifier.focusRequester(requesters.getValue(ControlsTarget.SPEED)),
                     ) { GlyphIcon(PlayerIcons.Speed) }
+                    ControlIcon(
+                        UiStrings.fitButton(state.videoFit), { onOpen(Overlay.FIT) },
+                        Modifier.focusRequester(requesters.getValue(ControlsTarget.FIT)),
+                    ) { GlyphIcon(PlayerIcons.Fit) }
                     if (state.seasonEpisodes.isNotEmpty()) {
                         ControlIcon(
                             stringResource(R.string.player_episodes), { onOpen(Overlay.EPISODES) },

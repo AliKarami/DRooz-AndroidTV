@@ -66,6 +66,7 @@
     <string name="player_subtitle_audio">زیرنویس و صدا</string>
     <string name="player_quality">کیفیت</string>
     <string name="player_speed">سرعت</string>
+    <string name="player_fit">اندازهٔ تصویر</string>
     <string name="player_episodes">قسمت‌ها</string>
     <string name="player_next_episode">قسمت بعد</string>
     <string name="player_group_subtitle">زیرنویس</string>

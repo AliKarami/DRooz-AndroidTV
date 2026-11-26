@@ -106,7 +106,7 @@ class RemoteKeysTest {
     }
 
     @Test fun heldFastForwardAndRewindInAPanelAreIgnored() {
-        for (panel in listOf(Overlay.SUBTITLE_AUDIO, Overlay.QUALITY, Overlay.SPEED, Overlay.EPISODES)) {
+        for (panel in listOf(Overlay.SUBTITLE_AUDIO, Overlay.QUALITY, Overlay.SPEED, Overlay.FIT, Overlay.EPISODES)) {
             assertEquals(KeyAction.None, mapKey(KEYCODE_MEDIA_FAST_FORWARD, true, 3, panel, false, false))
             assertEquals(KeyAction.None, mapKey(KEYCODE_MEDIA_REWIND, true, 12, panel, false, false))
             // A tap still seeks.

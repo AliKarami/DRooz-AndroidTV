@@ -23,6 +23,7 @@ A fast, good-looking TV app for DLRooz (you enter the site address on the login 
 - **Works with your remote and voice.** "Hey Google, pause", the Google TV now-playing card and TV-remote media keys all control the player.
 - **Subtitles done right.** Farsi, English, or **both at once**. Pick the size, colour and background, and fix out-of-sync subtitles in half-second steps.
 - **Everything the site's player has.** Quality picker, 5.1 surround sound, Persian dub, Audio Boost for quiet dialogue, playback speed, and next-episode autoplay.
+- **Fill your screen.** «اندازهٔ تصویر» in the player shows the whole picture, zooms it to fill the TV (cutting the edges), or stretches it to the TV's shape. The choice is remembered.
 - **Persian first.** Menus are fully right-to-left in Persian; titles keep their original names.
 
 <table>

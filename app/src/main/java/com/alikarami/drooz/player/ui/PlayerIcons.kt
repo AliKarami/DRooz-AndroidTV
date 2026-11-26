@@ -14,6 +14,7 @@ internal object PlayerIcons {
     val Speed = icon("Speed", SPEED)
     val Episodes = icon("Episodes", VIDEO_LIBRARY)
     val Next = icon("Next", SKIP_NEXT)
+    val Fit = icon("Fit", ASPECT_RATIO)
 
     private fun icon(name: String, pathData: String): ImageVector =
         ImageVector.Builder(name, 24.dp, 24.dp, 24f, 24f)
@@ -36,3 +37,5 @@ private const val SPEED = "M20.38,8.57l-1.23,1.85a8,8 0,0 1,-0.22 7.58L5.07,18A8
 private const val VIDEO_LIBRARY = "M4,6H2v14c0,1.1 0.9,2 2,2h14v-2H4V6zM20,2H8c-1.1,0 -2,0.9 -2,2v12c0,1.1 0.9,2 2,2h12" +
     "c1.1,0 2,-0.9 2,-2V4c0,-1.1 -0.9,-2 -2,-2zM12,14.5v-9l6,4.5 -6,4.5z"
 private const val SKIP_NEXT = "M6,18l8.5,-6L6,6v12zM16,6v12h2V6h-2z"
+private const val ASPECT_RATIO = "M19,12h-2v3h-3v2h5v-5zM7,9h3V7H5v5h2V9zM21,3H3c-1.1,0 -2,0.9 -2,2v14c0,1.1 0.9,2 2,2h18" +
+    "c1.1,0 2,-0.9 2,-2V5c0,-1.1 -0.9,-2 -2,-2zM21,19.01H3V4.99h18v14.02z"

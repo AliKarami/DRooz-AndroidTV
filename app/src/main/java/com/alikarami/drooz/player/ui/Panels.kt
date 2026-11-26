@@ -60,6 +60,7 @@ import com.alikarami.drooz.data.BACKGROUND_OPACITIES
 import com.alikarami.drooz.data.SUBTITLE_SIZES
 import com.alikarami.drooz.data.SubtitleChoice
 import com.alikarami.drooz.data.SubtitleColor
+import com.alikarami.drooz.data.VideoFit
 import com.alikarami.drooz.player.PlayerUiState
 import com.alikarami.drooz.player.PlayerViewModel
 import com.alikarami.drooz.player.SPEEDS
@@ -90,7 +91,7 @@ private val RowShape = RoundedCornerShape(8.dp)
 
 fun panelFraction(overlay: Overlay): Float? = when (overlay) {
     Overlay.SUBTITLE_AUDIO -> SUBTITLE_PANEL_FRACTION
-    Overlay.QUALITY, Overlay.SPEED -> SMALL_PANEL_FRACTION
+    Overlay.QUALITY, Overlay.SPEED, Overlay.FIT -> SMALL_PANEL_FRACTION
     else -> null
 }
 
@@ -379,6 +380,21 @@ internal fun SpeedPanel(speed: Float, focusToken: Int?, onPick: (Float) -> Unit,
             PanelOption(
                 UiStrings.speed(s), s == speed, { onPick(s) },
                 if (s == focusSpeed) Modifier.focusRequester(current) else Modifier,
+            )
+        }
+    }
+}
+
+/** «اندازهٔ تصویر»: fit the whole picture, fill the screen by zooming, or stretch to the screen. A pick closes the panel. */
+@Composable
+internal fun FitPanel(fit: VideoFit, focusToken: Int?, onPick: (VideoFit) -> Unit, modifier: Modifier = Modifier) {
+    val current = remember { FocusRequester() }
+    LaunchedEffect(focusToken) { if (focusToken != null) current.requestFocusSoon() }
+    SidePanel(stringResource(R.string.player_fit), SMALL_PANEL_FRACTION, modifier) {
+        VideoFit.entries.forEach { f ->
+            PanelOption(
+                UiStrings.videoFit(f), f == fit, { onPick(f) },
+                if (f == fit) Modifier.focusRequester(current) else Modifier,
             )
         }
     }

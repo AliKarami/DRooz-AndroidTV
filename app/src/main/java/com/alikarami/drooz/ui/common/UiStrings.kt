@@ -1,5 +1,7 @@
 package com.alikarami.drooz.ui.common
 
+import com.alikarami.drooz.data.VideoFit
+
 /** Persian copy that ViewModels compute (JVM-testable, single source). Static screen copy lives in strings.xml. */
 object UiStrings {
     const val WATCH_AGAIN = "تماشای دوباره"
@@ -48,6 +50,18 @@ object UiStrings {
      * parentheses around the name stay in place inside the RTL label.
      */
     fun qualityAuto(playingName: String?): String = if (playingName == null) "خودکار" else "خودکار (${ltr(playingName)})"
+    /** Picture fit options; the TV's own shape is whatever it is, so the names say what happens to the picture. */
+    fun videoFit(f: VideoFit): String = when (f) {
+        VideoFit.FIT -> "کامل (با حاشیهٔ سیاه)"
+        VideoFit.ZOOM -> "پر کردن صفحه (برش لبه‌ها)"
+        VideoFit.STRETCH -> "کشیدن تا اندازهٔ صفحه"
+    }
+    /** The controls' fit button label (the panel shows the full option names). */
+    fun fitButton(f: VideoFit): String = when (f) {
+        VideoFit.FIT -> "تصویر: کامل"
+        VideoFit.ZOOM -> "تصویر: پر کردن"
+        VideoFit.STRETCH -> "تصویر: کشیده"
+    }
     /** The controls' pill, kept short so the button row fits (the panel shows the full labels). */
     fun qualityButton(selectedName: String?): String =
         if (selectedName == null) "کیفیت: خودکار" else "کیفیت: ${ltr(selectedName)}"
